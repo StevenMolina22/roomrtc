@@ -1,0 +1,65 @@
+use std::str::FromStr;
+use crate::media_description::MediaDescription;
+
+const MEDIA_DESCRIPTION_KEY: &str = "m";
+const ATTRIBUTE_KEY: &str = "a";
+
+pub struct SessionDescriptionProtocol {
+    version: u8,
+    origin_id: usize,
+    session_name: String,
+    timing: String,
+    media_descriptions: Vec<MediaDescription>,
+    connection_data: String,
+}
+
+impl FromStr for SessionDescriptionProtocol {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut media_descriptions = Vec::new();
+
+        for line in s.split('\n') {
+            let line = line.trim();
+            let (key, value) = match line.split_once('=') {
+                Some((k, v)) => (k, v),
+                None => return Err(()),
+            };
+
+            match key {
+                MEDIA_DESCRIPTION_KEY => handle_media_description_line(value, &mut media_descriptions)?,
+                ATTRIBUTE_KEY => handle_attribute_line(value, &mut media_descriptions)?,
+                _ => continue,
+            }
+        }
+
+        Ok(Self::new(media_descriptions))
+    }
+}
+
+impl SessionDescriptionProtocol {
+    pub fn new(media_descriptions: Vec<MediaDescription>) -> Self {
+        Self {
+            version: 0,
+            origin_id: 0,
+            session_name: "-".into(),
+            timing: "0 0".into(),
+            media_descriptions,
+            connection_data: "IN IP4 0.0.0.0".into(),
+        }
+    }
+}
+
+fn handle_media_description_line(line: &str, media_descriptions: &mut Vec<MediaDescription>) -> Result<(), ()> {
+    media_descriptions.push(MediaDescription::from_str(line)?);
+    Ok(())
+}
+
+fn handle_attribute_line(line: &str, media_descriptions: &mut Vec<MediaDescription>) -> Result<(), ()> {
+    let (attribute_type, attribute_body) = line.split_once(' ').unwrap();
+    match media_descriptions.last_mut() {
+        Some(m) => m.add_attribute(attribute_type.into(), attribute_body.into()).map_err(|_| ())?,
+        None => return Err(()),
+    }
+    Ok(())
+}

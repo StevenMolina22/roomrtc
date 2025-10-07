@@ -1,3 +1,4 @@
+use std::fmt::{Display};
 use std::str::FromStr;
 
 const RTPMAP_KEY: &str = "rtpmap";
@@ -30,6 +31,21 @@ impl FromStr for MediaDescription {
     }
 }
 
+impl Display for MediaDescription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut content = format!("m={} {} {}", self.media_type, self.port, self.protocol);
+        for fmt in &self.fmts {
+            content = format!("{} {}", content, fmt)
+        }
+
+        for attr in &self.attributes {
+            content = format!("{}\na={}", content, attr)
+        }
+
+        write!(f, "{}", content)
+    }
+}
+
 impl MediaDescription {
     pub fn new(media_type: String, port: u16, protocol: String, fmts: Vec<usize>) -> Self {
         Self {
@@ -40,7 +56,7 @@ impl MediaDescription {
             attributes: Vec::new(),
         }
     }
-
+    
     pub fn add_attribute(&mut self, attribute_type: String, attribute_body: String) -> Result<(), ()>{
         if attribute_type == RTPMAP_KEY {
             match attribute_body.split_whitespace().collect::<Vec<&str>>()[..] {

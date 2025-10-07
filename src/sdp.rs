@@ -1,3 +1,4 @@
+use std::fmt::{Display};
 use std::str::FromStr;
 use crate::media_description::MediaDescription;
 
@@ -37,6 +38,18 @@ impl FromStr for SessionDescriptionProtocol {
     }
 }
 
+impl Display for SessionDescriptionProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut content = format!("v={}\no={}\ns={}\nt={}\nc={}", self.version, self.origin_id, self.session_name, self.timing, self.connection_data);
+
+        for media_description in &self.media_descriptions {
+            content = format!("{}\n{}", content, media_description);
+        }
+
+        write!(f, "{}", content)
+    }
+}
+
 impl SessionDescriptionProtocol {
     pub fn new(media_descriptions: Vec<MediaDescription>) -> Self {
         Self {
@@ -47,6 +60,17 @@ impl SessionDescriptionProtocol {
             media_descriptions,
             connection_data: "IN IP4 0.0.0.0".into(),
         }
+    }
+
+    pub fn create_answer(&self, offer_sdp: SessionDescriptionProtocol) -> Self {
+        // por cada md de self:
+        //     busque md compatible en offer_sdp, si encuentra:
+        //         busca a compatible, si encuentra:
+        //             agrega md a respuesta compatible si no lo agrego antes
+        //             agrega attr compatible a md de respuesta
+        
+
+        SessionDescriptionProtocol::new(Vec::new())
     }
 }
 

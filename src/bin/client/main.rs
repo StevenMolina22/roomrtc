@@ -13,8 +13,18 @@ fn main() {
 
     let client = Client::new();
     match argv[1].as_str() {
-        "0" => client.offer_sdp(BufReader::new(stdin()), stdout()),
-        "1" => client.answer_sdp(BufReader::new(stdin()), stdout()),
+        "0" => {
+            if let Err(_) = client.offer_sdp(BufReader::new(stdin()), stdout()) {
+                eprintln!();
+                return
+            }
+        },
+        "1" => {
+            if let Err(_) = client.answer_sdp(BufReader::new(stdin()), stdout()) {
+                eprintln!();
+                return
+            }
+        },
         _ => eprintln!("Error: wrong client mode"),
     }
 }

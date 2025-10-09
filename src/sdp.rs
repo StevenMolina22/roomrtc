@@ -96,11 +96,11 @@ fn handle_media_description_line(
 
 fn handle_attribute_line(
     line: &str,
-    media_descriptions: &mut Vec<MediaDescription>,
+    media_descriptions: &mut [MediaDescription],
 ) -> Result<(), ()> {
-    let (attribute_type, attribute_body) = if line.starts_with("candidate:") {
+    let (attribute_type, attribute_body) = if let Some(stripped) = line.strip_prefix("candidate:") {
         // Special handling for candidate lines: "candidate:1 1 UDP ..." -> ("candidate", "1 1 UDP ...")
-        ("candidate", &line[10..]) // Skip "candidate:"
+        ("candidate", stripped) // Skip "candidate:"
     } else {
         // Normal attribute parsing: "rtpmap 111 OPUS/48000/2" -> ("rtpmap", "111 OPUS/48000/2")
         line.split_once(' ').unwrap()

@@ -37,7 +37,7 @@ impl Client {
             .unwrap();
 
         // Add our ICE candidate to the media description
-        if let Some(candidate_line) = ice_agent.generate_candidate_lines().get(0) {
+        if let Some(candidate_line) = ice_agent.generate_candidate_lines().first() {
             // Split "a=candidate:" into type and value parts
             if let Some((attr_type, attr_body)) = candidate_line.trim().split_once(':') {
                 media_description
@@ -126,14 +126,13 @@ impl Client {
         out_buff.flush().unwrap();
 
         // Extract and process the remote ICE candidate from the offer
-        if let Some(line) = offer_string.lines().find(|l| l.starts_with("a=candidate:")) {
-            if let Ok(remote_candidate) = IceAgent::parse_candidate_line(line) {
+        if let Some(line) = offer_string.lines().find(|l| l.starts_with("a=candidate:"))
+            && let Ok(remote_candidate) = IceAgent::parse_candidate_line(line) {
                 self.ice_agent
                     .add_remote_candidate(remote_candidate)
                     .unwrap();
                 self.ice_agent.start_connectivity_checks().unwrap();
             }
-        }
 
         Ok(())
     }

@@ -138,6 +138,12 @@ pub struct IceAgent {
     selected_pair: Option<CandidatePair>,
 }
 
+impl Default for IceAgent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IceAgent {
     /// Crea un nuevo agente ICE vacío
     pub fn new() -> Self {

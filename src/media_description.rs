@@ -1,6 +1,23 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
+#[derive(Debug, PartialEq)]
+pub enum MediaDescriptionError {
+    InvalidAttributeFormat,
+    InvalidFormat,
+}
+
+impl Display for MediaDescriptionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MediaDescriptionError::InvalidAttributeFormat => write!(f, "Invalid attribute format"),
+            MediaDescriptionError::InvalidFormat => write!(f, "Invalid format for this media description"),
+        }
+    }
+}
+
+impl std::error::Error for MediaDescriptionError {}
+
 const RTPMAP_KEY: &str = "rtpmap";
 const CANDIDATE_KEY: &str = "candidate";
 pub struct MediaDescription {
@@ -67,25 +84,25 @@ impl MediaDescription {
         &mut self,
         attribute_type: String,
         attribute_body: String,
-    ) -> Result<(), ()> {
+    ) -> Result<(), MediaDescriptionError> {
         if attribute_type == RTPMAP_KEY {
             match attribute_body.split_whitespace().collect::<Vec<&str>>()[..] {
                 [f, _] => {
-                    let f = f.parse::<usize>().map_err(|_| ())?;
+                    let f = f.parse::<usize>().map_err(|_| MediaDescriptionError::InvalidAttributeFormat)?;
                     if !self.valid_fmt(f) {
-                        return Err(());
+                        return Err(MediaDescriptionError::InvalidFormat);
                     }
                 }
-                _ => return Err(()),
+                _ => return Err(MediaDescriptionError::InvalidAttributeFormat),
             };
         } else if attribute_type == CANDIDATE_KEY {
             // TODO: validate candidate format
         }
 
-        self.attributes.push(String::from(format!(
+        self.attributes.push(format!(
             "{}:{}",
             attribute_type, attribute_body
-        )));
+        ));
         Ok(())
     }
 

@@ -223,7 +223,7 @@ impl IceAgent {
         self.selected_pair = Some(selected_pair.clone());
 
         // Display handshake completion message
-        eprintln!("✅ Handshake complete! A direct connection can be established.");
+        eprintln!("Handshake complete! A direct connection can be established.");
         eprintln!(
             "   - My Address: {}:{}",
             selected_pair.local.address, selected_pair.local.port
@@ -244,6 +244,8 @@ impl IceAgent {
         self.selected_pair.as_ref()
     }
 
+    /// Genera líneas SDP para los candidatos locales
+    /// Formato: "a=candidate:foundation component transport priority ip port typ type"
     pub fn generate_candidate_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
         for candidate in &self.local_candidates {

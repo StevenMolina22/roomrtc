@@ -1,7 +1,8 @@
-use std::fmt::{Display};
+use std::fmt::Display;
 use std::str::FromStr;
 
 const RTPMAP_KEY: &str = "rtpmap";
+const CANDIDATE_KEY: &str = "candidate";
 pub struct MediaDescription {
     media_type: String,
     port: u16,
@@ -20,14 +21,19 @@ impl FromStr for MediaDescription {
         }
 
         let port = s_vec[1].parse::<u16>().map_err(|_| ())?;
-        
+
         let mut parsed_fmt = Vec::new();
         for f_string in &s_vec[3..] {
             let fmt = f_string.parse::<usize>().map_err(|_| ())?;
             parsed_fmt.push(fmt);
         }
 
-        Ok(Self::new(s_vec[0].into(), port, s_vec[2].into(), parsed_fmt))
+        Ok(Self::new(
+            s_vec[0].into(),
+            port,
+            s_vec[2].into(),
+            parsed_fmt,
+        ))
     }
 }
 
@@ -56,8 +62,12 @@ impl MediaDescription {
             attributes: Vec::new(),
         }
     }
-    
-    pub fn add_attribute(&mut self, attribute_type: String, attribute_body: String) -> Result<(), ()>{
+
+    pub fn add_attribute(
+        &mut self,
+        attribute_type: String,
+        attribute_body: String,
+    ) -> Result<(), ()> {
         if attribute_type == RTPMAP_KEY {
             match attribute_body.split_whitespace().collect::<Vec<&str>>()[..] {
                 [f, _] => {
@@ -65,19 +75,24 @@ impl MediaDescription {
                     if !self.valid_fmt(f) {
                         return Err(());
                     }
-                },
+                }
                 _ => return Err(()),
             };
+        } else if attribute_type == CANDIDATE_KEY {
+            // TODO: validate candidate format
         }
 
-        self.attributes.push(String::from(format!("{}:{}", attribute_type, attribute_body)));
+        self.attributes.push(String::from(format!(
+            "{}:{}",
+            attribute_type, attribute_body
+        )));
         Ok(())
     }
 
     fn valid_fmt(&self, fmt: usize) -> bool {
         for f in &self.fmts {
             if *f == fmt {
-                return true
+                return true;
             }
         }
         false

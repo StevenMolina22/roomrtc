@@ -62,11 +62,11 @@ impl Candidate {
 
 impl std::fmt::Display for Candidate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}@{} ({})", 
-               self.address, 
-               self.port, 
-               self.candidate_type, 
-               self.priority)
+        write!(
+            f,
+            "{}:{}@{} ({})",
+            self.address, self.port, self.candidate_type, self.priority
+        )
     }
 }
 
@@ -109,27 +109,33 @@ impl CandidatePair {
     }
 
     fn calculate_pair_priority(local: &Candidate, remote: &Candidate) -> u64 {
-            let g = std::cmp::min(local.priority, remote.priority) as u64;
-            let l = std::cmp::max(local.priority, remote.priority) as u64;
-            (1u64 << 32) * g + 2 * l + if local.priority > remote.priority { 1 } else { 0 }
-        }
+        let g = std::cmp::min(local.priority, remote.priority) as u64;
+        let l = std::cmp::max(local.priority, remote.priority) as u64;
+        (1u64 << 32) * g
+            + 2 * l
+            + if local.priority > remote.priority {
+                1
+            } else {
+                0
+            }
+    }
 }
 
 impl std::fmt::Display for CandidatePair {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} <-> {} [{}] (priority: {})", 
-               self.local, 
-               self.remote, 
-               self.state, 
-               self.priority)
+        write!(
+            f,
+            "{} <-> {} [{}] (priority: {})",
+            self.local, self.remote, self.state, self.priority
+        )
     }
 }
 
 pub struct IceAgent {
-    local_candidates: Vec<Candidate>,     // Mis candidatos (direcciones IP/puerto)
-    remote_candidates: Vec<Candidate>,    // Candidatos del otro peer
-    candidate_pairs: Vec<CandidatePair>,  // Todas las combinaciones posibles
-    selected_pair: Option<CandidatePair>, // El par ganador para comunicarse
+    local_candidates: Vec<Candidate>,
+    remote_candidates: Vec<Candidate>,
+    candidate_pairs: Vec<CandidatePair>,
+    selected_pair: Option<CandidatePair>,
 }
 
 impl IceAgent {
@@ -148,7 +154,7 @@ impl IceAgent {
     pub fn gather_candidates(&mut self, port: u16) -> Result<(), String> {
         // Encuentra mi IP local y crea un candidato
         let local_ip = self.get_local_ip()?;
-        let mut candidate = Candidate::new_host(local_ip, 1);  // Crea candidato host
+        let mut candidate = Candidate::new_host(local_ip, 1); // Crea candidato host
         candidate.port = port;
         self.local_candidates.push(candidate);
 
@@ -158,13 +164,21 @@ impl IceAgent {
     /// Obtiene la IP local
     fn get_local_ip(&self) -> Result<String, String> {
         use std::net::UdpSocket;
-        let socket = UdpSocket::bind("0.0.0.0:0")
-            .map_err(|e| format!("Error creating socket: {}", e))?;
-        socket.connect("8.8.8.8:80")
+        let socket =
+            UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Error creating socket: {}", e))?;
+        socket
+            .connect("8.8.8.8:80")
             .map_err(|e| format!("Error connecting socket: {}", e))?;
-        let local_addr = socket.local_addr()
+        let local_addr = socket
+            .local_addr()
             .map_err(|e| format!("Error getting local address: {}", e))?;
         Ok(local_addr.ip().to_string())
+    }
+
+    /// Agrega un solo candidato remoto y crea los pares
+    pub fn add_remote_candidate(&mut self, candidate: Candidate) -> Result<(), String> {
+        self.remote_candidates.push(candidate);
+        self.create_candidate_pair()
     }
 
     /// Agrega candidatos remotos recibidos del otro peer y crea pares de candidatos
@@ -194,16 +208,25 @@ impl IceAgent {
         if self.candidate_pairs.is_empty() {
             return Err("No candidate pairs to verify".into());
         }
-        
+
         // Se selecciona el primer par (mayor prioridad)
         // En una implementación real, acá se harían verificaciones STUN (entrega final)
         let mut selected_pair = self.candidate_pairs[0].clone();
         selected_pair.state = ConnectivityState::Succeeded;
-        
+
         self.selected_pair = Some(selected_pair.clone());
-        
-        println!("Selected pair: {}", selected_pair);
-        
+
+        // Display handshake completion message
+        eprintln!("✅ Handshake complete! A direct connection can be established.");
+        eprintln!(
+            "   - My Address: {}:{}",
+            selected_pair.local.address, selected_pair.local.port
+        );
+        eprintln!(
+            "   - Peer Address: {}:{}",
+            selected_pair.remote.address, selected_pair.remote.port
+        );
+
         Ok(())
     }
 
@@ -241,38 +264,35 @@ impl IceAgent {
     pub fn parse_candidate_line(line: &str) -> Result<Candidate, String> {
         // Remover prefijos y sufijos
         let line = line.trim().trim_end_matches("\r\n");
-        
+
         if !line.starts_with("a=candidate:") {
             return Err("Line is not a valid candidate".to_string());
         }
-        
+
         // Remover "a=candidate:" y dividir por espacios
         let parts: Vec<&str> = line[12..].split_whitespace().collect();
-        
+
         if parts.len() < 8 {
             return Err("Invalid candidate format".to_string());
         }
-        
+
         let foundation = parts[0].to_string();
-        let component_id = parts[1].parse::<u8>()
-            .map_err(|_| "Invalid component ID")?;
+        let component_id = parts[1].parse::<u8>().map_err(|_| "Invalid component ID")?;
         let _transport = parts[2]; // "UDP" o "TCP" - no usado por ahora
-        let priority = parts[3].parse::<u32>()
-            .map_err(|_| "Invalid priority")?;
+        let priority = parts[3].parse::<u32>().map_err(|_| "Invalid priority")?;
         let address = parts[4].to_string();
-        let port = parts[5].parse::<u16>()
-            .map_err(|_| "Invalid port")?;
-        
+        let port = parts[5].parse::<u16>().map_err(|_| "Invalid port")?;
+
         if parts[6] != "typ" {
             return Err("Invalid candidate format: missing 'typ'".to_string());
         }
-        
+
         let candidate_type = match parts[7] {
             "host" => CandidateType::Host,
             "srflx" => CandidateType::ServerReflexive,
             _ => return Err(format!("Unsupported candidate type: {}", parts[7])),
         };
-        
+
         Ok(Candidate {
             candidate_type,
             priority,

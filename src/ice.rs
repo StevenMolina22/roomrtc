@@ -45,7 +45,7 @@ impl Candidate {
             candidate_type,
             priority,
             address,
-            port: 0, // El puerto se asignará al recolectar candidatos
+            port: 0,
             component_id,
             foundation,
         }
@@ -56,7 +56,6 @@ impl Candidate {
             CandidateType::Host => 126,
             CandidateType::ServerReflexive => 100,
         };
-        // (type_preference << 24) | (local_preference << 8) | (256 - component_id)
         (type_preference << 24) | ((local_preference as u32) << 8) | (256 - 1)
     }
 }
@@ -145,18 +144,18 @@ impl IceAgent {
     }
 
     /// Recolecta candidatos locales (direcciones IP disponibles)
-    /// En esta implementación básica solo obtiene la IP local
+    /// En esta implementación solo obtiene la IP local
     pub fn gather_candidates(&mut self, port: u16) -> Result<(), String> {
         // Encuentra mi IP local y crea un candidato
-        let local_ip = self.get_local_ip()?;  // Obtiene IP (ej: 192.168.1.2)
+        let local_ip = self.get_local_ip()?;
         let mut candidate = Candidate::new_host(local_ip, 1);  // Crea candidato host
-        candidate.port = port; // Asigna el puerto especificado
+        candidate.port = port;
         self.local_candidates.push(candidate);
 
-        // En un ICE real, aquí se haría interacción con STUN/TURN
+        // En un ICE real, acá se haría interacción con STUN/TURN (entrega final)
         Ok(())
     }
-
+    /// Obtiene la IP local
     fn get_local_ip(&self) -> Result<String, String> {
         use std::net::UdpSocket;
         let socket = UdpSocket::bind("0.0.0.0:0")
@@ -168,12 +167,11 @@ impl IceAgent {
         Ok(local_addr.ip().to_string())
     }
 
-    /// Añade candidatos remotos recibidos del otro peer y crea pares de candidatos
+    /// Agrega candidatos remotos recibidos del otro peer y crea pares de candidatos
     pub fn add_remote_candidates(&mut self, candidates: Vec<Candidate>) -> Result<(), String> {
         for candidate in candidates {
             self.remote_candidates.push(candidate);
         }
-        // Cada vez que se añaden candidatos remotos, se crean nuevos pares
         self.create_candidate_pair()
     }
 
@@ -191,13 +189,14 @@ impl IceAgent {
         Ok(())
     }
 
+    /// Inicia las verificaciones de conectividad y selecciona el mejor par
     pub fn start_connectivity_checks(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.candidate_pairs.is_empty() {
             return Err("No candidate pairs to verify".into());
         }
         
-        // Para simplificar, seleccionamos el primer par (mayor prioridad)
-        // En una implementación real, aquí se harían verificaciones STUN
+        // Se selecciona el primer par (mayor prioridad)
+        // En una implementación real, acá se harían verificaciones STUN (entrega final)
         let mut selected_pair = self.candidate_pairs[0].clone();
         selected_pair.state = ConnectivityState::Succeeded;
         
@@ -264,7 +263,6 @@ impl IceAgent {
         let port = parts[5].parse::<u16>()
             .map_err(|_| "Invalid port")?;
         
-        // parts[6] debería ser "typ"
         if parts[6] != "typ" {
             return Err("Invalid candidate format: missing 'typ'".to_string());
         }

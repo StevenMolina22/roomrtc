@@ -5,7 +5,7 @@ pub enum CandidateType {
 }
 
 impl CandidateType {
-    /// Retorna la prioridad del tipo de candidato según RFC 8445
+    /// Returns the candidate type priority according to RFC 8445
     pub fn priority(&self) -> u32 {
         match self {
             CandidateType::Host => 126,
@@ -23,7 +23,7 @@ impl std::fmt::Display for CandidateType {
     }
 }
 
-// Representa un candidato ICE
+// Represents an ICE candidate
 #[derive(Clone)]
 pub struct Candidate {
     pub candidate_type: CandidateType,
@@ -35,11 +35,11 @@ pub struct Candidate {
 }
 
 impl Candidate {
-    /// Crea un nuevo candidato de tipo Host con la dirección IP especificada
+    /// Creates a new Host type candidate with the specified IP address
     pub fn new_host(address: String, component_id: u8) -> Self {
         let candidate_type = CandidateType::Host;
-        let priority = Self::calculate_priority(&candidate_type, 65535); // Preferencia local alta
-        let foundation = "1".to_string(); // En un caso real, esto sería más complejo
+        let priority = Self::calculate_priority(&candidate_type, 65535); // High local preference
+        let foundation = "1".to_string();
 
         Candidate {
             candidate_type,
@@ -145,7 +145,7 @@ impl Default for IceAgent {
 }
 
 impl IceAgent {
-    /// Crea un nuevo agente ICE vacío
+    /// Creates a new empty ICE agent
     pub fn new() -> Self {
         IceAgent {
             local_candidates: Vec::new(),
@@ -155,39 +155,44 @@ impl IceAgent {
         }
     }
 
-    /// Recolecta candidatos locales (direcciones IP disponibles)
-    /// En esta implementación solo obtiene la IP local
+    /// Gathers local candidates (available IP addresses)
+    /// This implementation only gets the local IP
     pub fn gather_candidates(&mut self, port: u16) -> Result<(), String> {
-        // Encuentra mi IP local y crea un candidato
+        // Find my local IP and create a candidate
         let local_ip = self.get_local_ip()?;
-        let mut candidate = Candidate::new_host(local_ip, 1); // Crea candidato host
+        let mut candidate = Candidate::new_host(local_ip, 1);
         candidate.port = port;
         self.local_candidates.push(candidate);
 
-        // En un ICE real, acá se haría interacción con STUN/TURN (entrega final)
+        // In a real ICE implementation, here would be STUN/TURN interaction (final delivery)
         Ok(())
     }
-    /// Obtiene la IP local
+    /// Gets the local IP using if_addrs
     fn get_local_ip(&self) -> Result<String, String> {
-        use std::net::UdpSocket;
-        let socket =
-            UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Error creating socket: {}", e))?;
-        socket
-            .connect("8.8.8.8:80")
-            .map_err(|e| format!("Error connecting socket: {}", e))?;
-        let local_addr = socket
-            .local_addr()
-            .map_err(|e| format!("Error getting local address: {}", e))?;
-        Ok(local_addr.ip().to_string())
+        // Get all network interfaces
+        // returns a list with Interface type objects
+        // each Interface has name, addr, index, oper_status and is_loopback() method
+        let interfaces = if_addrs::get_if_addrs()
+            .map_err(|e| format!("Error getting interfaces: {}", e))?;
+        
+        // Find the first interface that is not loopback
+        // loopback is a virtual internal interface of the operating system (doesn't connect any local network)
+        for interface in interfaces {
+            if !interface.is_loopback() {
+                return Ok(interface.addr.ip().to_string());
+            }
+        }
+        
+        Err("No network interface found".to_string())
     }
 
-    /// Agrega un solo candidato remoto y crea los pares
+    /// Adds a single remote candidate and creates pairs
     pub fn add_remote_candidate(&mut self, candidate: Candidate) -> Result<(), String> {
         self.remote_candidates.push(candidate);
         self.create_candidate_pair()
     }
 
-    /// Agrega candidatos remotos recibidos del otro peer y crea pares de candidatos
+    /// Adds remote candidates received from the other peer and creates candidate pairs
     pub fn add_remote_candidates(&mut self, candidates: Vec<Candidate>) -> Result<(), String> {
         for candidate in candidates {
             self.remote_candidates.push(candidate);
@@ -209,14 +214,14 @@ impl IceAgent {
         Ok(())
     }
 
-    /// Inicia las verificaciones de conectividad y selecciona el mejor par
+    /// Starts connectivity checks and selects the best pair
     pub fn start_connectivity_checks(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.candidate_pairs.is_empty() {
             return Err("No candidate pairs to verify".into());
         }
 
-        // Se selecciona el primer par (mayor prioridad)
-        // En una implementación real, acá se harían verificaciones STUN (entrega final)
+        // The first pair is selected (highest priority)
+        // In a real implementation, here would be STUN verifications (final delivery)
         let mut selected_pair = self.candidate_pairs[0].clone();
         selected_pair.state = ConnectivityState::Succeeded;
 
@@ -244,8 +249,8 @@ impl IceAgent {
         self.selected_pair.as_ref()
     }
 
-    /// Genera líneas SDP para los candidatos locales
-    /// Formato: "a=candidate:foundation component transport priority ip port typ type"
+    /// Generates SDP lines for local candidates
+    /// Format: "a=candidate:foundation component transport priority ip port typ type"
     pub fn generate_candidate_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
         for candidate in &self.local_candidates {
@@ -267,17 +272,15 @@ impl IceAgent {
         lines
     }
 
-    /// Parsea una línea de candidato SDP y retorna un Candidate
-    /// Formato: "a=candidate:foundation component transport priority ip port typ type"
+    /// Parses an SDP candidate line and returns a Candidate
+    /// Format: "a=candidate:foundation component transport priority ip port typ type"
     pub fn parse_candidate_line(line: &str) -> Result<Candidate, String> {
-        // Remover prefijos y sufijos
         let line = line.trim().trim_end_matches("\r\n");
 
         if !line.starts_with("a=candidate:") {
             return Err("Line is not a valid candidate".to_string());
         }
 
-        // Remover "a=candidate:" y dividir por espacios
         let parts: Vec<&str> = line[12..].split_whitespace().collect();
 
         if parts.len() < 8 {

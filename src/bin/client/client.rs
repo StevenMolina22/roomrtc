@@ -2,15 +2,13 @@ use std::{
     io::{BufRead, Write},
     str::FromStr,
 };
-
-use roomrtc::{
-    ice::IceAgent, media_description::MediaDescription, sdp::SessionDescriptionProtocol,
-};
+use std::collections::HashSet;
+use roomrtc::{ice::IceAgent, media_description::MediaDescription, sdp::SessionDescriptionProtocol, attribute::Attribute};
 
 const MEDIA_TYPE: &str = "video";
 const MEDIA_PORT: u16 = 4000;
 const MEDIA_PROTOCOL: &str = "RTP/AVP";
-const MEDIA_FMT: usize = 111;
+const MEDIA_FMT: u8 = 111;
 
 pub struct Client {
     sdp: SessionDescriptionProtocol,
@@ -30,23 +28,15 @@ impl Client {
             MEDIA_TYPE.into(),
             MEDIA_PORT,
             MEDIA_PROTOCOL.into(),
-            vec![MEDIA_FMT],
+            HashSet::from([MEDIA_FMT]),
         );
         media_description
-            .add_attribute("rtpmap".into(), "111 OPUS/48000/2".into())
+            .add_attribute(Attribute::RTPMap(111, "OPUS".into(), 48000, Some("2".into())))
             .unwrap();
 
         // Add our ICE candidate to the media description
-        if let Some(candidate_line) = ice_agent.generate_candidate_lines().first() {
-            // Split "a=candidate:" into type and value parts
-            if let Some((attr_type, attr_body)) = candidate_line.trim().split_once(':') {
-                media_description
-                    .add_attribute(
-                        attr_type.strip_prefix("a=").unwrap().into(),
-                        attr_body.into(),
-                    )
-                    .unwrap();
-            }
+        if let Some(candidate) = ice_agent.get_local_candidate() {
+            media_description.add_attribute(Attribute::Candidate(candidate.clone())).unwrap();
         }
 
         // Create SDP with our media description
@@ -79,24 +69,12 @@ impl Client {
             }
             answer.push_str(&line);
         }
-        let _answer_sdp = SessionDescriptionProtocol::from_str(&answer).map_err(|_| ())?;
+        let sdp_answer = SessionDescriptionProtocol::from_str(&answer).map_err(|_| ())?;
         eprintln!("Answer received");
 
         // Find and process the remote ICE candidate
-        if let Some(line) = answer.lines().find(|l| l.starts_with("a=candidate:")) {
-            if let Ok(remote_candidate) = IceAgent::parse_candidate_line(line) {
-                self.ice_agent
-                    .add_remote_candidate(remote_candidate)
-                    .unwrap();
-                self.ice_agent.start_connectivity_checks().unwrap();
-            } else {
-                eprintln!("Failed to parse remote candidate line");
-            }
-        } else {
-            eprintln!("No ICE candidate found in the answer");
-        }
-
-        Ok(())
+        
+        self.process_remote_sdp(&sdp_answer)
     }
 
     pub fn answer_sdp<R: BufRead, W: Write>(
@@ -104,6 +82,7 @@ impl Client {
         mut in_buff: R,
         mut out_buff: W,
     ) -> Result<(), ()> {
+
         let mut offer_string = String::new();
         // Read the complete SDP offer
         loop {
@@ -116,24 +95,26 @@ impl Client {
         }
 
         // Parse offer to make sure it's valid
-        let _offer_sdp = SessionDescriptionProtocol::from_str(&offer_string).map_err(|_| ())?;
+        let sdp_offer = SessionDescriptionProtocol::from_str(&offer_string).map_err(|_| ())?;
         eprintln!("Offer received");
 
         // Send our SDP answer
-        let sdp_answer = self.sdp.to_string();
-        out_buff.write_all(sdp_answer.as_bytes()).unwrap();
+        let sdp_answer = self.sdp.create_answer(&sdp_offer).map_err(|_| ())?;
+        out_buff.write_all(sdp_answer.to_string().as_bytes()).unwrap();
         out_buff.write_all("\n".as_bytes()).unwrap();
         out_buff.flush().unwrap();
 
         // Extract and process the remote ICE candidate from the offer
-        if let Some(line) = offer_string.lines().find(|l| l.starts_with("a=candidate:"))
-            && let Ok(remote_candidate) = IceAgent::parse_candidate_line(line) {
-                self.ice_agent
-                    .add_remote_candidate(remote_candidate)
-                    .unwrap();
-                self.ice_agent.start_connectivity_checks().unwrap();
-            }
+        self.process_remote_sdp(&sdp_offer)
+    }
 
-        Ok(())
+    fn process_remote_sdp(&mut self, sdp: &SessionDescriptionProtocol) -> Result<(), ()> {
+        for md in &sdp.media_descriptions {
+            for candidate in md.get_candidates() {
+                self.ice_agent.add_remote_candidate(candidate.clone()).map_err(|_| ())?;
+            }
+        }
+        
+        self.ice_agent.start_connectivity_checks().map_err(|_| ())
     }
 }

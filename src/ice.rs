@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 #[derive(Clone)]
 pub enum CandidateType {
     Host,
@@ -23,6 +25,18 @@ impl std::fmt::Display for CandidateType {
     }
 }
 
+impl FromStr for CandidateType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "host" => Ok(CandidateType::Host),
+            "srflx" => Ok(CandidateType::ServerReflexive),
+            _ => Err(()),
+        }
+    }
+}
+
 // Represents an ICE candidate
 #[derive(Clone)]
 pub struct Candidate {
@@ -32,14 +46,28 @@ pub struct Candidate {
     pub port: u16,
     pub component_id: u8,
     pub foundation: String,
+    pub transport: String,
 }
 
 impl Candidate {
+    pub fn new(candidate_type: CandidateType, priority: u32, address: String, port: u16, component_id: u8, foundation: String, transport:String) -> Self {
+        Self {
+            candidate_type,
+            priority,
+            address,
+            port,
+            component_id,
+            foundation,
+            transport
+        }
+    }
+
     /// Creates a new Host type candidate with the specified IP address
     pub fn new_host(address: String, component_id: u8) -> Self {
         let candidate_type = CandidateType::Host;
         let priority = Self::calculate_priority(&candidate_type, 65535); // High local preference
         let foundation = "1".to_string();
+        let transport = "UDP".to_string();
 
         Candidate {
             candidate_type,
@@ -48,6 +76,7 @@ impl Candidate {
             port: 0,
             component_id,
             foundation,
+            transport
         }
     }
 
@@ -247,70 +276,5 @@ impl IceAgent {
 
     pub fn get_selected_pair(&self) -> Option<&CandidatePair> {
         self.selected_pair.as_ref()
-    }
-
-    /// Generates SDP lines for local candidates
-    /// Format: "a=candidate:foundation component transport priority ip port typ type"
-    pub fn generate_candidate_lines(&self) -> Vec<String> {
-        let mut lines = Vec::new();
-        for candidate in &self.local_candidates {
-            let line = format!(
-                "a=candidate:{} {} {} {} {} {} typ {}\r\n",
-                candidate.foundation,
-                candidate.component_id,
-                "UDP",
-                candidate.priority,
-                candidate.address,
-                candidate.port,
-                match candidate.candidate_type {
-                    CandidateType::Host => "host",
-                    CandidateType::ServerReflexive => "srflx",
-                }
-            );
-            lines.push(line);
-        }
-        lines
-    }
-
-    /// Parses an SDP candidate line and returns a Candidate
-    /// Format: "a=candidate:foundation component transport priority ip port typ type"
-    pub fn parse_candidate_line(line: &str) -> Result<Candidate, String> {
-        let line = line.trim().trim_end_matches("\r\n");
-
-        if !line.starts_with("a=candidate:") {
-            return Err("Line is not a valid candidate".to_string());
-        }
-
-        let parts: Vec<&str> = line[12..].split_whitespace().collect();
-
-        if parts.len() < 8 {
-            return Err("Invalid candidate format".to_string());
-        }
-
-        let foundation = parts[0].to_string();
-        let component_id = parts[1].parse::<u8>().map_err(|_| "Invalid component ID")?;
-        let _transport = parts[2]; // "UDP" o "TCP" - no usado por ahora
-        let priority = parts[3].parse::<u32>().map_err(|_| "Invalid priority")?;
-        let address = parts[4].to_string();
-        let port = parts[5].parse::<u16>().map_err(|_| "Invalid port")?;
-
-        if parts[6] != "typ" {
-            return Err("Invalid candidate format: missing 'typ'".to_string());
-        }
-
-        let candidate_type = match parts[7] {
-            "host" => CandidateType::Host,
-            "srflx" => CandidateType::ServerReflexive,
-            _ => return Err(format!("Unsupported candidate type: {}", parts[7])),
-        };
-
-        Ok(Candidate {
-            candidate_type,
-            priority,
-            address,
-            port,
-            component_id,
-            foundation,
-        })
     }
 }

@@ -1,5 +1,8 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
+use crate::attribute::Attribute;
+use crate::ice::Candidate;
 
 #[derive(Debug, PartialEq)]
 pub enum MediaDescriptionError {
@@ -18,14 +21,12 @@ impl Display for MediaDescriptionError {
 
 impl std::error::Error for MediaDescriptionError {}
 
-const RTPMAP_KEY: &str = "rtpmap";
-const CANDIDATE_KEY: &str = "candidate";
 pub struct MediaDescription {
-    media_type: String,
-    port: u16,
-    protocol: String,
-    fmts: Vec<usize>,
-    attributes: Vec<String>,
+    pub media_type: String,
+    pub port: u16,
+    pub protocol: String,
+    pub fmts: HashSet<u8>,
+    pub attributes: Vec<Attribute>,
 }
 
 impl FromStr for MediaDescription {
@@ -39,10 +40,10 @@ impl FromStr for MediaDescription {
 
         let port = s_vec[1].parse::<u16>().map_err(|_| ())?;
 
-        let mut parsed_fmt = Vec::new();
+        let mut parsed_fmt = HashSet::new();
         for f_string in &s_vec[3..] {
-            let fmt = f_string.parse::<usize>().map_err(|_| ())?;
-            parsed_fmt.push(fmt);
+            let fmt = f_string.parse::<u8>().map_err(|_| ())?;
+            parsed_fmt.insert(fmt);
         }
 
         Ok(Self::new(
@@ -56,21 +57,22 @@ impl FromStr for MediaDescription {
 
 impl Display for MediaDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut content = format!("m={} {} {}", self.media_type, self.port, self.protocol);
+        write!(f, "m={} {} {}", self.media_type, self.port, self.protocol)?;
+
         for fmt in &self.fmts {
-            content = format!("{} {}", content, fmt)
+            write!(f, " {}", fmt)?;
         }
 
         for attr in &self.attributes {
-            content = format!("{}\na={}", content, attr)
+            write!(f, "\n {}", attr)?;
         }
-
-        write!(f, "{}", content)
+        
+        Ok(())
     }
 }
 
 impl MediaDescription {
-    pub fn new(media_type: String, port: u16, protocol: String, fmts: Vec<usize>) -> Self {
+    pub fn new(media_type: String, port: u16, protocol: String, fmts: HashSet<u8>) -> Self {
         Self {
             media_type,
             port,
@@ -82,36 +84,27 @@ impl MediaDescription {
 
     pub fn add_attribute(
         &mut self,
-        attribute_type: String,
-        attribute_body: String,
+        attr: Attribute,
     ) -> Result<(), MediaDescriptionError> {
-        if attribute_type == RTPMAP_KEY {
-            match attribute_body.split_whitespace().collect::<Vec<&str>>()[..] {
-                [f, _] => {
-                    let f = f.parse::<usize>().map_err(|_| MediaDescriptionError::InvalidAttributeFormat)?;
-                    if !self.valid_fmt(f) {
-                        return Err(MediaDescriptionError::InvalidFormat);
-                    }
-                }
-                _ => return Err(MediaDescriptionError::InvalidAttributeFormat),
-            };
-        } else if attribute_type == CANDIDATE_KEY {
-            // TODO: validate candidate format
+        if let Attribute::RTPMap(fmt, _, _, _) = &attr {
+            if !self.fmts.contains(fmt) {
+                return Err(MediaDescriptionError::InvalidFormat)
+            }
         }
 
-        self.attributes.push(format!(
-            "{}:{}",
-            attribute_type, attribute_body
-        ));
+        self.attributes.push(attr);
         Ok(())
     }
 
-    fn valid_fmt(&self, fmt: usize) -> bool {
-        for f in &self.fmts {
-            if *f == fmt {
-                return true;
+    pub fn get_candidates(&self) -> Vec<Candidate> {
+        let mut candidates: Vec<Candidate> = Vec::new();
+
+        for attr in &self.attributes {
+            if let Attribute::Candidate(candidate) = attr {
+                candidates.push(candidate.clone());
             }
         }
-        false
+
+        candidates
     }
 }

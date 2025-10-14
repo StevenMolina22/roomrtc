@@ -1,6 +1,8 @@
+use std::collections::HashSet;
 use crate::media_description::MediaDescription;
 use std::fmt::Display;
 use std::str::FromStr;
+use crate::attribute::Attribute;
 
 const MEDIA_DESCRIPTION_KEY: &str = "m";
 const ATTRIBUTE_KEY: &str = "a";
@@ -10,7 +12,7 @@ pub struct SessionDescriptionProtocol {
     origin_id: usize,
     session_name: String,
     timing: String,
-    media_descriptions: Vec<MediaDescription>,
+    pub media_descriptions: Vec<MediaDescription>,
     connection_data: String,
 }
 
@@ -71,19 +73,73 @@ impl SessionDescriptionProtocol {
         }
     }
 
-    pub fn create_answer(&self, _offer_sdp: SessionDescriptionProtocol) -> Self {
-        // por cada md de self:
-        //     busque md compatible en offer_sdp, si encuentra:
-        //         busca a compatible, si encuentra:
-        //             agrega md a respuesta compatible si no lo agrego antes
-        //             agrega attr compatible a md de respuesta
+    pub fn create_answer(&self, offer_sdp: &SessionDescriptionProtocol) -> Result<Self, ()> {
+        let mut answer_media_descriptions = Vec::new();
 
-        SessionDescriptionProtocol::new(Vec::new())
+        for local_md in &self.media_descriptions {
+            if let Some(offer_md) = offer_sdp.media_descriptions.iter()
+                .find(|m| m.media_type == local_md.media_type && m.protocol == local_md.protocol) {
+
+                let (answer_md_fmts, answer_md_attributes) = compatible_attributes_data(&local_md, &offer_md);
+                let answer_md = create_answer_md(local_md, answer_md_fmts, answer_md_attributes).map_err(|_| ())?;
+                answer_media_descriptions.push(answer_md);
+            }
+        }
+
+        Ok(SessionDescriptionProtocol::new(answer_media_descriptions))
     }
 
     pub fn set_connection_data(&mut self, net_type: String, addr_type: String, address: String) {
         self.connection_data = format!("{} {} {}", net_type, addr_type, address);
     }
+}
+
+
+// TO DO: Review if all local attributes should be copied into the sdp answer (ice candidates, fingerprints,...)
+fn compatible_attributes_data(
+    local_md: &MediaDescription,
+    offer_md: &MediaDescription
+) -> (HashSet<u8>, Vec<Attribute>) {
+
+    let mut answer_md_attributes = Vec::new();
+    let mut answer_md_fmts = HashSet::new();
+
+    for local_attr in &local_md.attributes {
+        if let Attribute::RTPMap(local_fmt, local_encoding_name, _, _) = &local_attr {
+            for offer_attr in &offer_md.attributes {
+                if let Attribute::RTPMap(_, offer_encoding_name, _, _) = &offer_attr {
+                    if local_encoding_name == offer_encoding_name {
+                        answer_md_fmts.insert(*local_fmt);
+                        answer_md_attributes.push(local_attr.clone());
+                    }
+                }
+            }
+        } else {
+            answer_md_attributes.push(local_attr.clone());
+        }
+    }
+
+    (answer_md_fmts, answer_md_attributes)
+}
+
+fn create_answer_md(
+    local_md: &MediaDescription,
+    answer_md_fmts: HashSet<u8>,
+    answer_md_attributes: Vec<Attribute>
+) -> Result<MediaDescription, ()> {
+
+    let mut answer_md = MediaDescription::new(
+        local_md.media_type.clone(),
+        if answer_md_attributes.is_empty(){ 0 } else { local_md.port },
+        local_md.protocol.clone(),
+        answer_md_fmts
+    );
+
+    for attr in answer_md_attributes {
+        answer_md.add_attribute(attr).map_err(|_| ())?;
+    }
+
+    Ok(answer_md)
 }
 
 fn handle_media_description_line(
@@ -98,17 +154,12 @@ fn handle_attribute_line(
     line: &str,
     media_descriptions: &mut [MediaDescription],
 ) -> Result<(), ()> {
-    let (attribute_type, attribute_body) = if let Some(stripped) = line.strip_prefix("candidate:") {
-        // Special handling for candidate lines: "candidate:1 1 UDP ..." -> ("candidate", "1 1 UDP ...")
-        ("candidate", stripped) // Skip "candidate:"
-    } else {
-        // Normal attribute parsing: "rtpmap 111 OPUS/48000/2" -> ("rtpmap", "111 OPUS/48000/2")
-        line.split_once(' ').unwrap()
-    };
+
+    let attribute = Attribute::from_str(line)?;
 
     match media_descriptions.last_mut() {
         Some(m) => m
-            .add_attribute(attribute_type.into(), attribute_body.into())
+            .add_attribute(attribute)
             .map_err(|_| ())?,
         None => return Err(()),
     }

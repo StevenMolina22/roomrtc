@@ -32,7 +32,7 @@ impl Client {
         let mut answer = String::new();
         in_buff.read_line(&mut answer).unwrap();
 
-        let answer_sdp = SessionDescriptionProtocol::from_str(&answer).map_err(|_| ())?;
+        let _ = SessionDescriptionProtocol::from_str(&answer).map_err(|_| ())?;
 
         println!("Answer received");
         Ok(())

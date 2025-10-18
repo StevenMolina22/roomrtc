@@ -57,20 +57,20 @@ impl MediaDescription {
         }
     }
     
-    pub fn add_attribute(&mut self, attribute_type: String, attribute_body: String) -> Result<(), ()>{
+    pub fn add_attribute(&mut self, attribute_type: String, attribute_body: String) -> Result<(), String>{
         if attribute_type == RTPMAP_KEY {
             match attribute_body.split_whitespace().collect::<Vec<&str>>()[..] {
                 [f, _] => {
-                    let f = f.parse::<usize>().map_err(|_| ())?;
+                    let f = f.parse::<usize>().map_err(|_| "Error parsing attribute body")?;
                     if !self.valid_fmt(f) {
-                        return Err(());
+                        return Err("Error parsing attribute body".to_string());
                     }
                 },
-                _ => return Err(()),
+                _ => return Err("Error splitting attribute body".to_string()),
             };
         }
 
-        self.attributes.push(String::from(format!("{}:{}", attribute_type, attribute_body)));
+        self.attributes.push(format!("{}:{}", attribute_type, attribute_body));
         Ok(())
     }
 

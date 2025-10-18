@@ -62,7 +62,7 @@ impl SessionDescriptionProtocol {
         }
     }
 
-    pub fn create_answer(&self, offer_sdp: SessionDescriptionProtocol) -> Self {
+    pub fn create_answer(&self, _offer_sdp: SessionDescriptionProtocol) -> Self {
         // por cada md de self:
         //     busque md compatible en offer_sdp, si encuentra:
         //         busca a compatible, si encuentra:
@@ -79,7 +79,7 @@ fn handle_media_description_line(line: &str, media_descriptions: &mut Vec<MediaD
     Ok(())
 }
 
-fn handle_attribute_line(line: &str, media_descriptions: &mut Vec<MediaDescription>) -> Result<(), ()> {
+fn handle_attribute_line(line: &str, media_descriptions: &mut [MediaDescription]) -> Result<(), ()> {
     let (attribute_type, attribute_body) = line.split_once(' ').unwrap();
     match media_descriptions.last_mut() {
         Some(m) => m.add_attribute(attribute_type.into(), attribute_body.into()).map_err(|_| ())?,

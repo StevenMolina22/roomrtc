@@ -86,10 +86,8 @@ impl MediaDescription {
         &mut self,
         attr: Attribute,
     ) -> Result<(), MediaDescriptionError> {
-        if let Attribute::RTPMap(fmt, _, _, _) = &attr {
-            if !self.fmts.contains(fmt) {
-                return Err(MediaDescriptionError::InvalidFormat)
-            }
+        if let Attribute::RTPMap(fmt, _, _, _) = &attr && !self.fmts.contains(fmt) {
+            return Err(MediaDescriptionError::InvalidFormat)
         }
 
         self.attributes.push(attr);

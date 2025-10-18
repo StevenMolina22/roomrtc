@@ -80,7 +80,7 @@ impl SessionDescriptionProtocol {
             if let Some(offer_md) = offer_sdp.media_descriptions.iter()
                 .find(|m| m.media_type == local_md.media_type && m.protocol == local_md.protocol) {
 
-                let (answer_md_fmts, answer_md_attributes) = compatible_attributes_data(&local_md, &offer_md);
+                let (answer_md_fmts, answer_md_attributes) = compatible_attributes_data(local_md, offer_md);
                 let answer_md = create_answer_md(local_md, answer_md_fmts, answer_md_attributes).map_err(|_| ())?;
                 answer_media_descriptions.push(answer_md);
             }
@@ -107,11 +107,9 @@ fn compatible_attributes_data(
     for local_attr in &local_md.attributes {
         if let Attribute::RTPMap(local_fmt, local_encoding_name, _, _) = &local_attr {
             for offer_attr in &offer_md.attributes {
-                if let Attribute::RTPMap(_, offer_encoding_name, _, _) = &offer_attr {
-                    if local_encoding_name == offer_encoding_name {
-                        answer_md_fmts.insert(*local_fmt);
-                        answer_md_attributes.push(local_attr.clone());
-                    }
+                if let Attribute::RTPMap(_, offer_encoding_name, _, _) = &offer_attr && local_encoding_name == offer_encoding_name {
+                    answer_md_fmts.insert(*local_fmt);
+                    answer_md_attributes.push(local_attr.clone());
                 }
             }
         } else {

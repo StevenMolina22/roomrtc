@@ -1,10 +1,10 @@
+use crate::sdp::Attribute;
+use crate::ice::Candidate;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
-use crate::attribute::Attribute;
-use crate::ice::Candidate;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum MediaDescriptionError {
     InvalidAttributeFormat,
     InvalidFormat,
@@ -13,8 +13,10 @@ pub enum MediaDescriptionError {
 impl Display for MediaDescriptionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MediaDescriptionError::InvalidAttributeFormat => write!(f, "Invalid attribute format"),
-            MediaDescriptionError::InvalidFormat => write!(f, "Invalid format for this media description"),
+            Self::InvalidAttributeFormat => write!(f, "Invalid attribute format"),
+            Self::InvalidFormat => {
+                write!(f, "Invalid format for this media description")
+            }
         }
     }
 }
@@ -60,19 +62,20 @@ impl Display for MediaDescription {
         write!(f, "m={} {} {}", self.media_type, self.port, self.protocol)?;
 
         for fmt in &self.fmts {
-            write!(f, " {}", fmt)?;
+            write!(f, " {fmt}")?;
         }
 
         for attr in &self.attributes {
-            write!(f, "\n {}", attr)?;
+            write!(f, "\n {attr}")?;
         }
-        
+
         Ok(())
     }
 }
 
 impl MediaDescription {
-    pub fn new(media_type: String, port: u16, protocol: String, fmts: HashSet<u8>) -> Self {
+    #[must_use]
+    pub const fn new(media_type: String, port: u16, protocol: String, fmts: HashSet<u8>) -> Self {
         Self {
             media_type,
             port,
@@ -82,20 +85,18 @@ impl MediaDescription {
         }
     }
 
-    pub fn add_attribute(
-        &mut self,
-        attr: Attribute,
-    ) -> Result<(), MediaDescriptionError> {
-        if let Attribute::RTPMap(fmt, _, _, _) = &attr {
-            if !self.fmts.contains(fmt) {
-                return Err(MediaDescriptionError::InvalidFormat)
-            }
+    pub fn add_attribute(&mut self, attr: Attribute) -> Result<(), MediaDescriptionError> {
+        if let Attribute::RTPMap(fmt, _, _, _) = &attr
+            && !self.fmts.contains(fmt)
+        {
+            return Err(MediaDescriptionError::InvalidFormat);
         }
 
         self.attributes.push(attr);
         Ok(())
     }
 
+    #[must_use]
     pub fn get_candidates(&self) -> Vec<Candidate> {
         let mut candidates: Vec<Candidate> = Vec::new();
 

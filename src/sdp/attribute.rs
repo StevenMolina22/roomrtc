@@ -1,6 +1,7 @@
+use crate::ice::Candidate;
+use crate::ice::CandidateType;
 use std::fmt;
 use std::str::FromStr;
-use crate::ice::{Candidate, CandidateType};
 
 const CANDIDATE_ATTR_KEY: &str = "candidate";
 const RTPMAP_ATTR_KEY: &str = "rtpmap";
@@ -14,8 +15,10 @@ pub enum Attribute {
 impl fmt::Display for Attribute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Attribute::Candidate(candidate) => {
-                write!(f, "a=candidate:{} {} {} {} {} {} typ {}",
+            Self::Candidate(candidate) => {
+                write!(
+                    f,
+                    "a=candidate:{} {} {} {} {} {} typ {}",
                     candidate.foundation,
                     candidate.component_id,
                     candidate.transport,
@@ -26,11 +29,11 @@ impl fmt::Display for Attribute {
                 )
             }
 
-            Attribute::RTPMap(fmt, enc_name, clock_rate, encoding_params) => {
+            Self::RTPMap(fmt, enc_name, clock_rate, encoding_params) => {
                 if let Some(params) = encoding_params {
-                    write!(f, "a=rtpmap:{} {}/{}/{}", fmt, enc_name, clock_rate, params)
+                    write!(f, "a=rtpmap:{fmt} {enc_name}/{clock_rate}/{params}")
                 } else {
-                    write!(f, "a=rtpmap:{} {}/{}", fmt, enc_name, clock_rate)
+                    write!(f, "a=rtpmap:{fmt} {enc_name}/{clock_rate}")
                 }
             }
         }
@@ -42,14 +45,10 @@ impl FromStr for Attribute {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once(':') {
-            Some((CANDIDATE_ATTR_KEY, value)) => {
-                parse_candidate_attr_values(value).map_err(|_| ())
-            },
+            Some((CANDIDATE_ATTR_KEY, value)) => parse_candidate_attr_values(value).map_err(|_| ()),
 
-            Some((RTPMAP_ATTR_KEY, value)) => {
-                parse_rptmap_attr_values(value)
-            },
-            _ => Err(())
+            Some((RTPMAP_ATTR_KEY, value)) => parse_rptmap_attr_values(value),
+            _ => Err(()),
         }
     }
 }
@@ -65,13 +64,18 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, ()> {
     let mut parts = parts[1].split('/');
     let encoding_name = parts.next().ok_or(())?;
     let clock_rate = parts.next().ok_or(())?.parse::<u32>().map_err(|_| ())?;
-    let encoding_params = parts.next().map(|s| s.to_string());
+    let encoding_params = parts.next().map(std::string::ToString::to_string);
 
     if parts.next().is_some() {
         return Err(());
     }
 
-    Ok(Attribute::RTPMap(fmt, encoding_name.into(), clock_rate, encoding_params))
+    Ok(Attribute::RTPMap(
+        fmt,
+        encoding_name.into(),
+        clock_rate,
+        encoding_params,
+    ))
 }
 
 fn parse_candidate_attr_values(values: &str) -> Result<Attribute, &'static str> {
@@ -86,17 +90,13 @@ fn parse_candidate_attr_values(values: &str) -> Result<Attribute, &'static str> 
 
     let transport = parts[2];
 
-    Ok(
-        Attribute::Candidate(
-            Candidate::new(
-                CandidateType::from_str(parts[7]).map_err(|_| "")?,
-                parts[3].parse::<u32>().map_err(|_| "Invalid priority")?,
-                parts[4].to_string(),
-                parts[5].parse::<u16>().map_err(|_| "Invalid port")?,
-                parts[1].parse::<u8>().map_err(|_| "Invalid component ID")?,
-                parts[0].to_string(),
-                transport.into(),
-            )
-        )
-    )
+    Ok(Attribute::Candidate(Candidate::new(
+        CandidateType::from_str(parts[7]).map_err(|()| "")?,
+        parts[3].parse::<u32>().map_err(|_| "Invalid priority")?,
+        parts[4].to_string(),
+        parts[5].parse::<u16>().map_err(|_| "Invalid port")?,
+        parts[1].parse::<u8>().map_err(|_| "Invalid component ID")?,
+        parts[0].to_string(),
+        transport.into(),
+    )))
 }

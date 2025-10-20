@@ -1,9 +1,12 @@
+use std::collections::HashSet;
 use std::{
     io::{BufRead, Write},
-    str::FromStr,
 };
-use std::collections::HashSet;
-use roomrtc::{ice::IceAgent, media_description::MediaDescription, sdp::SessionDescriptionProtocol, attribute::Attribute};
+use std::str::FromStr;
+use roomrtc::{
+    ice::IceAgent,
+    sdp::{Attribute, SessionDescriptionProtocol, MediaDescription}
+};
 
 const MEDIA_TYPE: &str = "video";
 const MEDIA_PORT: u16 = 4000;
@@ -31,12 +34,19 @@ impl Client {
             HashSet::from([MEDIA_FMT]),
         );
         media_description
-            .add_attribute(Attribute::RTPMap(111, "OPUS".into(), 48000, Some("2".into())))
+            .add_attribute(Attribute::RTPMap(
+                111,
+                "OPUS".into(),
+                48000,
+                Some("2".into()),
+            ))
             .unwrap();
 
         // Add our ICE candidate to the media description
         if let Some(candidate) = ice_agent.get_local_candidate() {
-            media_description.add_attribute(Attribute::Candidate(candidate.clone())).unwrap();
+            media_description
+                .add_attribute(Attribute::Candidate(candidate.clone()))
+                .unwrap();
         }
 
         // Create SDP with our media description
@@ -44,7 +54,11 @@ impl Client {
 
         // Set connection info using our local IP
         if let Some(local_candidate) = ice_agent.get_local_candidate() {
-            sdp.set_connection_data("IN".into(), "IP4".into(), local_candidate.address.clone());
+            sdp.set_connection_data(
+                "IN".into(),
+                "IP4".into(),
+                local_candidate.address.clone().as_str(),
+            );
         }
 
         Self { sdp, ice_agent }
@@ -57,7 +71,7 @@ impl Client {
     ) -> Result<(), ()> {
         // Send our SDP offer
         out_buff.write_all(self.sdp.to_string().as_bytes()).unwrap();
-        out_buff.write_all("\n".as_bytes()).unwrap();
+        out_buff.write_all(b"\n").unwrap();
         out_buff.flush().unwrap();
 
         // Read the complete SDP answer
@@ -69,11 +83,11 @@ impl Client {
             }
             answer.push_str(&line);
         }
-        let sdp_answer = SessionDescriptionProtocol::from_str(&answer).map_err(|_| ())?;
+        let sdp_answer = SessionDescriptionProtocol::from_str(&answer).map_err(|()| ())?;
         eprintln!("Answer received");
 
         // Find and process the remote ICE candidate
-        
+
         self.process_remote_sdp(&sdp_answer)
     }
 
@@ -82,7 +96,6 @@ impl Client {
         mut in_buff: R,
         mut out_buff: W,
     ) -> Result<(), ()> {
-
         let mut offer_string = String::new();
         // Read the complete SDP offer
         loop {
@@ -95,13 +108,15 @@ impl Client {
         }
 
         // Parse offer to make sure it's valid
-        let sdp_offer = SessionDescriptionProtocol::from_str(&offer_string).map_err(|_| ())?;
+        let sdp_offer = SessionDescriptionProtocol::from_str(&offer_string).map_err(|()| ())?;
         eprintln!("Offer received");
 
         // Send our SDP answer
-        let sdp_answer = self.sdp.create_answer(&sdp_offer).map_err(|_| ())?;
-        out_buff.write_all(sdp_answer.to_string().as_bytes()).unwrap();
-        out_buff.write_all("\n".as_bytes()).unwrap();
+        let sdp_answer = self.sdp.create_answer(&sdp_offer).map_err(|()| ())?;
+        out_buff
+            .write_all(sdp_answer.to_string().as_bytes())
+            .unwrap();
+        out_buff.write_all(b"\n").unwrap();
         out_buff.flush().unwrap();
 
         // Extract and process the remote ICE candidate from the offer
@@ -111,10 +126,12 @@ impl Client {
     fn process_remote_sdp(&mut self, sdp: &SessionDescriptionProtocol) -> Result<(), ()> {
         for md in &sdp.media_descriptions {
             for candidate in md.get_candidates() {
-                self.ice_agent.add_remote_candidate(candidate.clone()).map_err(|_| ())?;
+                self.ice_agent
+                    .add_remote_candidate(candidate.clone())
+                    .map_err(|_| ())?;
             }
         }
-        
+
         self.ice_agent.start_connectivity_checks().map_err(|_| ())
     }
 }

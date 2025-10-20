@@ -19,7 +19,10 @@ fn main() {
             }
         }
         "1" => {
-            if client.answer_sdp(BufReader::new(stdin()), stdout()).is_err() {
+            if client
+                .answer_sdp(BufReader::new(stdin()), stdout())
+                .is_err()
+            {
                 eprintln!();
             }
         }

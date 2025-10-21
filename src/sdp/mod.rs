@@ -1,7 +1,7 @@
 mod attribute;
 mod media_description;
 mod session_description;
-mod sdp_errors;
+mod error;
 
 pub use self::attribute::Attribute;
 pub use self::media_description::MediaDescription;

@@ -7,7 +7,7 @@ use roomrtc::{
     ice::IceAgent,
     sdp::{Attribute, SessionDescriptionProtocol, MediaDescription}
 };
-use super::client_errors::ClientError as Error;
+use super::error::ClientError as Error;
 
 
 const MEDIA_TYPE: &str = "video";

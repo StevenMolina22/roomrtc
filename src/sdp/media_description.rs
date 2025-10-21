@@ -3,7 +3,7 @@ use crate::ice::Candidate;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
-use super::sdp_errors::SdpError as Error;
+use super::error::SdpError as Error;
 /*
 #[derive(Debug, PartialEq, Eq)]
 pub enum MediaDescriptionError {

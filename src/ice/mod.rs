@@ -3,7 +3,7 @@ mod candidate;
 mod candidate_pair;
 mod connectivity_state;
 mod ice_agent;
-mod ice_errors;
+mod error;
 
 pub use self::candidate_type::CandidateType;
 pub use self::candidate::Candidate;

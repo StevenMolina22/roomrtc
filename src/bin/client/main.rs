@@ -1,5 +1,5 @@
 mod client;
-mod client_errors;
+mod error;
 
 use crate::client::Client;
 use std::env::args;

@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use super::ice_errors::IceError as Error;
+use super::error::IceError as Error;
 #[derive(Clone)]
 pub enum CandidateType {
     Host,

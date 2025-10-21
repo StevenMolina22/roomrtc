@@ -85,7 +85,7 @@ impl Client {
             }
             answer.push_str(&line);
         }
-        let sdp_answer = SessionDescriptionProtocol::from_str(&answer).map_err(|_| Error::SdpCreationError)?;
+        let sdp_answer = SessionDescriptionProtocol::from_str(&answer).map_err(|e| Error::SdpCreationError(e.to_string()))?;
         eprintln!("Answer received");
 
         // Find and process the remote ICE candidate
@@ -110,11 +110,11 @@ impl Client {
         }
 
         // Parse offer to make sure it's valid
-        let sdp_offer = SessionDescriptionProtocol::from_str(&offer_string).map_err(|_| Error::SdpCreationError)?;
+        let sdp_offer = SessionDescriptionProtocol::from_str(&offer_string).map_err(|e| Error::SdpCreationError(e.to_string()))?;
         eprintln!("Offer received");
 
         // Send our SDP answer
-        let sdp_answer = self.sdp.create_answer(&sdp_offer).map_err(|_| Error::SdpCreationError)?;
+        let sdp_answer = self.sdp.create_answer(&sdp_offer).map_err(|e| Error::SdpCreationError(e.to_string()))?;
         out_buff
             .write_all(sdp_answer.to_string().as_bytes())
             .unwrap();
@@ -130,10 +130,10 @@ impl Client {
             for candidate in md.get_candidates() {
                 self.ice_agent
                     .add_remote_candidate(candidate.clone())
-                    .map_err(|_| Error::IceConnectionError)?;
+                    .map_err(|e| Error::IceConnectionError(e.to_string()))?;
             }
         }
 
-        self.ice_agent.start_connectivity_checks().map_err(|_| Error::IceConnectionError)
+        self.ice_agent.start_connectivity_checks().map_err(|e| Error::IceConnectionError(e.to_string()))
     }
 }

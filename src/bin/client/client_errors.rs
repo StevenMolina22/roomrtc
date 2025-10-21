@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-#[derive(Debug)]
+#[derive(Eq, PartialEq, Debug)]
 pub enum ClientError {
     SdpCreationError,
     IceConnectionError,

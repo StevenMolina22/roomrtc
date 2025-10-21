@@ -1,6 +1,6 @@
 use super::Attribute;
 use super::MediaDescription;
-use super::sdp_errors::SdpErrors as Error;
+use super::sdp_errors::SdpError as Error;
 
 use std::collections::HashSet;
 use std::fmt::Display;

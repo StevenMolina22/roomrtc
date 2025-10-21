@@ -1,7 +1,7 @@
 use super::candidate::Candidate;
 use super::candidate_pair::CandidatePair;
 use super::connectivity_state::ConnectivityState;
-use super::ice_errors::IceErrors as Error;
+use super::ice_errors::IceError as Error;
 
 pub struct IceAgent {
     local_candidates: Vec<Candidate>,

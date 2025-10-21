@@ -2,7 +2,7 @@ use crate::ice::Candidate;
 use crate::ice::CandidateType;
 use std::fmt;
 use std::str::FromStr;
-use super::sdp_errors::SdpErrors as Error;
+use super::sdp_errors::SdpError as Error;
 
 const CANDIDATE_ATTR_KEY: &str = "candidate";
 const RTPMAP_ATTR_KEY: &str = "rtpmap";

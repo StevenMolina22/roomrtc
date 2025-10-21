@@ -1,9 +1,10 @@
-use crate::sdp::Attribute;
+use super::Attribute;
 use crate::ice::Candidate;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
-
+use super::sdp_errors::SdpErrors as Error;
+/*
 #[derive(Debug, PartialEq, Eq)]
 pub enum MediaDescriptionError {
     InvalidAttributeFormat,
@@ -23,6 +24,8 @@ impl Display for MediaDescriptionError {
 
 impl std::error::Error for MediaDescriptionError {}
 
+ */
+
 pub struct MediaDescription {
     pub media_type: String,
     pub port: u16,
@@ -32,19 +35,19 @@ pub struct MediaDescription {
 }
 
 impl FromStr for MediaDescription {
-    type Err = ();
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s_vec: Vec<&str> = s.split_whitespace().collect();
         if s_vec.len() < 4 {
-            return Err(());
+            return Err(Error::InvalidMediaDescriptionFormatError);
         }
 
-        let port = s_vec[1].parse::<u16>().map_err(|_| ())?;
+        let port = s_vec[1].parse::<u16>().map_err(|_| Error::InvalidPortError)?;
 
         let mut parsed_fmt = HashSet::new();
         for f_string in &s_vec[3..] {
-            let fmt = f_string.parse::<u8>().map_err(|_| ())?;
+            let fmt = f_string.parse::<u8>().map_err(|_| Error::InvalidFmtError)?;
             parsed_fmt.insert(fmt);
         }
 
@@ -85,11 +88,11 @@ impl MediaDescription {
         }
     }
 
-    pub fn add_attribute(&mut self, attr: Attribute) -> Result<(), MediaDescriptionError> {
+    pub fn add_attribute(&mut self, attr: Attribute) -> Result<(), Error> {
         if let Attribute::RTPMap(fmt, _, _, _) = &attr
             && !self.fmts.contains(fmt)
         {
-            return Err(MediaDescriptionError::InvalidFormat);
+            return Err(Error::InvalidMediaDescriptionFormatError);
         }
 
         self.attributes.push(attr);

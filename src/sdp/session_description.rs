@@ -1,5 +1,6 @@
-use crate::sdp::Attribute;
-use crate::sdp::MediaDescription;
+use super::Attribute;
+use super::MediaDescription;
+use super::sdp_errors::SdpErrors as Error;
 
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -18,7 +19,7 @@ pub struct SessionDescriptionProtocol {
 }
 
 impl FromStr for SessionDescriptionProtocol {
-    type Err = ();
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut media_descriptions = Vec::new();
@@ -30,7 +31,7 @@ impl FromStr for SessionDescriptionProtocol {
             }
 
             let Some((key, value)) = line.split_once('=') else {
-                return Err(());
+                return Err(Error::InvalidMediaDescriptionFormatError);
             };
 
             match key {
@@ -75,7 +76,7 @@ impl SessionDescriptionProtocol {
         }
     }
 
-    pub fn create_answer(&self, offer_sdp: &Self) -> Result<Self, ()> {
+    pub fn create_answer(&self, offer_sdp: &Self) -> Result<Self, Error> {
         let mut answer_media_descriptions = Vec::new();
 
         for local_md in &self.media_descriptions {
@@ -86,8 +87,7 @@ impl SessionDescriptionProtocol {
             {
                 let (answer_md_fmts, answer_md_attributes) =
                     compatible_attributes_data(local_md, offer_md);
-                let answer_md = create_answer_md(local_md, answer_md_fmts, answer_md_attributes)
-                    .map_err(|()| ())?;
+                let answer_md = create_answer_md(local_md, answer_md_fmts, answer_md_attributes)?;
                 answer_media_descriptions.push(answer_md);
             }
         }
@@ -130,7 +130,7 @@ fn create_answer_md(
     local_md: &MediaDescription,
     answer_md_fmts: HashSet<u8>,
     answer_md_attributes: Vec<Attribute>,
-) -> Result<MediaDescription, ()> {
+) -> Result<MediaDescription, Error> {
     let mut answer_md = MediaDescription::new(
         local_md.media_type.clone(),
         if answer_md_attributes.is_empty() {
@@ -143,7 +143,7 @@ fn create_answer_md(
     );
 
     for attr in answer_md_attributes {
-        answer_md.add_attribute(attr).map_err(|_| ())?;
+        answer_md.add_attribute(attr)?;
     }
 
     Ok(answer_md)
@@ -152,7 +152,7 @@ fn create_answer_md(
 fn handle_media_description_line(
     line: &str,
     media_descriptions: &mut Vec<MediaDescription>,
-) -> Result<(), ()> {
+) -> Result<(), Error> {
     media_descriptions.push(MediaDescription::from_str(line)?);
     Ok(())
 }
@@ -160,12 +160,12 @@ fn handle_media_description_line(
 fn handle_attribute_line(
     line: &str,
     media_descriptions: &mut [MediaDescription],
-) -> Result<(), ()> {
+) -> Result<(), Error> {
     let attribute = Attribute::from_str(line)?;
 
     match media_descriptions.last_mut() {
-        Some(m) => m.add_attribute(attribute).map_err(|_| ())?,
-        None => return Err(()),
+        Some(m) => m.add_attribute(attribute)?,
+        None => return Err(Error::MissingMediaDescriptionError),
     }
     Ok(())
 }

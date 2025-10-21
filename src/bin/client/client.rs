@@ -7,6 +7,8 @@ use roomrtc::{
     ice::IceAgent,
     sdp::{Attribute, SessionDescriptionProtocol, MediaDescription}
 };
+use super::client_errors::ClientError as Error;
+
 
 const MEDIA_TYPE: &str = "video";
 const MEDIA_PORT: u16 = 4000;
@@ -55,8 +57,8 @@ impl Client {
         // Set connection info using our local IP
         if let Some(local_candidate) = ice_agent.get_local_candidate() {
             sdp.set_connection_data(
-                "IN".into(),
-                "IP4".into(),
+                "IN",
+                "IP4",
                 local_candidate.address.clone().as_str(),
             );
         }
@@ -68,7 +70,7 @@ impl Client {
         &mut self,
         mut in_buff: R,
         mut out_buff: W,
-    ) -> Result<(), ()> {
+    ) -> Result<(), Error> {
         // Send our SDP offer
         out_buff.write_all(self.sdp.to_string().as_bytes()).unwrap();
         out_buff.write_all(b"\n").unwrap();
@@ -83,7 +85,7 @@ impl Client {
             }
             answer.push_str(&line);
         }
-        let sdp_answer = SessionDescriptionProtocol::from_str(&answer).map_err(|()| ())?;
+        let sdp_answer = SessionDescriptionProtocol::from_str(&answer).map_err(|_| Error::SdpCreationError)?;
         eprintln!("Answer received");
 
         // Find and process the remote ICE candidate
@@ -95,7 +97,7 @@ impl Client {
         &mut self,
         mut in_buff: R,
         mut out_buff: W,
-    ) -> Result<(), ()> {
+    ) -> Result<(), Error> {
         let mut offer_string = String::new();
         // Read the complete SDP offer
         loop {
@@ -108,11 +110,11 @@ impl Client {
         }
 
         // Parse offer to make sure it's valid
-        let sdp_offer = SessionDescriptionProtocol::from_str(&offer_string).map_err(|()| ())?;
+        let sdp_offer = SessionDescriptionProtocol::from_str(&offer_string).map_err(|_| Error::SdpCreationError)?;
         eprintln!("Offer received");
 
         // Send our SDP answer
-        let sdp_answer = self.sdp.create_answer(&sdp_offer).map_err(|()| ())?;
+        let sdp_answer = self.sdp.create_answer(&sdp_offer).map_err(|_| Error::SdpCreationError)?;
         out_buff
             .write_all(sdp_answer.to_string().as_bytes())
             .unwrap();
@@ -123,15 +125,15 @@ impl Client {
         self.process_remote_sdp(&sdp_offer)
     }
 
-    fn process_remote_sdp(&mut self, sdp: &SessionDescriptionProtocol) -> Result<(), ()> {
+    fn process_remote_sdp(&mut self, sdp: &SessionDescriptionProtocol) -> Result<(), Error> {
         for md in &sdp.media_descriptions {
             for candidate in md.get_candidates() {
                 self.ice_agent
                     .add_remote_candidate(candidate.clone())
-                    .map_err(|_| ())?;
+                    .map_err(|_| Error::IceConnectionError)?;
             }
         }
 
-        self.ice_agent.start_connectivity_checks().map_err(|_| ())
+        self.ice_agent.start_connectivity_checks().map_err(|_| Error::IceConnectionError)
     }
 }

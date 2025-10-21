@@ -1,5 +1,5 @@
 use std::str::FromStr;
-
+use super::ice_errors::IceErrors as Error;
 #[derive(Clone)]
 pub enum CandidateType {
     Host,
@@ -27,13 +27,13 @@ impl std::fmt::Display for CandidateType {
 }
 
 impl FromStr for CandidateType {
-    type Err = ();
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "host" => Ok(Self::Host),
             "srflx" => Ok(Self::ServerReflexive),
-            _ => Err(()),
+            _ => Err(Error::InvalidCandidateType),
         }
     }
 }

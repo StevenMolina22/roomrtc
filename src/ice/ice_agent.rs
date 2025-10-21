@@ -1,6 +1,7 @@
-use crate::ice::candidate::Candidate;
-use crate::ice::candidate_pair::CandidatePair;
-use crate::ice::connectivity_state::ConnectivityState;
+use super::candidate::Candidate;
+use super::candidate_pair::CandidatePair;
+use super::connectivity_state::ConnectivityState;
+use super::ice_errors::IceErrors as Error;
 
 pub struct IceAgent {
     local_candidates: Vec<Candidate>,
@@ -29,7 +30,7 @@ impl IceAgent {
 
     /// Gathers local candidates (available IP addresses)
     /// This implementation only gets the local IP
-    pub fn gather_candidates(&mut self, port: u16) -> Result<(), String> {
+    pub fn gather_candidates(&mut self, port: u16) -> Result<(), Error> {
         // Find my local IP and create a candidate
         let local_ip = get_local_ip()?;
         let mut candidate = Candidate::new_host(local_ip, 1);
@@ -41,22 +42,26 @@ impl IceAgent {
     }
 
     /// Adds a single remote candidate and creates pairs
-    pub fn add_remote_candidate(&mut self, candidate: Candidate) -> Result<(), String> {
+    pub fn add_remote_candidate(&mut self, candidate: Candidate) -> Result<(), Error> {
         self.remote_candidates.push(candidate);
         self.create_candidate_pair()
     }
 
     /// Adds remote candidates received from the other peer and creates candidate pairs
-    pub fn add_remote_candidates(&mut self, candidates: Vec<Candidate>) -> Result<(), String> {
+    pub fn add_remote_candidates(&mut self, candidates: Vec<Candidate>) -> Result<(), Error> {
         for candidate in candidates {
             self.remote_candidates.push(candidate);
         }
         self.create_candidate_pair()
     }
 
-    fn create_candidate_pair(&mut self) -> Result<(), String> {
-        if self.local_candidates.is_empty() || self.remote_candidates.is_empty() {
-            return Err("No candidates available to create a pair".into());
+    fn create_candidate_pair(&mut self) -> Result<(), Error> {
+        if self.local_candidates.is_empty() {
+            return Err(Error::NoLocalCandidates);
+        }
+
+        if self.remote_candidates.is_empty() {
+            return Err(Error::NoRemoteCandidates);
         }
 
         for local in &self.local_candidates {
@@ -69,9 +74,9 @@ impl IceAgent {
     }
 
     /// Starts connectivity checks and selects the best pair
-    pub fn start_connectivity_checks(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn start_connectivity_checks(&mut self) -> Result<(), Error> {
         if self.candidate_pairs.is_empty() {
-            return Err("No candidate pairs to verify".into());
+            return Err(Error::NoCandidatePairs);
         }
 
         // The first pair is selected (highest priority)
@@ -107,12 +112,12 @@ impl IceAgent {
 }
 
 /// Gets the local IP using if_addrs
-fn get_local_ip() -> Result<String, String> {
+fn get_local_ip() -> Result<String, Error> {
     // Get all network interfaces
     // returns a list with Interface type objects
     // each Interface has name, addr, index, oper_status and is_loopback() method
     let interfaces =
-        if_addrs::get_if_addrs().map_err(|e| format!("Error getting interfaces: {e}"))?;
+        if_addrs::get_if_addrs().map_err(|_| Error::NetworkInterfaceError)?;
 
     // Find the first interface that is not loopback
     // loopback is a virtual internal interface of the operating system (doesn't connect any local network)
@@ -122,5 +127,5 @@ fn get_local_ip() -> Result<String, String> {
         }
     }
 
-    Err("No network interface found".to_string())
+    Err(Error::NoNetworkInterfaceFound)
 }

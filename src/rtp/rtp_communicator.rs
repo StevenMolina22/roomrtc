@@ -54,6 +54,7 @@ impl RtpSender {
 
 pub struct RtpReceiver {
     socket: UdpSocket,
+    last_sequence_number: Option<u16>,
 }
 
 impl RtpReceiver {
@@ -68,15 +69,22 @@ impl RtpReceiver {
         let socket = UdpSocket::bind(bind_addr).map_err(|e| Error::new(ErrorKind::AddrNotAvailable, e))?;
         socket.set_nonblocking(true).map_err(|e| Error::new(ErrorKind::Other, e))?;
 
-        Ok(Self { socket })
+        Ok(Self { socket, last_sequence_number: None })
     }
 
     /// Intenta recibir un paquete RTP. Devuelve Some(RtpPackage) si llegó un paquete, None si no hay datos
-    pub fn try_receive(&self) -> Result<Option<RtpPackage>, Error> {
+    pub fn try_receive(&mut self) -> Result<Option<RtpPackage>, Error> {
         let mut buf = [0u8; 1500]; // MTU típico de red
         match self.socket.recv(&mut buf) {
             Ok(size) => {
                 if let Some(pkg) = RtpPackage::from_bytes(&buf[..size]) {
+                    if let Some(last_seq) = self.last_sequence_number {
+                        let expected = last_seq.wrapping_add(1);
+                        if pkg.sequence_number != expected {
+                            //Generate RTCP to notify a package loss
+                        }
+                    }
+                    self.last_sequence_number = Some(pkg.sequence_number);
                     Ok(Some(pkg))
                 } else {
                     Err(Error::new(ErrorKind::InvalidData, "RTP parse error"))

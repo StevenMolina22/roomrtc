@@ -6,7 +6,7 @@ fn main() -> Result<(), Error> {
     let dest: SocketAddr = "127.0.0.1:5004".parse().unwrap();
     let mut sender = RtpSender::new(dest, 1234)?;
 
-    let receiver = RtpReceiver::new(5004)?;
+    let mut receiver = RtpReceiver::new(5004)?;
 
     // Enviar un paquete RTP “falso”
     sender.send(b"Hola RTP", 96, 0, true)?;

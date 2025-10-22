@@ -1,11 +1,13 @@
+#[derive(Debug, Clone)]
+
 pub struct RtpPackage {
     version: u8,
     marker: bool,
     payload_type: u8,
-    sequence_number: u16,
-    timestamp: u32,
+    pub sequence_number: u16,
+    pub timestamp: u32,
     ssrc: u32,
-    payload: Vec<u8>,
+    pub payload: Vec<u8>,
 }
 
 impl RtpPackage {
@@ -35,6 +37,30 @@ impl RtpPackage {
         buf.extend_from_slice(&self.payload);
 
         buf
+    }
+
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+        if data.len() < 12 {
+            return None;
+        }
+
+        let version = data[0] >> 6;
+        let marker = (data[0] & 0x80) != 0;
+        let payload_type = data[1];
+        let sequence_number = u16::from_be_bytes([data[2], data[3]]);
+        let timestamp = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+        let ssrc = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
+        let payload = data[12..].to_vec();
+
+        Some(Self {
+            version,
+            marker,
+            payload_type,
+            sequence_number,
+            timestamp,
+            ssrc,
+            payload,
+        })
     }
 }
 

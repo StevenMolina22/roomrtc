@@ -11,7 +11,7 @@ fn main() {
         return;
     }
 
-    // Create dummy channels for the CLI, which doesn't have a GUI.
+    // Create dummy channels for the CLI
     let (local_tx, _local_rx) = mpsc::channel();
     let (remote_tx, _remote_rx) = mpsc::channel();
 
@@ -21,7 +21,7 @@ fn main() {
         "0" => {
             // Offerer: Print offer, wait for answer
             let offer = client.get_offer();
-            println!("{}", offer); // Print offer to stdout
+            println!("{}", offer);
 
             // Read answer from stdin
             let mut answer_str = String::new();
@@ -46,7 +46,7 @@ fn main() {
             // Process offer and get answer
             match client.process_offer(&offer_str) {
                 Ok(answer_sdp) => {
-                    println!("{}", answer_sdp); // Print answer to stdout
+                    println!("{}", answer_sdp);
                 }
                 Err(e) => {
                     eprintln!("Error processing offer: {}", e);

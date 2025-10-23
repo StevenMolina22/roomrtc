@@ -22,7 +22,7 @@ pub struct Client {
     pub sdp: SessionDescriptionProtocol,
     pub ice_agent: IceAgent,
     // media
-    pub local_video_sender: Sender<VideoFrame>, // For "self-view"
+    pub local_video_sender: Sender<VideoFrame>, // For self-view
     pub remote_video_sender: Sender<VideoFrame>, // For decoded peer video
     pub rtp_sender: Option<Arc<Mutex<RtpSender>>>, // Will be set after handshake
     pub rtp_receiver: Option<Arc<Mutex<RtpReceiver>>>, // Will be set after handshake
@@ -106,7 +106,7 @@ impl Client {
             .map_err(|e| Error::SdpCreationError(e.to_string()))?;
 
         // Process remote candidates
-        self.process_remote_sdp(&sdp_answer);
+        self.process_remote_sdp(&sdp_answer)?;
 
         if let Some(pair) = self.ice_agent.get_selected_pair() {
             self.start_media_threads(pair.clone())?;

@@ -1,11 +1,15 @@
-use crate::client::client::Client;
-
-use super::views::View;
+use crate::{
+    client::client::{Client, VideoFrame},
+    ui::views::View,
+};
 use eframe::egui;
+use std::sync::mpsc::{self, Receiver};
 
 pub struct RoomRTCApp {
     view: View,
     client: Option<Client>,
+    local_video_receiver: Option<Receiver<VideoFrame>>,
+    remote_video_receiver: Option<Receiver<VideoFrame>>,
 }
 
 impl Default for RoomRTCApp {
@@ -13,6 +17,8 @@ impl Default for RoomRTCApp {
         Self {
             view: View::Menu,
             client: None,
+            local_video_receiver: None,
+            remote_video_receiver: None,
         }
     }
 }
@@ -25,15 +31,23 @@ impl eframe::App for RoomRTCApp {
             match &mut self.view {
                 View::Menu => {
                     ui.vertical_centered(|ui| {
-                        ui.heading("RoomRTC");
-                        ui.add_space(20.0);
-
+                        // ...
                         let create_btn = egui::Button::new("Create Call (Offer)")
                             .min_size(egui::vec2(200.0, 40.0));
                         if ui.add_sized([200.0, 40.0], create_btn).clicked() {
-                            let client = Client::new();
+                            // 1. Create channels
+                            let (local_tx, local_rx) = mpsc::channel();
+                            let (remote_tx, remote_rx) = mpsc::channel();
+
+                            // 2. Pass Senders to Client
+                            let client = Client::new(local_tx, remote_tx);
                             let our_offer = client.get_offer();
+
+                            // 3. Store Client and Receivers in App
                             self.client = Some(client);
+                            self.local_video_receiver = Some(local_rx);
+                            self.remote_video_receiver = Some(remote_rx);
+
                             self.view = View::Connecting {
                                 our_offer,
                                 remote_sdp: String::new(),
@@ -46,8 +60,18 @@ impl eframe::App for RoomRTCApp {
                         let join_btn = egui::Button::new("Join Call (Answer)")
                             .min_size(egui::vec2(200.0, 40.0));
                         if ui.add_sized([200.0, 40.0], join_btn).clicked() {
-                            let client = Client::new();
+                            // 1. Create channels
+                            let (local_tx, local_rx) = mpsc::channel();
+                            let (remote_tx, remote_rx) = mpsc::channel();
+
+                            // 2. Pass Senders to Client
+                            let client = Client::new(local_tx, remote_tx);
+
+                            // 3. Store Client and Receivers in App
                             self.client = Some(client);
+                            self.local_video_receiver = Some(local_rx);
+                            self.remote_video_receiver = Some(remote_rx);
+
                             self.view = View::Connecting {
                                 our_offer: String::new(), // Empty indicates we are answerer
                                 remote_sdp: String::new(),
@@ -69,7 +93,7 @@ impl eframe::App for RoomRTCApp {
                         ui.heading("You are the Offerer");
                         ui.separator();
                         ui.label("1. Copy your offer and send it to the other user:");
-                        ui.add(egui::TextEdit::multiline(our_offer).interactive(false));
+                        ui.add(egui::TextEdit::multiline(&mut our_offer.clone()));
                         ui.separator();
 
                         ui.label("2. Paste the remote user's answer below:");
@@ -109,7 +133,7 @@ impl eframe::App for RoomRTCApp {
                         if let Some(answer_str) = our_answer {
                             ui.separator();
                             ui.label("2. Copy your answer and send it back:");
-                            ui.add(egui::TextEdit::multiline(answer_str).interactive(false));
+                            ui.add(egui::TextEdit::multiline(&mut answer_str.clone()));
                             ui.label("Connection established. Waiting for remote...");
                             // We can go to 'Call' view immediately
                             // as our client logic already processed the offer.

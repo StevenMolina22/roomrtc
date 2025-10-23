@@ -1,5 +1,6 @@
 use std::env::args;
 use std::io::{Read, stdin};
+use std::sync::mpsc;
 
 use roomrtc::client::client::Client;
 
@@ -10,7 +11,12 @@ fn main() {
         return;
     }
 
-    let mut client = Client::new();
+    // Create dummy channels for the CLI, which doesn't have a GUI.
+    let (local_tx, _local_rx) = mpsc::channel();
+    let (remote_tx, _remote_rx) = mpsc::channel();
+
+    let mut client = Client::new(local_tx, remote_tx);
+
     match argv[1].as_str() {
         "0" => {
             // Offerer: Print offer, wait for answer

@@ -1,22 +1,38 @@
-use std::collections::HashSet;
-use std::str::FromStr;
-
 use crate::client::error::ClientError as Error;
 use crate::ice::IceAgent;
+use crate::rtp::rtp_communicator::{RtpReceiver, RtpSender};
 use crate::sdp::{Attribute, MediaDescription, SessionDescriptionProtocol};
+use std::collections::HashSet;
+use std::str::FromStr;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 const MEDIA_TYPE: &str = "video";
 const MEDIA_PORT: u16 = 4000;
 const MEDIA_PROTOCOL: &str = "RTP/AVP";
 const MEDIA_FMT: u8 = 111;
 
+pub struct VideoFrame {
+    pub rgb_data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
 pub struct Client {
     pub sdp: SessionDescriptionProtocol,
-    ice_agent: IceAgent,
+    pub ice_agent: IceAgent,
+    // media
+    pub local_video_sender: Sender<VideoFrame>, // For "self-view"
+    pub remote_video_sender: Sender<VideoFrame>, // For decoded peer video
+    pub rtp_sender: Option<Arc<Mutex<RtpSender>>>, // Will be set after handshake
+    pub rtp_receiver: Option<Arc<Mutex<RtpReceiver>>>, // Will be set after handshake
 }
 
 impl Client {
-    pub fn new() -> Self {
+    pub fn new(
+        local_video_sender: Sender<VideoFrame>,
+        remote_video_sender: Sender<VideoFrame>,
+    ) -> Self {
         // Create ICE agent and gather network candidates
         let mut ice_agent = IceAgent::new();
         if ice_agent.gather_candidates(MEDIA_PORT).is_err() {
@@ -54,7 +70,14 @@ impl Client {
             sdp.set_connection_data("IN", "IP4", local_candidate.address.clone().as_str());
         }
 
-        Self { sdp, ice_agent }
+        Self {
+            sdp,
+            ice_agent,
+            local_video_sender,
+            remote_video_sender,
+            rtp_sender: None,
+            rtp_receiver: None,
+        }
     }
 
     /// Processes a remote offer, starts ICE, and returns an answer string.
@@ -64,6 +87,11 @@ impl Client {
 
         // Process remote candidates
         self.process_remote_sdp(&sdp_offer)?;
+
+        // Start media on success
+        if let Some(pair) = self.ice_agent.get_selected_pair() {
+            self.start_media_threads(pair.clone())?;
+        }
 
         // Create and return answer
         self.sdp
@@ -78,7 +106,18 @@ impl Client {
             .map_err(|e| Error::SdpCreationError(e.to_string()))?;
 
         // Process remote candidates
-        self.process_remote_sdp(&sdp_answer)
+        self.process_remote_sdp(&sdp_answer);
+
+        if let Some(pair) = self.ice_agent.get_selected_pair() {
+            self.start_media_threads(pair.clone())?;
+        }
+
+        Ok(())
+    }
+
+    /// Returns this client's SDP offer string.
+    pub fn get_offer(&self) -> String {
+        self.sdp.to_string()
     }
 
     /// Private helper to extract ICE candidates from any SDP and start ICE.
@@ -94,10 +133,5 @@ impl Client {
         self.ice_agent
             .start_connectivity_checks()
             .map_err(|e| Error::IceConnectionError(e.to_string()))
-    }
-
-    /// Returns this client's SDP offer string.
-    pub fn get_offer(&self) -> String {
-        self.sdp.to_string()
     }
 }

@@ -37,3 +37,66 @@ impl std::fmt::Display for CandidatePair {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ice::candidate_type::CandidateType;
+    use crate::ice::connectivity_state::ConnectivityState;
+
+    fn build_candidate(priority: u32) -> Candidate {
+        Candidate {
+            candidate_type: CandidateType::Host,
+            priority,
+            address: "127.0.0.1".to_string(),
+            port: 5000,
+            component_id: 1,
+            foundation: "foundation".to_string(),
+            transport: "udp".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_candidate_pair_new_initialization() {
+        let local = build_candidate(100);
+        let remote = build_candidate(200);
+
+        let pair = CandidatePair::new(local.clone(), remote.clone());
+
+        assert_eq!(pair.local.priority, 100);
+        assert_eq!(pair.remote.priority, 200);
+        assert_eq!(pair.state, ConnectivityState::Waiting);
+    }
+
+    #[test]
+    fn test_candidate_pair_priority_calculation() {
+        // local = 300, remote = 100
+        let local = build_candidate(300);
+        let remote = build_candidate(100);
+
+        let pair = CandidatePair::new(local, remote);
+
+        // Fórmula:
+        // g = min(300, 100) = 100
+        // l = max(300, 100) = 300
+        // priority = (1<<32)*g + 2*l + (local > remote ? 1 : 0)
+        let expected = ((1u64 << 32) * 100) + (2 * 300) + 1;
+
+        assert_eq!(pair.priority, expected);
+    }
+
+    #[test]
+    fn test_candidate_pair_display() {
+        let local = build_candidate(123);
+        let remote = build_candidate(456);
+
+        let pair = CandidatePair::new(local, remote);
+
+        let display = format!("{}", pair);
+
+        assert!(display.contains("<->"));
+        assert!(display.contains("priority"));
+        assert!(display.contains("Waiting"));
+        assert!(display.contains("127.0.0.1:5000"));
+    }
+}

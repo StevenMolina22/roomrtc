@@ -116,8 +116,7 @@ fn get_local_ip() -> Result<String, Error> {
     // Get all network interfaces
     // returns a list with Interface type objects
     // each Interface has name, addr, index, oper_status and is_loopback() method
-    let interfaces =
-        if_addrs::get_if_addrs().map_err(|_| Error::NetworkInterfaceError)?;
+    let interfaces = if_addrs::get_if_addrs().map_err(|_| Error::NetworkInterfaceError)?;
 
     // Find the first interface that is not loopback
     // loopback is a virtual internal interface of the operating system (doesn't connect any local network)
@@ -128,4 +127,88 @@ fn get_local_ip() -> Result<String, Error> {
     }
 
     Err(Error::NoNetworkInterfaceFound)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ice::candidate::Candidate;
+    use crate::ice::candidate_type::CandidateType;
+
+    fn sample_remote_candidate() -> Candidate {
+        Candidate::new(
+            CandidateType::Host,
+            126,
+            "192.168.0.50".to_string(),
+            5000,
+            1,
+            "1".to_string(),
+            "udp".to_string(),
+        )
+    }
+
+    #[test]
+    fn test_new_agent_is_empty() {
+        let agent = IceAgent::new();
+
+        assert!(agent.local_candidates.is_empty());
+        assert!(agent.remote_candidates.is_empty());
+        assert!(agent.candidate_pairs.is_empty());
+        assert!(agent.get_selected_pair().is_none());
+    }
+
+    #[test]
+    fn test_gather_candidates_adds_local_candidate() {
+        let mut agent = IceAgent::new();
+
+        let result = agent.gather_candidates(3478);
+        assert!(result.is_ok());
+
+        assert_eq!(agent.local_candidates.len(), 1);
+        assert_eq!(agent.local_candidates[0].port, 3478);
+        assert_eq!(
+            agent.local_candidates[0].candidate_type,
+            CandidateType::Host
+        );
+    }
+
+    #[test]
+    fn test_add_remote_candidate_creates_pairs() {
+        let mut agent = IceAgent::new();
+        agent.gather_candidates(4000).unwrap();
+
+        let remote = sample_remote_candidate();
+
+        let result = agent.add_remote_candidate(remote.clone());
+        assert!(result.is_ok());
+
+        assert_eq!(agent.remote_candidates.len(), 1);
+        assert_eq!(agent.candidate_pairs.len(), 1);
+
+        let pair = &agent.candidate_pairs[0];
+        assert_eq!(pair.local.address, agent.local_candidates[0].address);
+        assert_eq!(pair.remote.address, remote.address);
+    }
+
+    #[test]
+    fn test_start_connectivity_checks_selects_pair() {
+        let mut agent = IceAgent::new();
+        agent.gather_candidates(4000).unwrap();
+
+        let remote = sample_remote_candidate();
+        agent.add_remote_candidate(remote).unwrap();
+
+        let result = agent.start_connectivity_checks();
+        assert!(result.is_ok());
+
+        let selected = agent.get_selected_pair().unwrap();
+        assert_eq!(selected.state, ConnectivityState::Succeeded);
+    }
+
+    #[test]
+    fn test_error_when_starting_checks_without_pairs() {
+        let mut agent = IceAgent::new();
+        let result = agent.start_connectivity_checks();
+        assert!(matches!(result, Err(Error::NoCandidatePairs)));
+    }
 }

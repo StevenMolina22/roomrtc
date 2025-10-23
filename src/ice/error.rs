@@ -19,7 +19,9 @@ pub enum IceError {
 impl Display for IceError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            IceError::NetworkInterfaceError => write!(f, "Error: \"could not obtain network interface\""),
+            IceError::NetworkInterfaceError => {
+                write!(f, "Error: \"could not obtain network interface\"")
+            }
             IceError::NoNetworkInterfaceFound => write!(f, "Error: \"no network interface found\""),
             IceError::InvalidCandidateAddress => write!(f, "Error: \"invalid candidate address\""),
             IceError::InvalidCandidatePort => write!(f, "Error: \"invalid candidate port\""),
@@ -28,8 +30,12 @@ impl Display for IceError {
             IceError::NoRemoteCandidates => write!(f, "Error: \"no remote candidate available\""),
             IceError::CandidatePairCreationFailed => write!(f, "Error: \"pair creation failed\""),
             IceError::NoCandidatePairs => write!(f, "Error: \"no candidate pairs available\""),
-            IceError::InvalidConnectivityState => write!(f, "Error: \"invalid connectivity state\""),
-            IceError::UnsupportedCandidateType => write!(f, "Error: \"unsupported candidate type\""),
+            IceError::InvalidConnectivityState => {
+                write!(f, "Error: \"invalid connectivity state\"")
+            }
+            IceError::UnsupportedCandidateType => {
+                write!(f, "Error: \"unsupported candidate type\"")
+            }
             IceError::InternalError => write!(f, "Error: \"internal error\""),
         }
     }

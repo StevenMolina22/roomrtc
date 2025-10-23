@@ -46,9 +46,7 @@ impl FromStr for Attribute {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once(':') {
-            Some((CANDIDATE_ATTR_KEY, value)) => {
-                parse_candidate_attr_values(value).map_err(|_| Error::InvalidCandidateParsingError)
-            }
+            Some((CANDIDATE_ATTR_KEY, value)) => parse_candidate_attr_values(value),
 
             Some((RTPMAP_ATTR_KEY, value)) => parse_rptmap_attr_values(value),
             _ => Err(Error::InvalidRtpMapFormatError),
@@ -68,11 +66,10 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
 
     let mut parts = parts[1].split('/');
     let encoding_name = parts.next().ok_or(Error::MissingEncodingNameError)?;
-    let clock_rate = parts
-        .next()
-        .ok_or(Error::MissingClockRateError)?
-        .parse::<u32>()
-        .map_err(|_| Error::InvalidClockRateParsingError)?;
+    if encoding_name.is_empty() {
+        return Err(Error::MissingEncodingNameError);
+    }
+    let clock_rate = parts.next().ok_or(Error::MissingClockRateError)?.parse::<u32>().map_err(|_| Error::InvalidClockRateParsingError)?;
     let encoding_params = parts.next().map(std::string::ToString::to_string);
 
     if parts.next().is_some() {
@@ -114,4 +111,180 @@ fn parse_candidate_attr_values(values: &str) -> Result<Attribute, Error> {
         parts[0].to_string(),
         transport.into(),
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ice::{Candidate, CandidateType};
+
+    #[test]
+    fn test_rtpmap_from_str_valid_basic() {
+        let line = "rtpmap:96 opus/48000/2";
+        let attr = Attribute::from_str(line).unwrap();
+
+        match attr {
+            Attribute::RTPMap(fmt, enc, rate, params) => {
+                assert_eq!(fmt, 96);
+                assert_eq!(enc, "opus");
+                assert_eq!(rate, 48000);
+                assert_eq!(params.unwrap(), "2");
+            }
+            _ => panic!("Expected Attribute::RTPMap"),
+        }
+    }
+
+    #[test]
+    fn test_rtpmap_from_str_valid_no_params() {
+        let line = "rtpmap:97 PCMU/8000";
+        let attr = Attribute::from_str(line).unwrap();
+
+        match attr {
+            Attribute::RTPMap(fmt, enc, rate, params) => {
+                assert_eq!(fmt, 97);
+                assert_eq!(enc, "PCMU");
+                assert_eq!(rate, 8000);
+                assert!(params.is_none());
+            }
+            _ => panic!("Expected Attribute::RTPMap"),
+        }
+    }
+
+    #[test]
+    fn test_rtpmap_from_str_invalid_format() {
+        let line = "rtpmap:";
+        let attr = Attribute::from_str(line);
+
+        assert!(matches!(attr, Err(Error::InvalidRtpMapFormatError)));
+    }
+
+    #[test]
+    fn test_rtpmap_from_str_missing_encoding() {
+        let line = "rtpmap:96 /48000/2";
+        let attr = Attribute::from_str(line);
+
+        assert!(matches!(attr, Err(Error::MissingEncodingNameError)));
+    }
+
+    #[test]
+    fn test_rtpmap_from_str_missing_clock_rate() {
+        let line = "rtpmap:96 opus";
+        let attr = Attribute::from_str(line);
+
+        assert!(matches!(attr, Err(Error::MissingClockRateError)));
+    }
+
+    #[test]
+    fn test_invalid_rtpmap_extra_fields() {
+        let line = "rtpmap:96 opus/48000/2/extra"; // Demasiados campos
+        let result = Attribute::from_str(line);
+
+        assert!(matches!(result, Err(Error::ExtraRtpFieldsError)));
+    }
+
+    #[test]
+    fn test_display_rtpmap() {
+        let attr = Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into()));
+        assert_eq!(attr.to_string(), "a=rtpmap:96 opus/48000/2");
+
+        let attr_no_params = Attribute::RTPMap(97, "PCMU".into(), 8000, None);
+        assert_eq!(attr_no_params.to_string(), "a=rtpmap:97 PCMU/8000");
+    }
+
+    #[test]
+    fn test_candidate_from_str_valid() {
+        let line = "candidate:1 1 udp 2122252543 192.168.1.5 54400 typ host";
+        let attr = Attribute::from_str(line).unwrap();
+
+        match attr {
+            Attribute::Candidate(cand) => {
+                assert_eq!(cand.foundation, "1");
+                assert_eq!(cand.component_id, 1);
+                assert_eq!(cand.transport, "udp");
+                assert_eq!(cand.priority, 2122252543);
+                assert_eq!(cand.address, "192.168.1.5");
+                assert_eq!(cand.port, 54400);
+                assert!(matches!(cand.candidate_type, CandidateType::Host));
+            }
+            _ => panic!("Expected Attribute::Candidate"),
+        }
+    }
+
+    #[test]
+    fn test_candidate_from_str_invalid_format() {
+        let bad_lines = [
+            "candidate:1 1 udp 2122252543 192.168.1.5 typ host",
+            "candidate:1 1 udp 2122252543 192.168.1.5 54400",
+            "candidate:1 1 udp x 192.168.1.5 54400 typ host",
+            "candidate:1 1 udp 2122252543 192.168.1.5 x typ host",
+        ];
+
+        for line in bad_lines {
+            assert!(Attribute::from_str(line).is_err(), "Should fail: {line}");
+        }
+    }
+
+    #[test]
+    fn test_candidate_from_str_invalid_format_missing_fields() {
+        let candidate = "candidate:1 1 udp 2122252543 192.168.1.5 typ host";
+        let attr = Attribute::from_str(candidate);
+
+        assert!(matches!(attr, Err(Error::InvalidLineFormatError)));
+    }
+
+    #[test]
+    fn test_candidate_from_str_invalid_format_missing_typ() {
+        let candidate = "candidate:1 1 udp 2122252543 192.168.1.5 54400 host typ";
+        let attr = Attribute::from_str(candidate);
+
+        assert!(matches!(attr, Err(Error::InvalidCandidateFormatError)));
+    }
+
+    #[test]
+    fn test_candidate_from_str_invalid_candidate_type() {
+        let candidate = "candidate:1 1 udp 2122252543 192.168.1.5 54400 typ Guest";
+        let attr = Attribute::from_str(candidate);
+
+        assert!(matches!(attr, Err(Error::InvalidCandidateTypeError)));
+    }
+
+    #[test]
+    fn test_candidate_from_str_invalid_priority() {
+        let candidate = "candidate:1 1 udp priority 192.168.1.5 54400 typ host";
+        let attr = Attribute::from_str(candidate);
+
+        assert!(matches!(attr, Err(Error::InvalidPriorityError)));
+    }
+
+    #[test]
+    fn test_candidate_from_str_invalid_port() {
+        let candidate = "candidate:1 1 udp 2122252543 192.168.1.5 port typ host";
+        let attr = Attribute::from_str(candidate);
+
+        assert!(matches!(attr, Err(Error::InvalidPortError)));
+    }
+
+    #[test]
+    fn test_candidate_from_str_invalid_component_id() {
+        let candidate = "candidate:1 id udp 2122252543 192.168.1.5 54400 typ host";
+        let attr = Attribute::from_str(candidate);
+
+        assert!(matches!(attr, Err(Error::InvalidComponentIdError)));
+    }
+    #[test]
+    fn test_display_candidate() {
+        let candidate = Candidate::new(
+            CandidateType::Host,
+            2122252543,
+            "192.168.1.5".into(),
+            54400,
+            1,
+            "1".into(),
+            "udp".into(),
+        );
+
+        let attr = Attribute::Candidate(candidate);
+        let expected = "a=candidate:1 1 udp 2122252543 192.168.1.5 54400 typ host";
+        assert_eq!(attr.to_string(), expected);
+    }
 }

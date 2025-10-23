@@ -1,14 +1,11 @@
-use std::collections::HashSet;
-use std::{
-    io::{BufRead, Write},
-};
-use std::str::FromStr;
+use super::error::ClientError as Error;
 use roomrtc::{
     ice::IceAgent,
-    sdp::{Attribute, SessionDescriptionProtocol, MediaDescription}
+    sdp::{Attribute, MediaDescription, SessionDescriptionProtocol},
 };
-use super::error::ClientError as Error;
-
+use std::collections::HashSet;
+use std::io::{BufRead, Write};
+use std::str::FromStr;
 
 const MEDIA_TYPE: &str = "video";
 const MEDIA_PORT: u16 = 4000;
@@ -56,11 +53,7 @@ impl Client {
 
         // Set connection info using our local IP
         if let Some(local_candidate) = ice_agent.get_local_candidate() {
-            sdp.set_connection_data(
-                "IN",
-                "IP4",
-                local_candidate.address.clone().as_str(),
-            );
+            sdp.set_connection_data("IN", "IP4", local_candidate.address.clone().as_str());
         }
 
         Self { sdp, ice_agent }
@@ -85,7 +78,8 @@ impl Client {
             }
             answer.push_str(&line);
         }
-        let sdp_answer = SessionDescriptionProtocol::from_str(&answer).map_err(|e| Error::SdpCreationError(e.to_string()))?;
+        let sdp_answer = SessionDescriptionProtocol::from_str(&answer)
+            .map_err(|e| Error::SdpCreationError(e.to_string()))?;
         eprintln!("Answer received");
 
         // Find and process the remote ICE candidate
@@ -110,11 +104,15 @@ impl Client {
         }
 
         // Parse offer to make sure it's valid
-        let sdp_offer = SessionDescriptionProtocol::from_str(&offer_string).map_err(|e| Error::SdpCreationError(e.to_string()))?;
+        let sdp_offer = SessionDescriptionProtocol::from_str(&offer_string)
+            .map_err(|e| Error::SdpCreationError(e.to_string()))?;
         eprintln!("Offer received");
 
         // Send our SDP answer
-        let sdp_answer = self.sdp.create_answer(&sdp_offer).map_err(|e| Error::SdpCreationError(e.to_string()))?;
+        let sdp_answer = self
+            .sdp
+            .create_answer(&sdp_offer)
+            .map_err(|e| Error::SdpCreationError(e.to_string()))?;
         out_buff
             .write_all(sdp_answer.to_string().as_bytes())
             .unwrap();
@@ -134,6 +132,8 @@ impl Client {
             }
         }
 
-        self.ice_agent.start_connectivity_checks().map_err(|e| Error::IceConnectionError(e.to_string()))
+        self.ice_agent
+            .start_connectivity_checks()
+            .map_err(|e| Error::IceConnectionError(e.to_string()))
     }
 }

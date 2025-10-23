@@ -1,6 +1,6 @@
-use std::str::FromStr;
 use super::error::IceError as Error;
-#[derive(Clone)]
+use std::str::FromStr;
+#[derive(Debug, PartialEq, Clone)]
 pub enum CandidateType {
     Host,
     ServerReflexive,
@@ -35,5 +35,35 @@ impl FromStr for CandidateType {
             "srflx" => Ok(Self::ServerReflexive),
             _ => Err(Error::InvalidCandidateType),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_candidate_type_priority() {
+        assert_eq!(CandidateType::Host.priority(), 126);
+        assert_eq!(CandidateType::ServerReflexive.priority(), 100);
+    }
+
+    #[test]
+    fn test_candidate_type_display() {
+        assert_eq!(CandidateType::Host.to_string(), "host");
+        assert_eq!(CandidateType::ServerReflexive.to_string(), "srflx");
+    }
+
+    #[test]
+    fn test_candidate_type_from_str() {
+        assert_eq!(
+            CandidateType::from_str("host").unwrap(),
+            CandidateType::Host
+        );
+        assert_eq!(
+            CandidateType::from_str("srflx").unwrap(),
+            CandidateType::ServerReflexive
+        );
+        assert!(CandidateType::from_str("invalid").is_err());
     }
 }

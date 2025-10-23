@@ -1,8 +1,8 @@
+use super::error::SdpError as Error;
 use crate::ice::Candidate;
 use crate::ice::CandidateType;
 use std::fmt;
 use std::str::FromStr;
-use super::error::SdpError as Error;
 
 const CANDIDATE_ATTR_KEY: &str = "candidate";
 const RTPMAP_ATTR_KEY: &str = "rtpmap";
@@ -60,7 +60,9 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
         return Err(Error::InvalidRtpMapFormatError);
     }
 
-    let fmt = parts[0].parse::<u8>().map_err(|_| Error::InvalidRtpMapFormatError)?;
+    let fmt = parts[0]
+        .parse::<u8>()
+        .map_err(|_| Error::InvalidRtpMapFormatError)?;
 
     let mut parts = parts[1].split('/');
     let encoding_name = parts.next().ok_or(Error::MissingEncodingNameError)?;
@@ -96,10 +98,16 @@ fn parse_candidate_attr_values(values: &str) -> Result<Attribute, Error> {
 
     Ok(Attribute::Candidate(Candidate::new(
         CandidateType::from_str(parts[7]).map_err(|_| Error::InvalidCandidateTypeError)?,
-        parts[3].parse::<u32>().map_err(|_| Error::InvalidPriorityError)?,
+        parts[3]
+            .parse::<u32>()
+            .map_err(|_| Error::InvalidPriorityError)?,
         parts[4].to_string(),
-        parts[5].parse::<u16>().map_err(|_| Error::InvalidPortError)?,
-        parts[1].parse::<u8>().map_err(|_| Error::InvalidComponentIdError)?,
+        parts[5]
+            .parse::<u16>()
+            .map_err(|_| Error::InvalidPortError)?,
+        parts[1]
+            .parse::<u8>()
+            .map_err(|_| Error::InvalidComponentIdError)?,
         parts[0].to_string(),
         transport.into(),
     )))

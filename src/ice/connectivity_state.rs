@@ -1,4 +1,4 @@
-#[derive(Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ConnectivityState {
     Waiting,
     InProgress,
@@ -17,3 +17,15 @@ impl std::fmt::Display for ConnectivityState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::ConnectivityState;
+
+    #[test]
+    fn test_connectivity_state_display() {
+        assert_eq!(ConnectivityState::Waiting.to_string(), "Waiting");
+        assert_eq!(ConnectivityState::InProgress.to_string(), "In Progress");
+        assert_eq!(ConnectivityState::Succeeded.to_string(), "Succeeded");
+        assert_eq!(ConnectivityState::Failed.to_string(), "Failed");
+    }
+}

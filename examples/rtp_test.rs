@@ -1,8 +1,7 @@
+use roomrtc::rtp::rtp_communicator::{RtpReceiver, RtpSender};
 use std::net::SocketAddr;
-use std::io::Error;
-use roomrtc::rtp::rtp_communicator::{RtpSender, RtpReceiver};
 
-fn main() -> Result<(), Error> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dest: SocketAddr = "127.0.0.1:5004".parse().unwrap();
     let mut sender = RtpSender::new(dest, 1234)?;
 

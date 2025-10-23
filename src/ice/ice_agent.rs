@@ -116,8 +116,7 @@ fn get_local_ip() -> Result<String, Error> {
     // Get all network interfaces
     // returns a list with Interface type objects
     // each Interface has name, addr, index, oper_status and is_loopback() method
-    let interfaces =
-        if_addrs::get_if_addrs().map_err(|_| Error::NetworkInterfaceError)?;
+    let interfaces = if_addrs::get_if_addrs().map_err(|_| Error::NetworkInterfaceError)?;
 
     // Find the first interface that is not loopback
     // loopback is a virtual internal interface of the operating system (doesn't connect any local network)

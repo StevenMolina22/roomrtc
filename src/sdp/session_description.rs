@@ -169,3 +169,138 @@ fn handle_attribute_line(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sdp::error::SdpError as Error;
+
+    fn make_test_media_description() -> MediaDescription {
+        let mut fmts = HashSet::new();
+        fmts.insert(96);
+
+        let mut md = MediaDescription::new("audio".into(), 5004, "RTP/AVP".into(), fmts);
+        md.add_attribute(Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into()))).unwrap();
+        md
+    }
+
+    #[test]
+    fn test_from_str_generates_valid_session_description() {
+        let sdp_line = "\
+            v=0
+            o=0
+            s=-
+            t=0 0
+            c=IN IP4 127.0.0.1
+            m=audio 5004 RTP/AVP 96
+            a=rtpmap:96 opus/48000/2";
+
+        let sdp = SessionDescriptionProtocol::from_str(sdp_line).unwrap();
+        assert_eq!(sdp.version, 0);
+        assert_eq!(sdp.origin_id, 0);
+        assert_eq!(sdp.session_name, "-");
+        assert_eq!(sdp.timing, "0 0");
+        assert_eq!(sdp.connection_data, "IN IP4 0.0.0.0");
+        assert_eq!(sdp.media_descriptions.len(), 1);
+
+        let md = sdp.media_descriptions.first().unwrap();
+        assert_eq!(md.media_type, "audio");
+        assert_eq!(md.protocol, "RTP/AVP");
+        assert_eq!(md.port, 5004);
+        assert!(md.attributes.iter().any(|a| matches!(a, Attribute::RTPMap(_, _, _, _))));
+    }
+
+    #[test]
+    fn test_from_str_with_invalid_sdp_line() {
+        let sdp_line = "\
+            v=0
+            o=0
+            s=-
+            t=0 0
+            c IN IP4 127.0.0.1
+            m=audio 5004 RTP/AVP 96
+            a=rtpmap:96 opus/48000/2";
+
+        let sdp = SessionDescriptionProtocol::from_str(sdp_line);
+        assert!(sdp.is_err());
+        if let Err(err) = sdp {
+            assert!(matches!(err, Error::InvalidMediaDescriptionFormatError));
+        } else {
+            panic!("Expected InvalidMediaDescriptionFormatError");
+        }
+    }
+
+    #[test]
+    fn test_display_formats_sdp_correctly() {
+        let md = make_test_media_description();
+        let sdp = SessionDescriptionProtocol::new(vec![md]);
+
+        let out = format!("{}", sdp);
+        assert!(out.contains("v=0"));
+        assert!(out.contains("m=audio"));
+        assert!(out.contains("a=rtpmap:96 opus/48000/2"));
+    }
+
+    #[test]
+    fn test_set_connection_data_updates_value() {
+        let md = make_test_media_description();
+        let mut sdp = SessionDescriptionProtocol::new(vec![md]);
+
+        assert_eq!(sdp.connection_data, "IN IP4 0.0.0.0");
+
+        sdp.set_connection_data("IN", "IP4", "127.0.0.1");
+        assert_eq!(sdp.connection_data, "IN IP4 127.0.0.1");
+    }
+
+    #[test]
+    fn test_set_connection_data_changes_value() {
+        let mut sdp = SessionDescriptionProtocol::new(vec![]);
+        sdp.set_connection_data("IN", "IP4", "192.168.0.5");
+
+        assert_eq!(sdp.connection_data, "IN IP4 192.168.0.5");
+    }
+
+    #[test]
+    fn test_create_answer_filters_incompatible_formats() {
+        let local_md = make_test_media_description();
+        let local_sdp = SessionDescriptionProtocol::new(vec![local_md]);
+
+        let mut remote_fmts = HashSet::new();
+        remote_fmts.insert(97);
+        let mut remote_md = MediaDescription::new("audio".into(), 6000, "RTP/AVP".into(), remote_fmts);
+        remote_md.add_attribute(Attribute::RTPMap(97, "vp8".into(), 90000, Some("1".into()))).unwrap();
+
+        let remote_sdp = SessionDescriptionProtocol::new(vec![remote_md]);
+
+        let answer = local_sdp.create_answer(&remote_sdp).unwrap();
+        assert_eq!(answer.media_descriptions.len(), 1);
+
+        let answer_md = &answer.media_descriptions[0];
+        assert!(answer_md.fmts.is_empty());
+    }
+
+    #[test]
+    fn test_create_answer_preserves_compatible_formats() {
+        let local_md = make_test_media_description();
+        let local_sdp = SessionDescriptionProtocol::new(vec![local_md]);
+
+        let mut offer_md = MediaDescription::new(
+            "audio".into(),
+            6000,
+            "RTP/AVP".into(),
+            HashSet::from([96]),
+        );
+        offer_md
+            .add_attribute(Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into())))
+            .unwrap();
+
+        let offer_sdp = SessionDescriptionProtocol::new(vec![offer_md]);
+
+        let answer = local_sdp.create_answer(&offer_sdp).unwrap();
+        assert_eq!(answer.media_descriptions.len(), 1);
+
+        let answer_md = &answer.media_descriptions[0];
+        assert!(answer_md.fmts.contains(&96));
+        assert!(answer_md.attributes.iter().any(|a| matches!(a, Attribute::RTPMap(_, _, _, _))));
+    }
+}

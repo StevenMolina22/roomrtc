@@ -10,6 +10,9 @@ pub struct RoomRTCApp {
     client: Option<Client>,
     local_video_receiver: Option<Receiver<VideoFrame>>,
     remote_video_receiver: Option<Receiver<VideoFrame>>,
+
+    local_texture: Option<egui::TextureHandle>,
+    remote_texture: Option<egui::TextureHandle>,
 }
 
 impl Default for RoomRTCApp {
@@ -19,6 +22,8 @@ impl Default for RoomRTCApp {
             client: None,
             local_video_receiver: None,
             remote_video_receiver: None,
+            local_texture: None,
+            remote_texture: None,
         }
     }
 }
@@ -148,22 +153,84 @@ impl eframe::App for RoomRTCApp {
                 }
 
                 View::Call => {
-                    ui.vertical_centered(|ui| {
-                        ui.heading("Call in Progress");
-                        ui.add_space(20.0);
-                        ui.label("TODO: Display Nokhwa camera feed and decoded video stream.");
-                        ui.add_space(20.0);
-
-                        let boton = egui::Button::new("Finalizar llamada")
-                            .min_size(egui::vec2(150.0, 40.0));
-
-                        if ui.add_sized([150.0, 40.0], boton).clicked() {
-                            self.client = None;
-                            self.view = View::Menu;
+                    // --- Receive Local Frame ---
+                    if let Some(rx) = &self.local_video_receiver {
+                        if let Ok(frame) = rx.try_recv() {
+                            // This helper function is defined outside the update loop
+                            update_texture_from_frame(ctx, frame, &mut self.local_texture);
                         }
+                    }
+
+                    // --- Receive Remote Frame ---
+                    if let Some(rx) = &self.remote_video_receiver {
+                        if let Ok(frame) = rx.try_recv() {
+                            // This helper function is defined outside the update loop
+                            update_texture_from_frame(ctx, frame, &mut self.remote_texture);
+                        }
+                    }
+
+                    // --- Display Videos ---
+                    ui.heading("Call in Progress");
+                    ui.horizontal(|ui| {
+                        // Display Remote Video
+                        ui.vertical(|ui| {
+                            ui.label("Remote Video");
+                            if let Some(tex) = &self.remote_texture {
+                                ui.add(egui::Image::new(tex).fit_to_exact_size(tex.size_vec2()));
+                            } else {
+                                ui.label("Waiting for remote video...");
+                            }
+                        });
+
+                        // Display Local Video
+                        ui.vertical(|ui| {
+                            ui.label("Local Video (Self-View)");
+                            if let Some(tex) = &self.local_texture {
+                                ui.add(egui::Image::new(tex).fit_to_exact_size(tex.size_vec2()));
+                            } else {
+                                ui.label("Waiting for local camera...");
+                            }
+                        });
                     });
+
+                    ui.add_space(20.0);
+
+                    // --- Hang-up Button ---
+                    let boton =
+                        egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
+
+                    if ui.add_sized([150.0, 40.0], boton).clicked() {
+                        self.client = None;
+                        self.local_texture = None; // Clear textures
+                        self.remote_texture = None; // Clear textures
+                        self.local_video_receiver = None; // Drop receivers
+                        self.remote_video_receiver = None;
+                        self.view = View::Menu;
+                    }
+
+                    // Request repaint to keep the video feed "live"
+                    ctx.request_repaint();
                 }
             }
         });
     }
+}
+
+fn update_texture_from_frame(
+    ctx: &egui::Context,
+    frame: VideoFrame,
+    texture: &mut Option<egui::TextureHandle>,
+) {
+    let image = egui::ColorImage::from_rgb(
+        [frame.width as usize, frame.height as usize],
+        &frame.rgb_data,
+    );
+    let tex = texture.get_or_insert_with(|| {
+        ctx.load_texture(
+            "video_frame",
+            image.clone(),
+            egui::TextureOptions::default(),
+        )
+    });
+    tex.set(image, egui::TextureOptions::default());
 }

@@ -11,7 +11,14 @@ pub struct RtpPackage {
 }
 
 impl RtpPackage {
-    pub fn new(marker: bool, payload_type: u8, payload: Vec<u8>, timestamp: u32, sequence_number: u16, ssrc: u32) -> Self {
+    pub fn new(
+        marker: bool,
+        payload_type: u8,
+        payload: Vec<u8>,
+        timestamp: u32,
+        sequence_number: u16,
+        ssrc: u32,
+    ) -> Self {
         Self {
             version: 2,
             marker,
@@ -63,4 +70,3 @@ impl RtpPackage {
         })
     }
 }
-

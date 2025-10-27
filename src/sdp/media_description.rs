@@ -1,9 +1,9 @@
 use super::Attribute;
+use super::error::SdpError as Error;
 use crate::ice::Candidate;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
-use super::error::SdpError as Error;
 /*
 #[derive(Debug, PartialEq, Eq)]
 pub enum MediaDescriptionError {
@@ -43,7 +43,9 @@ impl FromStr for MediaDescription {
             return Err(Error::InvalidMediaDescriptionFormatError);
         }
 
-        let port = s_vec[1].parse::<u16>().map_err(|_| Error::InvalidPortError)?;
+        let port = s_vec[1]
+            .parse::<u16>()
+            .map_err(|_| Error::InvalidPortError)?;
 
         let mut parsed_fmt = HashSet::new();
         for f_string in &s_vec[3..] {
@@ -134,7 +136,10 @@ mod tests {
     fn test_from_str_invalid_format_missing_fields() {
         let line = "audio 5004 RTP/AVP";
         let result = MediaDescription::from_str(line);
-        assert!(matches!(result, Err(Error::InvalidMediaDescriptionFormatError)));
+        assert!(matches!(
+            result,
+            Err(Error::InvalidMediaDescriptionFormatError)
+        ));
     }
 
     #[test]
@@ -170,7 +175,9 @@ mod tests {
 
         let attr = Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into()));
         let result = md.add_attribute(attr);
-        assert!(matches!(result, Err(Error::UnmatchingMediaDescriptionAndAttributeError)));
+        assert!(matches!(
+            result,
+            Err(Error::UnmatchingMediaDescriptionAndAttributeError)
+        ));
     }
 }
-

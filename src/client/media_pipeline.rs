@@ -1,7 +1,8 @@
 use crate::client::client::{Client, VideoFrame};
 use crate::client::error::ClientError as Error;
 use crate::ice::CandidatePair;
-use crate::rtp::rtp_communicator::{RtpReceiver, RtpSender};
+use crate::rtp::receiver::RtpReceiver;
+use crate::rtp::sender::RtpSender;
 use nokhwa::Camera;
 use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
 use openh264::decoder::Decoder;
@@ -26,7 +27,7 @@ impl Client {
         .parse()
         .map_err(|_| Error::IceConnectionError("Invalid remote addr".into()))?;
 
-        let sender = RtpSender::new(remote_addr, 12345) // SSRC 12345
+        let sender = RtpSender::new(remote_addr, remote_addr, 12345) // SSRC 12345
             .map_err(|e| Error::IceConnectionError(e.to_string()))?;
         let receiver = RtpReceiver::new(selected_pair.local.port) // Bind to our local port
             .map_err(|e| Error::IceConnectionError(e.to_string()))?;

@@ -180,7 +180,13 @@ mod tests {
         fmts.insert(96);
 
         let mut md = MediaDescription::new("audio".into(), 5004, "RTP/AVP".into(), fmts);
-        md.add_attribute(Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into()))).unwrap();
+        md.add_attribute(Attribute::RTPMap(
+            96,
+            "opus".into(),
+            48000,
+            Some("2".into()),
+        ))
+        .unwrap();
         md
     }
 
@@ -207,7 +213,11 @@ mod tests {
         assert_eq!(md.media_type, "audio");
         assert_eq!(md.protocol, "RTP/AVP");
         assert_eq!(md.port, 5004);
-        assert!(md.attributes.iter().any(|a| matches!(a, Attribute::RTPMap(_, _, _, _))));
+        assert!(
+            md.attributes
+                .iter()
+                .any(|a| matches!(a, Attribute::RTPMap(_, _, _, _)))
+        );
     }
 
     #[test]
@@ -267,8 +277,11 @@ mod tests {
 
         let mut remote_fmts = HashSet::new();
         remote_fmts.insert(97);
-        let mut remote_md = MediaDescription::new("audio".into(), 6000, "RTP/AVP".into(), remote_fmts);
-        remote_md.add_attribute(Attribute::RTPMap(97, "vp8".into(), 90000, Some("1".into()))).unwrap();
+        let mut remote_md =
+            MediaDescription::new("audio".into(), 6000, "RTP/AVP".into(), remote_fmts);
+        remote_md
+            .add_attribute(Attribute::RTPMap(97, "vp8".into(), 90000, Some("1".into())))
+            .unwrap();
 
         let remote_sdp = SessionDescriptionProtocol::new(vec![remote_md]);
 
@@ -284,14 +297,15 @@ mod tests {
         let local_md = make_test_media_description();
         let local_sdp = SessionDescriptionProtocol::new(vec![local_md]);
 
-        let mut offer_md = MediaDescription::new(
-            "audio".into(),
-            6000,
-            "RTP/AVP".into(),
-            HashSet::from([96]),
-        );
+        let mut offer_md =
+            MediaDescription::new("audio".into(), 6000, "RTP/AVP".into(), HashSet::from([96]));
         offer_md
-            .add_attribute(Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into())))
+            .add_attribute(Attribute::RTPMap(
+                96,
+                "opus".into(),
+                48000,
+                Some("2".into()),
+            ))
             .unwrap();
 
         let offer_sdp = SessionDescriptionProtocol::new(vec![offer_md]);
@@ -301,6 +315,11 @@ mod tests {
 
         let answer_md = &answer.media_descriptions[0];
         assert!(answer_md.fmts.contains(&96));
-        assert!(answer_md.attributes.iter().any(|a| matches!(a, Attribute::RTPMap(_, _, _, _))));
+        assert!(
+            answer_md
+                .attributes
+                .iter()
+                .any(|a| matches!(a, Attribute::RTPMap(_, _, _, _)))
+        );
     }
 }

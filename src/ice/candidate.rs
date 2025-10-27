@@ -113,8 +113,7 @@ mod tests {
         // Host => type_pref = 126
         // local_pref = 65535
         // priority = (126 << 24) | (65535 << 8) | 255
-        let expected_priority =
-            (126u32 << 24) | (u32::from(65535u16) << 8) | (256 - 1);
+        let expected_priority = (126u32 << 24) | (u32::from(65535u16) << 8) | (256 - 1);
         assert_eq!(candidate.priority, expected_priority);
     }
 
@@ -124,8 +123,7 @@ mod tests {
         let candidate = Candidate::new_host("1.1.1.1".to_string(), 1);
         let priority = candidate.priority;
 
-        let expected =
-            (126u32 << 24) | (u32::from(65535u16) << 8) | (256 - 1);
+        let expected = (126u32 << 24) | (u32::from(65535u16) << 8) | (256 - 1);
 
         assert_eq!(priority, expected);
     }

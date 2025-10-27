@@ -1,4 +1,5 @@
 use std::str::FromStr;
+
 use super::error::IceError as Error;
 #[derive(Debug, PartialEq, Clone)]
 pub enum CandidateType {
@@ -57,8 +58,14 @@ mod tests {
 
     #[test]
     fn test_candidate_type_from_str() {
-        assert_eq!(CandidateType::from_str("host").unwrap(), CandidateType::Host);
-        assert_eq!(CandidateType::from_str("srflx").unwrap(), CandidateType::ServerReflexive);
+        assert_eq!(
+            CandidateType::from_str("host").unwrap(),
+            CandidateType::Host
+        );
+        assert_eq!(
+            CandidateType::from_str("srflx").unwrap(),
+            CandidateType::ServerReflexive
+        );
         assert!(CandidateType::from_str("invalid").is_err());
     }
 }

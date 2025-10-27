@@ -1,6 +1,7 @@
 use crate::client::error::ClientError as Error;
 use crate::ice::IceAgent;
-use crate::rtp::rtp_communicator::{RtpReceiver, RtpSender};
+use crate::rtp::receiver::RtpReceiver;
+use crate::rtp::sender::RtpSender;
 use crate::sdp::{Attribute, MediaDescription, SessionDescriptionProtocol};
 use std::collections::HashSet;
 use std::str::FromStr;

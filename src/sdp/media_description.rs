@@ -1,9 +1,9 @@
 use super::Attribute;
+use super::error::SdpError as Error;
 use crate::ice::Candidate;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
-use super::error::SdpError as Error;
 /*
 #[derive(Debug, PartialEq, Eq)]
 pub enum MediaDescriptionError {
@@ -43,7 +43,9 @@ impl FromStr for MediaDescription {
             return Err(Error::InvalidMediaDescriptionFormatError);
         }
 
-        let port = s_vec[1].parse::<u16>().map_err(|_| Error::InvalidPortError)?;
+        let port = s_vec[1]
+            .parse::<u16>()
+            .map_err(|_| Error::InvalidPortError)?;
 
         let mut parsed_fmt = HashSet::new();
         for f_string in &s_vec[3..] {

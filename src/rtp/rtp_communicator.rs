@@ -1,6 +1,5 @@
 use crate::rtp::error::RTPError;
 use crate::rtp::rtp_package::RtpPackage;
-use std::io::ErrorKind;
 use std::net::{SocketAddr, UdpSocket};
 
 pub struct RtpSender {
@@ -9,27 +8,9 @@ pub struct RtpSender {
     ssrc: u32,
 }
 
-fn get_local_ip() -> Result<String, Box<dyn std::error::Error>> {
-    let interfaces =
-        if_addrs::get_if_addrs().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    for interface in interfaces {
-        if !interface.is_loopback() {
-            return Ok(interface.addr.ip().to_string());
-        }
-    }
-    Err(Box::new(std::io::Error::new(
-        ErrorKind::NotFound,
-        "no network interface found",
-    )))
-}
-
 impl RtpSender {
     pub fn new(dest: SocketAddr, ssrc: u32) -> Result<Self, RTPError> {
-        let local_ip = get_local_ip().map_err(|_| RTPError::InvalidAddr)?;
-        let local_addr: SocketAddr = format!("{}:0", local_ip)
-            .parse()
-            .map_err(|_| RTPError::InvalidAddr)?;
-        let socket = UdpSocket::bind(local_addr).map_err(|_| RTPError::AddrNotAvailable)?;
+        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|_| RTPError::AddrNotAvailable)?;
         socket
             .connect(dest)
             .map_err(|_| RTPError::AddrNotAvailable)?;
@@ -74,11 +55,6 @@ pub struct RtpReceiver {
 impl RtpReceiver {
     /// Crea un receptor RTP enlazado a la IP local y puerto dado
     pub fn new(bind_port: u16) -> Result<Self, RTPError> {
-        // no anduvo con esto no se por que
-        // let local_ip = get_local_ip().map_err(|e| Error::new(ErrorKind::Other, format!("get_local_ip: {}", e)))?;
-        // let bind_addr = format!("{}:{}", local_ip, bind_port);
-
-        // Bind to 0.0.0.0 so we accept packets on any local interface (including loopback)
         let bind_addr = format!("0.0.0.0:{}", bind_port);
         let socket = UdpSocket::bind(bind_addr).map_err(|_| RTPError::AddrNotAvailable)?;
         socket

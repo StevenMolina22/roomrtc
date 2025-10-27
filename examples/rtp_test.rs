@@ -1,4 +1,4 @@
-use roomrtc::rtp::rtp_communicator::{RtpReceiver, RtpSender};
+use roomrtc::rtp::rtp_peer::{RtpReceiver, RtpSender};
 use std::net::SocketAddr;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

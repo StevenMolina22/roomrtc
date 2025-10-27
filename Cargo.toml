@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 if-addrs = "0.10"
 openh264 = "0.9.0"
+chrono = "0.4.42"

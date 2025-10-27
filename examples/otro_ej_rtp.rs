@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use roomrtc::rtp::rtp_communicator::{RtpReceiver, RtpSender};
+use roomrtc::rtp::rtp_peer::{RtpReceiver, RtpSender};
 use roomrtc::rtp::rtp_package::RtpPackage;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

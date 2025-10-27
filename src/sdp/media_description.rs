@@ -136,7 +136,10 @@ mod tests {
     fn test_from_str_invalid_format_missing_fields() {
         let line = "audio 5004 RTP/AVP";
         let result = MediaDescription::from_str(line);
-        assert!(matches!(result, Err(Error::InvalidMediaDescriptionFormatError)));
+        assert!(matches!(
+            result,
+            Err(Error::InvalidMediaDescriptionFormatError)
+        ));
     }
 
     #[test]
@@ -172,7 +175,9 @@ mod tests {
 
         let attr = Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into()));
         let result = md.add_attribute(attr);
-        assert!(matches!(result, Err(Error::UnmatchingMediaDescriptionAndAttributeError)));
+        assert!(matches!(
+            result,
+            Err(Error::UnmatchingMediaDescriptionAndAttributeError)
+        ));
     }
 }
-

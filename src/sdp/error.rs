@@ -19,7 +19,7 @@ pub enum SdpError {
     InvalidMediaDescriptionFormatError,
     InvalidMediaDescriptionAttributeFormat,
     InvalidFmtError,
-    UnmatchingMediaDescriptionAndAttributeError
+    UnmatchingMediaDescriptionAndAttributeError,
 }
 
 impl Display for SdpError {
@@ -56,7 +56,9 @@ impl Display for SdpError {
                 write!(f, "Error: \"Invalid media description attribute format\"")
             }
             SdpError::InvalidFmtError => write!(f, "Error: \"Invalid fmt error\""),
-            SdpError::UnmatchingMediaDescriptionAndAttributeError => write!(f, "Error: \"The attribute format does not match with the media description attribute format.\""),
+            SdpError::UnmatchingMediaDescriptionAndAttributeError => {
+                write!(f, "Error: \"Unmatching media description and attribute\"")
+            }
         }
     }
 }

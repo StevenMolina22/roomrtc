@@ -46,7 +46,9 @@ impl FromStr for Attribute {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once(':') {
-            Some((CANDIDATE_ATTR_KEY, value)) => parse_candidate_attr_values(value),
+            Some((CANDIDATE_ATTR_KEY, value)) => {
+                parse_candidate_attr_values(value).map_err(|_| Error::InvalidCandidateParsingError)
+            }
 
             Some((RTPMAP_ATTR_KEY, value)) => parse_rptmap_attr_values(value),
             _ => Err(Error::InvalidRtpMapFormatError),

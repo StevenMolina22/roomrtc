@@ -6,3 +6,7 @@ edition = "2024"
 [dependencies]
 eframe = "0.29"
 egui = "0.29"
+chrono = "0.4.42"
+openh264 = "0.9.0"
+opencv = "0.96"
+if-addrs = "0.14.0"

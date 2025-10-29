@@ -1,5 +1,5 @@
 use super::error::ClientError as Error;
-use roomrtc::{
+use crate::{
     ice::IceAgent,
     sdp::{Attribute, MediaDescription, SessionDescriptionProtocol},
 };
@@ -13,9 +13,10 @@ const MEDIA_PROTOCOL: &str = "RTP/AVP";
 const MEDIA_FMT: u8 = 111;
 
 pub struct Client {
-    sdp: SessionDescriptionProtocol,
-    ice_agent: IceAgent,
+    pub sdp: SessionDescriptionProtocol,
+    pub ice_agent: IceAgent,
 }
+
 
 impl Client {
     pub fn new() -> Self {
@@ -121,6 +122,33 @@ impl Client {
 
         // Extract and process the remote ICE candidate from the offer
         self.process_remote_sdp(&sdp_offer)
+    }
+
+    pub fn process_offer(&mut self, offer_str: &str) -> Result<String, Error> {
+        let sdp_offer = SessionDescriptionProtocol::from_str(offer_str)
+            .map_err(|e| Error::SdpCreationError(e.to_string()))?;
+
+        // Process remote candidates
+        self.process_remote_sdp(&sdp_offer)?;
+
+        // Create and return answer
+        self.sdp
+            .create_answer(&sdp_offer)
+            .map(|answer_sdp| answer_sdp.to_string())
+            .map_err(|e| Error::SdpCreationError(e.to_string()))
+    }
+    pub fn process_answer(&mut self, answer_str: &str) -> Result<(), Error> {
+        let sdp_answer = SessionDescriptionProtocol::from_str(answer_str)
+            .map_err(|e| Error::SdpCreationError(e.to_string()))?;
+
+        // Process remote candidates
+        self.process_remote_sdp(&sdp_answer)?;
+
+        Ok(())
+    }
+
+    pub fn get_offer(&self) -> String {
+        self.sdp.to_string()
     }
 
     fn process_remote_sdp(&mut self, sdp: &SessionDescriptionProtocol) -> Result<(), Error> {

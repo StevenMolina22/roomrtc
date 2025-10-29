@@ -36,7 +36,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         timestamp: u32,
         frame_id: u64,
         chunk_id: u64,
-        marker: bool,
+        marker: u16,
     ) -> Result<(), RtpError> {
         if let Ok(conn) = self.connection_status.read()
             && *conn == ConnectionStatus::Closed
@@ -100,7 +100,7 @@ mod tests {
 
         for i in 0..3 {
             let payload = vec![i];
-            sender.send(&payload, 96, 1234 + i as u32, 0, i.into(), false)?;
+            sender.send(&payload, 96, 1234 + i as u32, 0, i.into(), 5)?;
         }
 
         let sent = rtp_sent.lock().unwrap();

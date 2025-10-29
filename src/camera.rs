@@ -1,4 +1,4 @@
-use std::io::Read;
+use crate::frame_handler::Frame;
 use opencv::{
     prelude::*,
     videoio,
@@ -9,24 +9,20 @@ use std::sync::{Arc, RwLock};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
-
-pub struct Frame {
-    data: Vec<u8>,
-    width: u32,
-    height: u32
-}
 pub struct Camera {
     running: Arc<RwLock<bool>>,
+    frame_id: usize
 }
 
 impl Camera {
     pub fn new() -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
+            frame_id: 0
         }
     }
 
-    pub fn start(&self) -> Receiver<Frame> {
+    pub fn start(&mut self) -> Receiver<Frame> {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
         *running.write().unwrap() = true;
@@ -52,9 +48,12 @@ impl Camera {
 
                 let frame = Frame {
                     data,
-                    width: yuv.cols() as u32,
-                    height: yuv.rows() as u32,
+                    width: yuv.cols() as usize,
+                    height: yuv.rows() as usize,
+                    id: self.frame_id
                 };
+                self.frame_id = self.frame_id + 1;
+
 
                 if tx.send(frame).is_err() {
                     break;

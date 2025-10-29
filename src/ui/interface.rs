@@ -19,7 +19,7 @@ impl eframe::App for RoomRTCApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
 
-            match &mut self.view {
+            match self.view {
                 View::Menu => self.show_menu(ui),
                 View::Connection { our_offer, remote_sdp, our_answer } => {
                     self.show_connection(ui, our_offer, our_answer, remote_sdp);

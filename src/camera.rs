@@ -11,14 +11,14 @@ use std::thread;
 use std::time::Duration;
 pub struct Camera {
     running: Arc<RwLock<bool>>,
-    frame_id: usize
+    frame_id: Arc<RwLock<usize>>,
 }
 
 impl Camera {
     pub fn new() -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
-            frame_id: 0
+            frame_id: Arc::new(RwLock::new(0))
         }
     }
 
@@ -26,6 +26,7 @@ impl Camera {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
         *running.write().unwrap() = true;
+        let frame_id = self.frame_id.clone();
 
         thread::spawn(move || {
             let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY).unwrap();
@@ -45,15 +46,20 @@ impl Camera {
 
                 imgproc::cvt_color(&mat, &mut yuv, imgproc::COLOR_BGR2YUV_I420, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT).unwrap();
                 let data = yuv.data_bytes().unwrap().to_vec();
-
+                
+                let id = {
+                    let mut id_lock = frame_id.write().unwrap();
+                    let id = *id_lock;
+                    *id_lock = id + 1;
+                    id
+                };
+                
                 let frame = Frame {
                     data,
                     width: yuv.cols() as usize,
                     height: yuv.rows() as usize,
-                    id: self.frame_id
+                    id: id as u64
                 };
-                self.frame_id = self.frame_id + 1;
-
 
                 if tx.send(frame).is_err() {
                     break;

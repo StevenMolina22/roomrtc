@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn test_receiver_receives_rtp_packet() -> Result<(), RtpError> {
         let fake_payload = vec![1, 2, 3, 4];
-        let fake_rtp_packet = RtpPacket::new(false, 96, fake_payload.clone(), 1234, 0, 0, 42);
+        let fake_rtp_packet = RtpPacket::new(5, 96, fake_payload.clone(), 1234, 0, 0, 42);
         let rtp_data = vec![fake_rtp_packet.to_bytes()];
         let rtp_sent = Arc::new(Mutex::new(Vec::new()));
 

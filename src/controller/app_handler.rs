@@ -1,7 +1,7 @@
 use std::net::UdpSocket;
 use crate::{camera::Camera, rtp::{RtpSender, RtpReceiver}, frame_handler::{Encoder, Decoder}, client::Client};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use super::error::ControllerError as Error;
 use std::thread;
@@ -15,10 +15,12 @@ pub struct Controller {
     pub rx_encoded: Arc<Mutex<Receiver<EncodedFrame>>>,
     pub tx_raw: Sender<Frame>,
     pub rx_raw: Arc<Mutex<Receiver<Frame>>>,
+    pub tx_local: Sender<Vec<u8>>,
+    pub tx_remote: Sender<Vec<u8>>,
 }
 
 impl Controller {
-    pub fn new() -> Self {
+    pub fn new(tx_local: Sender<Vec<u8>>, tx_remote: Sender<Vec<u8>>) -> Self {
         let (tx_raw, rx_raw) = channel();
         let (tx_encoded, rx_encoded) = channel();
 
@@ -28,6 +30,8 @@ impl Controller {
             rx_encoded: Arc::new(Mutex::new(rx_encoded)),
             tx_raw,
             rx_raw: Arc::new(Mutex::new(rx_raw)),
+            tx_local,
+            tx_remote,
         }
     }
 

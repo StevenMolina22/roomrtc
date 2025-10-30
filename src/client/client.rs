@@ -33,9 +33,9 @@ impl Client {
         media_description
             .add_attribute(Attribute::RTPMap(
                 111,
-                "OPUS".into(),
+                "H264".into(),
                 48000,
-                Some("2".into()),
+                None,
             ))
             .unwrap();
 

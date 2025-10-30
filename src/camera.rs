@@ -3,7 +3,6 @@ use opencv::{
     prelude::*,
     videoio,
     imgproc,
-    core
 };
 use std::sync::{Arc, RwLock};
 use std::sync::mpsc::{self, Receiver};
@@ -44,16 +43,16 @@ impl Camera {
                     continue;
                 }
 
-                imgproc::cvt_color(&mat, &mut yuv, imgproc::COLOR_BGR2YUV_I420, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT).unwrap();
+                imgproc::cvt_color(&mat, &mut yuv, imgproc::COLOR_BGR2YUV_I420, 0).unwrap();
                 let data = yuv.data_bytes().unwrap().to_vec();
-                
+
                 let id = {
                     let mut id_lock = frame_id.write().unwrap();
                     let id = *id_lock;
                     *id_lock = id + 1;
                     id
                 };
-                
+
                 let frame = Frame {
                     data,
                     width: yuv.cols() as usize,
@@ -64,7 +63,7 @@ impl Camera {
                 if tx.send(frame).is_err() {
                     break;
                 }
-                
+
                 thread::sleep(Duration::from_millis(10));
             }
 

@@ -1,3 +1,4 @@
+use std::net::UdpSocket;
 use eframe::egui;
 use egui::Ui;
 use super::views::View;
@@ -6,10 +7,11 @@ use crate::{controller::Controller};
 pub struct RoomRTCApp {
     view: View,
     controller: Controller,
-
     our_offer: String,
     remote_sdp: String,
     our_answer: Option<String>,
+    socket: Option<UdpSocket>,
+    address: String,
 }
 
 impl RoomRTCApp {
@@ -20,6 +22,8 @@ impl RoomRTCApp {
             our_offer: String::new(),
             remote_sdp: String::new(),
             our_answer: None,
+            socket: None,
+            address: String::new(),
         }
     }
 }
@@ -82,9 +86,32 @@ impl RoomRTCApp {
             ui.add_space(20.0);
 
             let boton = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
+            let msg_btn = egui::Button::new("send").min_size(egui::vec2(150.0, 40.0));
 
-            if ui.add_sized([150.0, 40.0], boton).clicked() {
-                self.view = View::Menu;
+            if self.socket.is_none() && let Some(pair) = self.controller.client.ice_agent.get_selected_pair() {
+                let local_addr = format!("{}:{}", pair.local.address, pair.local.port);
+                let remote_addr = format!("{}:{}", pair.remote.address, pair.remote.port);
+                self.address = local_addr.clone();
+
+                let socket = UdpSocket::bind(local_addr).unwrap();
+                socket.connect(remote_addr).unwrap();
+                socket.set_nonblocking(true).unwrap();
+                self.socket = Some(socket);
+            }
+            
+            if let Some(socket) = &self.socket {
+                let mut buf = [0u8; 1024];
+                if !socket.recv(&mut buf).is_err() {
+                    println!("{}", String::from_utf8(buf.to_vec()).unwrap());
+                }
+
+                if ui.add(msg_btn).clicked() {
+                    socket.send(format!("hola soy {}", self.address).as_bytes()).unwrap();
+                }
+
+                if ui.add_sized([150.0, 40.0], boton).clicked() {
+                    self.view = View::Menu;
+                }
             }
         });
     }
@@ -98,7 +125,7 @@ impl RoomRTCApp {
 
         ui.label("2. Paste the remote user's answer below:");
         ui.add(
-            egui::TextEdit::multiline(&mut self.remote_sdp.clone()).hint_text("Paste SDP Answer..."),
+            egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Answer..."),
         );
 
         if !self.remote_sdp.is_empty() {
@@ -118,7 +145,7 @@ impl RoomRTCApp {
         ui.separator();
         ui.label("1. Paste the remote user's offer below:");
         ui.add(
-            egui::TextEdit::multiline(&mut self.remote_sdp.clone()).hint_text("Paste SDP Offer..."),
+            egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Offer..."),
         );
 
         if self.our_answer.is_none() {
@@ -136,7 +163,10 @@ impl RoomRTCApp {
             ui.add(egui::TextEdit::multiline(&mut answer_str.clone()));
             ui.label("Connection established. Waiting for remote...");
 
-            self.view = View::Call;
+            let join_btn = egui::Button::new("Join Call");
+            if ui.add(join_btn).clicked() {
+                self.view = View::Call;
+            }
         }
     }
 }

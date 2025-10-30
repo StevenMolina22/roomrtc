@@ -1,7 +1,7 @@
 use std::net::UdpSocket;
 use crate::{camera::Camera, rtp::{RtpSender, RtpReceiver}, frame_handler::{Encoder, Decoder}, client::Client};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use super::error::ControllerError as Error;
 use std::thread;

@@ -1,4 +1,6 @@
 use std::net::UdpSocket;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
 use eframe::egui;
 use egui::Ui;
 use super::views::View;
@@ -7,23 +9,29 @@ use crate::{controller::Controller};
 pub struct RoomRTCApp {
     view: View,
     controller: Controller,
+    rx_local: Receiver<Vec<u8>>,
+    rx_remote: Receiver<Vec<u8>>,
+    socket: Option<UdpSocket>,
+    addr: String,
     our_offer: String,
     remote_sdp: String,
     our_answer: Option<String>,
-    socket: Option<UdpSocket>,
-    address: String,
 }
 
 impl RoomRTCApp {
     pub fn new() -> Self {
+        let (tx_local, rx_local) = mpsc::channel();
+        let (tx_remote, rx_remote) = mpsc::channel();
         Self {
             view: View::default(),
-            controller: Controller::new(),
+            controller: Controller::new(tx_local, tx_remote),
+            rx_local,
+            rx_remote,
+            socket: None,
+            addr: String::new(),
             our_offer: String::new(),
             remote_sdp: String::new(),
             our_answer: None,
-            socket: None,
-            address: String::new(),
         }
     }
 }
@@ -91,7 +99,7 @@ impl RoomRTCApp {
             if self.socket.is_none() && let Some(pair) = self.controller.client.ice_agent.get_selected_pair() {
                 let local_addr = format!("{}:{}", pair.local.address, pair.local.port);
                 let remote_addr = format!("{}:{}", pair.remote.address, pair.remote.port);
-                self.address = local_addr.clone();
+                self.addr = local_addr.clone();
 
                 let socket = UdpSocket::bind(local_addr).unwrap();
                 socket.connect(remote_addr).unwrap();
@@ -106,7 +114,7 @@ impl RoomRTCApp {
                 }
 
                 if ui.add(msg_btn).clicked() {
-                    socket.send(format!("hola soy {}", self.address).as_bytes()).unwrap();
+                    socket.send(format!("hola soy {}", self.addr).as_bytes()).unwrap();
                 }
 
                 if ui.add_sized([150.0, 40.0], boton).clicked() {

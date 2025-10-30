@@ -8,6 +8,7 @@ use std::thread;
 use chrono::prelude::*;
 use crate::ice::CandidatePair;
 use crate::frame_handler::{Frame, EncodedFrame};
+use crate::rtp::RtpPacket;
 
 pub struct Controller {
     pub client: Client,
@@ -15,10 +16,12 @@ pub struct Controller {
     pub rx_encoded: Arc<Mutex<Receiver<EncodedFrame>>>,
     pub tx_raw: Sender<Frame>,
     pub rx_raw: Arc<Mutex<Receiver<Frame>>>,
+    pub tx_local: Sender<Vec<u8>>,
+    pub tx_remote: Sender<Vec<u8>>,
 }
 
 impl Controller {
-    pub fn new() -> Self {
+    pub fn new(tx_local: Sender<Vec<u8>>, tx_remote: Sender<Vec<u8>>) -> Self {
         let (tx_raw, rx_raw) = channel();
         let (tx_encoded, rx_encoded) = channel();
 
@@ -28,6 +31,8 @@ impl Controller {
             rx_encoded: Arc::new(Mutex::new(rx_encoded)),
             tx_raw,
             rx_raw: Arc::new(Mutex::new(rx_raw)),
+            tx_local,
+            tx_remote,
         }
     }
 
@@ -59,33 +64,42 @@ impl Controller {
             .parse()
             .map_err(|e| Error::ParsingSocketAddressError(e))?;
 
-        let rtp_socket = UdpSocket::bind(local_rtp)
+        let rtp_sender_socket = UdpSocket::bind(local_rtp)
             .map_err(|e| Error::BindingAddressError(e.to_string()))?;
-        let rtcp_socket = UdpSocket::bind(local_rtcp)
+        let rtcp_sender_socket = UdpSocket::bind(local_rtcp)
             .map_err(|e| Error::BindingAddressError(e.to_string()))?;
 
-        rtp_socket
+        rtp_sender_socket
             .connect(remote_rtp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
-        rtcp_socket
+        rtcp_sender_socket
             .connect(remote_rtcp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
 
+        let rtp_receiver_socket = rtp_sender_socket.try_clone().map_err(|e| Error::CloningSocketError(e.to_string()))?;
+        let rtcp_receiver_socket = rtcp_sender_socket.try_clone().map_err(|e| Error::CloningSocketError(e.to_string()))?;
+
         self.spawn_camera_thread();
         self.spawn_encoder_thread();
-        self.spawn_rtp_sender_thread(rtp_socket, rtcp_socket)?;
+        self.spawn_rtp_sender_thread(rtp_sender_socket, rtcp_sender_socket)?;
+        self.spawn_rtp_receiver_thread(rtp_receiver_socket, rtcp_receiver_socket);
 
         Ok(())
     }
 
     fn spawn_camera_thread(&self) {
         let tx_to_controller = self.tx_raw.clone();
+        let tx_local_cam_receiver = self.tx_local.clone();
+
         let mut camera = Camera::new();
         let rx_camera = camera.start();
 
         thread::spawn(move || {
             for frame in rx_camera {
+                tx_local_cam_receiver.send(frame.data.clone()).unwrap();
+
                 tx_to_controller.send(frame).unwrap();
+                // Maybe we can encode and send in this thread
             }
         });
     }
@@ -145,11 +159,47 @@ impl Controller {
                 }
             }
         });
-
         Ok(())
     }
-}
 
+    fn spawn_rtp_receiver_thread(&self, rtp_receiver_socket: UdpSocket, rtcp_receiver_socket: UdpSocket) {
+        let tx_remote_cam_receiver = self.tx_remote.clone();
+
+        thread::spawn({
+            let mut receiver = RtpReceiver::new(rtp_receiver_socket, rtcp_receiver_socket).map_err(|e| Error::RtpReceiverError(e.to_string())).unwrap();
+            move || {
+                let mut actual_frame = None;
+                let mut chunks = Vec::new();
+
+                loop {
+                    let rtp_packet = receiver.receive().map_err(|e| Error::RtpReceiverError(e.to_string())).unwrap();
+
+                    match actual_frame {
+                        Some(act_frame_id) => {
+                            if act_frame_id == rtp_packet.frame_id {
+                                chunks.push(rtp_packet.clone());
+                            } else {
+                                chunks = Vec::new();
+                            }
+
+                            if rtp_packet.marker == chunks.len() as u16 {
+                                let frame_data = generate_frame_from(&mut chunks);
+                                tx_remote_cam_receiver.send(frame_data).map_err(|e| Error::RtpSenderError(e.to_string())).unwrap();
+                            }
+                        },
+                        None => actual_frame = Some(rtp_packet.frame_id),
+                    }
+                }
+            }
+        });
+    }
+}
+fn generate_frame_from(chunks: &mut Vec<RtpPacket>) -> Vec<u8> {
+    chunks.sort_by_key(|c| c.chunk_id);
+    let mut data = Vec::new();
+    let _ = chunks.iter().map(|c| data.extend(c.payload.clone()));
+    data
+}
 
 
 /*

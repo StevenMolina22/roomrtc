@@ -2,7 +2,7 @@
 
 pub struct RtpPacket {
     version: u8,
-    marker: u16,
+    pub marker: u16,
     pub(crate) payload_type: u8,
     pub frame_id: u64,
     pub chunk_id: u64,

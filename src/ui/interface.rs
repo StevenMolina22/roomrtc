@@ -105,9 +105,8 @@ impl RoomRTCApp {
                 socket.connect(remote_addr).unwrap();
                 socket.set_nonblocking(true).unwrap();
                 self.socket = Some(socket);
-
-
             }
+
             if let Some(socket) = &self.socket {
                 let mut buf = [0u8; 1024];
                 if !socket.recv(&mut buf).is_err() {
@@ -122,8 +121,6 @@ impl RoomRTCApp {
                     self.view = View::Menu;
                 }
             }
-
-
         });
     }
 
@@ -156,7 +153,7 @@ impl RoomRTCApp {
         ui.separator();
         ui.label("1. Paste the remote user's offer below:");
         ui.add(
-            egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Offer..."),
+            egui::TextEdit::multiline(&mut self.remote_sdp.clone()).hint_text("Paste SDP Offer..."),
         );
 
         if self.our_answer.is_none() {

@@ -5,12 +5,13 @@ use eframe::egui;
 use egui::Ui;
 use super::views::View;
 use crate::{controller::Controller};
+use crate::frame_handler::Frame;
 
 pub struct RoomRTCApp {
     view: View,
     controller: Controller,
-    rx_local: Receiver<Vec<u8>>,
-    rx_remote: Receiver<Vec<u8>>,
+    rx_local: Receiver<Frame>,
+    rx_remote: Receiver<Frame>,
     socket: Option<UdpSocket>,
     addr: String,
     our_offer: String,

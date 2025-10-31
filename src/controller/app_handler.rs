@@ -16,12 +16,12 @@ pub struct Controller {
     pub rx_encoded: Arc<Mutex<Receiver<EncodedFrame>>>,
     pub tx_raw: Sender<Frame>,
     pub rx_raw: Arc<Mutex<Receiver<Frame>>>,
-    pub tx_local: Sender<Vec<u8>>,
-    pub tx_remote: Sender<Vec<u8>>,
+    pub tx_local: Sender<Frame>,
+    pub tx_remote: Sender<Frame>,
 }
 
 impl Controller {
-    pub fn new(tx_local: Sender<Vec<u8>>, tx_remote: Sender<Vec<u8>>) -> Self {
+    pub fn new(tx_local: Sender<Frame>, tx_remote: Sender<Frame>) -> Self {
         let (tx_raw, rx_raw) = channel();
         let (tx_encoded, rx_encoded) = channel();
 
@@ -96,7 +96,7 @@ impl Controller {
 
         thread::spawn(move || {
             for frame in rx_camera {
-                tx_local_cam_receiver.send(frame.data.clone()).unwrap();
+                tx_local_cam_receiver.send(frame.clone()).unwrap();
 
                 tx_to_controller.send(frame).unwrap();
                 // Maybe we can encode and send in this thread
@@ -113,10 +113,14 @@ impl Controller {
             move || {
                 for frame in rx_raw.lock().unwrap().try_iter() {
                     let id = frame.id;
+                    let height = frame.height;
+                    let width = frame.width;
                     let encoded = encoder.encode_frame(frame).unwrap();
                     let encoded_frame = EncodedFrame {
                         id,
                         chunks: encoded,
+                        width,
+                        height
                     };
                     tx_encoded.send(encoded_frame).unwrap();
                 }
@@ -167,6 +171,7 @@ impl Controller {
 
         thread::spawn({
             let mut receiver = RtpReceiver::new(rtp_receiver_socket, rtcp_receiver_socket).map_err(|e| Error::RtpReceiverError(e.to_string())).unwrap();
+            let mut decoder = Decoder::new().unwrap();
             move || {
                 let mut actual_frame = None;
                 let mut chunks = Vec::new();
@@ -183,7 +188,7 @@ impl Controller {
                             }
 
                             if rtp_packet.marker == chunks.len() as u16 {
-                                let frame_data = generate_frame_from(&mut chunks);
+                                let frame_data = generate_frame_from(&mut chunks, &mut decoder);
                                 tx_remote_cam_receiver.send(frame_data).map_err(|e| Error::RtpSenderError(e.to_string())).unwrap();
                             }
                         },
@@ -194,11 +199,19 @@ impl Controller {
         });
     }
 }
-fn generate_frame_from(chunks: &mut Vec<RtpPacket>) -> Vec<u8> {
+fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Frame {
+    let fr_id = chunks.first().unwrap().frame_id;
     chunks.sort_by_key(|c| c.chunk_id);
     let mut data = Vec::new();
     let _ = chunks.iter().map(|c| data.extend(c.payload.clone()));
-    data
+    let (decoded_data, width, height) =decoder.decode_frame(&data).unwrap();
+    
+    Frame {
+        data: decoded_data,
+        width,
+        height,
+        id: fr_id,
+    }
 }
 
 

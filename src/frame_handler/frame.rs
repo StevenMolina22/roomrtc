@@ -1,5 +1,5 @@
 use opencv::imgproc;
-use opencv::prelude::*;
+use opencv::{prelude::*, core};
 use super::FrameError as Error;
 
 #[derive(Clone)]
@@ -25,7 +25,8 @@ impl Frame {
             &yuv_mat,
             &mut rgb_mat,
             imgproc::COLOR_YUV2RGB_I420,
-            0
+            0,
+            core::AlgorithmHint::ALGO_HINT_DEFAULT
         ).map_err(|_| Error::TypeConversionError)?;
 
         Ok(

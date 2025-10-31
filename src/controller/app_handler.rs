@@ -110,16 +110,14 @@ impl Controller {
         thread::spawn({
             let mut encoder = Encoder::new().unwrap();
             move || {
-                for frame in rx_raw.lock().unwrap().try_iter() {
-                    let id = frame.id;
-                    let height = frame.height;
-                    let width = frame.width;
-                    let encoded = encoder.encode_frame(frame).unwrap();
+                loop {
+                    let frame =  rx_raw.lock().unwrap().recv().unwrap();
+                    let encoded = encoder.encode_frame(&frame).unwrap();
                     let encoded_frame = EncodedFrame {
-                        id,
+                        id: frame.id,
                         chunks: encoded,
-                        width,
-                        height
+                        width: frame.width,
+                        height: frame.height,
                     };
                     tx_encoded.send(encoded_frame).unwrap();
                 }
@@ -146,7 +144,9 @@ impl Controller {
             )
                 .map_err(|e| Error::RtpSenderError(e.to_string()))?;
             move || {
-                for encoded_frame in rx_encoded.lock().unwrap().try_iter() {
+                loop {
+                    let encoded_frame = rx_encoded.lock().unwrap().recv().unwrap();
+                    println!("received frame from encoder thread");
                     for (i, c) in encoded_frame.chunks.iter().enumerate() {
                         rtp_sender
                             .send(
@@ -158,6 +158,7 @@ impl Controller {
                                 encoded_frame.chunks.len() as u16,
                             )
                             .unwrap();
+                        println!("sent frame to rtp receiver");
                     }
                 }
             }
@@ -177,7 +178,7 @@ impl Controller {
 
                 loop {
                     let rtp_packet = receiver.receive().map_err(|e| Error::RtpReceiverError(e.to_string())).unwrap();
-
+                    println!("received rtp packet");
                     match actual_frame {
                         Some(act_frame_id) => {
                             if act_frame_id == rtp_packet.frame_id {
@@ -187,8 +188,11 @@ impl Controller {
                             }
 
                             if rtp_packet.marker == chunks.len() as u16 {
+                                println!("complete frame received!");
                                 let frame_data = generate_frame_from(&mut chunks, &mut decoder);
+                                println!("frame data generated");
                                 tx_remote_cam_receiver.send(frame_data).map_err(|e| Error::RtpSenderError(e.to_string())).unwrap();
+                                println!("sent frame to interface");
                             }
                         },
                         None => actual_frame = Some(rtp_packet.frame_id),

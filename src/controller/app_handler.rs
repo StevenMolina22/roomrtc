@@ -16,12 +16,12 @@ pub struct Controller {
     pub rx_encoded: Arc<Mutex<Receiver<EncodedFrame>>>,
     pub tx_raw: Sender<Frame>,
     pub rx_raw: Arc<Mutex<Receiver<Frame>>>,
-    pub tx_local: Sender<Vec<u8>>,
-    pub tx_remote: Sender<Vec<u8>>,
+    pub tx_local: Sender<Frame>,
+    pub tx_remote: Sender<Frame>,
 }
 
 impl Controller {
-    pub fn new(tx_local: Sender<Vec<u8>>, tx_remote: Sender<Vec<u8>>) -> Self {
+    pub fn new(tx_local: Sender<Frame>, tx_remote: Sender<Frame>) -> Self {
         let (tx_raw, rx_raw) = channel();
         let (tx_encoded, rx_encoded) = channel();
 
@@ -198,7 +198,9 @@ fn generate_frame_from(chunks: &mut Vec<RtpPacket>) -> Vec<u8> {
     chunks.sort_by_key(|c| c.chunk_id);
     let mut data = Vec::new();
     let _ = chunks.iter().map(|c| data.extend(c.payload.clone()));
-    data
+    
+    Decoder::decode_frame(&mut self, data)
+    // Here we have to decode the frame and return it as Vec<u8>
 }
 
 

@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
+
 pub struct Camera {
     running: Arc<RwLock<bool>>,
     frame_id: Arc<RwLock<usize>>,
@@ -37,7 +38,7 @@ impl Camera {
 
             let mut mat = Mat::default();
             let mut yuv = Mat::default();
-
+            
             while *running.read().unwrap() {
                 if !cam.read(&mut mat).unwrap() || mat.empty() {
                     continue;

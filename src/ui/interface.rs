@@ -2,20 +2,23 @@ use std::net::UdpSocket;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use eframe::egui;
-use egui::Ui;
+use egui::{ColorImage, Context, TextureHandle, TextureOptions, Ui};
 use super::views::View;
 use crate::{controller::Controller};
+use crate::frame_handler::Frame;
 
 pub struct RoomRTCApp {
     view: View,
     controller: Controller,
-    rx_local: Receiver<Vec<u8>>,
-    rx_remote: Receiver<Vec<u8>>,
+    rx_local: Receiver<Frame>,
+    rx_remote: Receiver<Frame>,
     socket: Option<UdpSocket>,
     addr: String,
     our_offer: String,
     remote_sdp: String,
     our_answer: Option<String>,
+    local_texture: Option<TextureHandle>,
+    remote_texture: Option<TextureHandle>,
 }
 
 impl RoomRTCApp {
@@ -32,19 +35,21 @@ impl RoomRTCApp {
             our_offer: String::new(),
             remote_sdp: String::new(),
             our_answer: None,
+            local_texture: None,
+            remote_texture: None,
         }
     }
 }
 
 impl eframe::App for RoomRTCApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
 
             match self.view {
                 View::Menu => self.show_menu(ui),
                 View::Connection => self.show_connection(ui),
-                View::Call => self.show_call(ui),
+                View::Call => self.show_call(ctx, ui),
             }
         });
     }
@@ -88,38 +93,16 @@ impl RoomRTCApp {
         }
     }
 
-    fn show_call(&mut self, ui: &mut Ui) {
-        ui.vertical_centered(|ui| {
+    fn show_call(&mut self, ctx: & Context, ui: &mut Ui) {
+        ui.vertical_centered(|mut ui| {
             ui.heading("Llamada");
             ui.add_space(20.0);
 
-            let boton = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
-            let msg_btn = egui::Button::new("send").min_size(egui::vec2(150.0, 40.0));
+            self.update_local_camera(&ctx, &mut ui);
 
-            if self.socket.is_none() && let Some(pair) = self.controller.client.ice_agent.get_selected_pair() {
-                let local_addr = format!("{}:{}", pair.local.address, pair.local.port);
-                let remote_addr = format!("{}:{}", pair.remote.address, pair.remote.port);
-                self.addr = local_addr.clone();
-
-                let socket = UdpSocket::bind(local_addr).unwrap();
-                socket.connect(remote_addr).unwrap();
-                socket.set_nonblocking(true).unwrap();
-                self.socket = Some(socket);
-            }
-
-            if let Some(socket) = &self.socket {
-                let mut buf = [0u8; 1024];
-                if !socket.recv(&mut buf).is_err() {
-                    println!("{}", String::from_utf8(buf.to_vec()).unwrap());
-                }
-
-                if ui.add(msg_btn).clicked() {
-                    socket.send(format!("hola soy {}", self.addr).as_bytes()).unwrap();
-                }
-
-                if ui.add_sized([150.0, 40.0], boton).clicked() {
-                    self.view = View::Menu;
-                }
+            let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
+            if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
+                self.view = View::Menu;
             }
         });
     }
@@ -177,4 +160,33 @@ impl RoomRTCApp {
             }
         }
     }
+    fn update_local_camera(&mut self, ctx: &Context,  ui: &mut Ui) {
+        let mut last_frame: Option<Frame> = None;
+        while let Ok(frame) = self.rx_local.try_recv() {
+            last_frame = Some(frame);
+        }
+
+
+        if let Some(frame) = last_frame {
+            let color_img = ColorImage::from_rgb([frame.height, frame.width], &frame.data);
+            self.local_texture = Some(ctx.load_texture("remote", color_img, TextureOptions::default()))
+        }
+
+        if let Some(texture) = &self.local_texture {
+            // Podés ajustar el tamaño del cuadro (por ejemplo, 320x240)
+            let size = texture.size_vec2();
+            let aspect_ratio = size.x / size.y;
+            let desired_height = 240.0;
+            let desired_width = desired_height * aspect_ratio;
+
+            let image = egui::Image::new(texture)
+                .fit_to_exact_size(egui::vec2(desired_width, desired_height));
+            
+            ui.add(image);            
+        } else {
+            ui.label("No se recibió video todavía...");
+        }
+        //hacer el display de self.local_texture
+    }
 }
+

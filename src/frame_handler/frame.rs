@@ -4,4 +4,3 @@ pub struct Frame {
     pub height: usize,
     pub id: u64
 }
-

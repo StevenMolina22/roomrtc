@@ -184,18 +184,24 @@ impl Controller {
                             if act_frame_id == rtp_packet.frame_id {
                                 chunks.push(rtp_packet.clone());
                             } else {
-                                chunks = Vec::new();
+                                chunks = vec![rtp_packet.clone()];
+                                actual_frame = Some(rtp_packet.frame_id);
                             }
 
                             if rtp_packet.marker == chunks.len() as u16 {
                                 println!("complete frame received!");
                                 let frame_data = generate_frame_from(&mut chunks, &mut decoder);
                                 println!("frame data generated");
-                                tx_remote_cam_receiver.send(frame_data).map_err(|e| Error::RtpSenderError(e.to_string())).unwrap();
+                                tx_remote_cam_receiver.send(frame_data)
+                                    .map_err(|e| Error::RtpSenderError(e.to_string()))
+                                    .unwrap();
                                 println!("sent frame to interface");
                             }
                         },
-                        None => actual_frame = Some(rtp_packet.frame_id),
+                        None => {
+                            actual_frame = Some(rtp_packet.frame_id);
+                            chunks.push(rtp_packet.clone());
+                        }
                     }
                 }
             }

@@ -1,14 +1,19 @@
-use std::net::UdpSocket;
-use crate::{camera::Camera, rtp::{RtpSender, RtpReceiver}, frame_handler::{Encoder, Decoder}, client::Client};
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{channel, Receiver, Sender};
 use super::error::ControllerError as Error;
-use std::thread;
-use chrono::prelude::*;
+use crate::frame_handler::{EncodedFrame, Frame};
 use crate::ice::CandidatePair;
-use crate::frame_handler::{Frame, EncodedFrame};
 use crate::rtp::RtpPacket;
+use crate::{
+    camera::Camera,
+    client::Client,
+    frame_handler::{Decoder, Encoder},
+    rtp::{RtpReceiver, RtpSender},
+};
+use chrono::prelude::*;
+use std::net::SocketAddr;
+use std::net::UdpSocket;
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 pub struct Controller {
     pub client: Client,
@@ -64,10 +69,10 @@ impl Controller {
             .parse()
             .map_err(|e| Error::ParsingSocketAddressError(e))?;
 
-        let rtp_sender_socket = UdpSocket::bind(local_rtp)
-            .map_err(|e| Error::BindingAddressError(e.to_string()))?;
-        let rtcp_sender_socket = UdpSocket::bind(local_rtcp)
-            .map_err(|e| Error::BindingAddressError(e.to_string()))?;
+        let rtp_sender_socket =
+            UdpSocket::bind(local_rtp).map_err(|e| Error::BindingAddressError(e.to_string()))?;
+        let rtcp_sender_socket =
+            UdpSocket::bind(local_rtcp).map_err(|e| Error::BindingAddressError(e.to_string()))?;
 
         rtp_sender_socket
             .connect(remote_rtp)
@@ -76,8 +81,12 @@ impl Controller {
             .connect(remote_rtcp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
 
-        let rtp_receiver_socket = rtp_sender_socket.try_clone().map_err(|e| Error::CloningSocketError(e.to_string()))?;
-        let rtcp_receiver_socket = rtcp_sender_socket.try_clone().map_err(|e| Error::CloningSocketError(e.to_string()))?;
+        let rtp_receiver_socket = rtp_sender_socket
+            .try_clone()
+            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
+        let rtcp_receiver_socket = rtcp_sender_socket
+            .try_clone()
+            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
 
         self.spawn_camera_thread();
         self.spawn_encoder_thread();
@@ -96,7 +105,9 @@ impl Controller {
 
         thread::spawn(move || {
             for frame in rx_camera {
-                if tx_local_cam.send(frame.clone()).is_err() || tx_to_controller.send(frame).is_err() {
+                if tx_local_cam.send(frame.clone()).is_err()
+                    || tx_to_controller.send(frame).is_err()
+                {
                     break;
                 }
             }
@@ -111,7 +122,7 @@ impl Controller {
             let mut encoder = Encoder::new().unwrap();
             move || {
                 loop {
-                    let frame =  rx_raw.lock().unwrap().recv().unwrap();
+                    let frame = rx_raw.lock().unwrap().recv().unwrap();
                     let encoded = encoder.encode_frame(&frame).unwrap();
                     let encoded_frame = EncodedFrame {
                         id: frame.id,
@@ -142,7 +153,7 @@ impl Controller {
                     .map_err(|e| Error::CloningSocketError(e.to_string()))?,
                 42,
             )
-                .map_err(|e| Error::RtpSenderError(e.to_string()))?;
+            .map_err(|e| Error::RtpSenderError(e.to_string()))?;
             move || {
                 loop {
                     let encoded_frame = rx_encoded.lock().unwrap().recv().unwrap();
@@ -166,18 +177,27 @@ impl Controller {
         Ok(())
     }
 
-    fn spawn_rtp_receiver_thread(&self, rtp_receiver_socket: UdpSocket, rtcp_receiver_socket: UdpSocket) {
+    fn spawn_rtp_receiver_thread(
+        &self,
+        rtp_receiver_socket: UdpSocket,
+        rtcp_receiver_socket: UdpSocket,
+    ) {
         let tx_remote_cam_receiver = self.tx_remote.clone();
 
         thread::spawn({
-            let mut receiver = RtpReceiver::new(rtp_receiver_socket, rtcp_receiver_socket).map_err(|e| Error::RtpReceiverError(e.to_string())).unwrap();
+            let mut receiver = RtpReceiver::new(rtp_receiver_socket, rtcp_receiver_socket)
+                .map_err(|e| Error::RtpReceiverError(e.to_string()))
+                .unwrap();
             let mut decoder = Decoder::new().unwrap();
             move || {
                 let mut actual_frame = None;
                 let mut chunks = Vec::new();
 
                 loop {
-                    let rtp_packet = receiver.receive().map_err(|e| Error::RtpReceiverError(e.to_string())).unwrap();
+                    let rtp_packet = receiver
+                        .receive()
+                        .map_err(|e| Error::RtpReceiverError(e.to_string()))
+                        .unwrap();
                     println!("received rtp packet");
                     match actual_frame {
                         Some(act_frame_id) => {
@@ -192,12 +212,13 @@ impl Controller {
                                 println!("complete frame received!");
                                 let frame_data = generate_frame_from(&mut chunks, &mut decoder);
                                 println!("frame data generated");
-                                tx_remote_cam_receiver.send(frame_data)
+                                tx_remote_cam_receiver
+                                    .send(frame_data)
                                     .map_err(|e| Error::RtpSenderError(e.to_string()))
                                     .unwrap();
                                 println!("sent frame to interface");
                             }
-                        },
+                        }
                         None => {
                             actual_frame = Some(rtp_packet.frame_id);
                             chunks.push(rtp_packet.clone());
@@ -213,8 +234,8 @@ fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Fr
     chunks.sort_by_key(|c| c.chunk_id);
     let mut data = Vec::new();
     let _ = chunks.iter().map(|c| data.extend(c.payload.clone()));
-    let (decoded_data, width, height) =decoder.decode_frame(&data).unwrap();
-    
+    let (decoded_data, width, height) = decoder.decode_frame(&data).unwrap();
+
     Frame {
         data: decoded_data,
         width,
@@ -222,7 +243,6 @@ fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Fr
         id: fr_id,
     }
 }
-
 
 /*
 

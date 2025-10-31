@@ -1,10 +1,10 @@
-use std::sync::{mpsc};
-use std::sync::mpsc::Receiver;
+use super::views::View;
+use crate::controller::Controller;
+use crate::frame_handler::Frame;
 use eframe::egui;
 use egui::{ColorImage, Context, TextureHandle, TextureOptions, Ui};
-use super::views::View;
-use crate::{controller::Controller};
-use crate::frame_handler::Frame;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
 
 pub struct RoomRTCApp {
     view: View,
@@ -56,8 +56,8 @@ impl eframe::App for RoomRTCApp {
 impl RoomRTCApp {
     fn show_menu(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            let create_btn = egui::Button::new("Create Call (Offer)")
-                .min_size(egui::vec2(200.0, 40.0));
+            let create_btn =
+                egui::Button::new("Create Call (Offer)").min_size(egui::vec2(200.0, 40.0));
             if ui.add_sized([200.0, 40.0], create_btn).clicked() {
                 self.our_offer = self.controller.client.get_offer();
                 self.remote_sdp = String::new();
@@ -67,8 +67,8 @@ impl RoomRTCApp {
 
             ui.add_space(10.0);
 
-            let join_btn = egui::Button::new("Join Call (Answer)")
-                .min_size(egui::vec2(200.0, 40.0));
+            let join_btn =
+                egui::Button::new("Join Call (Answer)").min_size(egui::vec2(200.0, 40.0));
             if ui.add_sized([200.0, 40.0], join_btn).clicked() {
                 self.our_offer = String::new();
                 self.remote_sdp = String::new();
@@ -90,7 +90,7 @@ impl RoomRTCApp {
         }
     }
 
-    fn show_call(&mut self, ctx: & Context, ui: &mut Ui) {
+    fn show_call(&mut self, ctx: &Context, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
             ui.heading("Llamada");
             ui.add_space(20.0);
@@ -121,9 +121,7 @@ impl RoomRTCApp {
         ui.separator();
 
         ui.label("2. Paste the remote user's answer below:");
-        ui.add(
-            egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Answer..."),
-        );
+        ui.add(egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Answer..."));
 
         if !self.remote_sdp.is_empty() {
             if ui.button("Connect").clicked() {
@@ -142,9 +140,7 @@ impl RoomRTCApp {
         ui.heading("You are the Answerer");
         ui.separator();
         ui.label("1. Paste the remote user's offer below:");
-        ui.add(
-            egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Offer..."),
-        );
+        ui.add(egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Offer..."));
 
         if self.our_answer.is_none() {
             if !self.remote_sdp.is_empty() && ui.button("Generate Answer").clicked() {
@@ -163,20 +159,27 @@ impl RoomRTCApp {
 
             let join_btn = egui::Button::new("Join Call");
             if ui.add(join_btn).clicked() {
-                self.controller.start_call().unwrap();
-                self.view = View::Call;
+                if let Err(e) = self.controller.start_call() {
+                    eprintln!("Failed to start call: {}", e);
+                    // TODO: Show this error in the GUI
+                } else {
+                    self.view = View::Call;
+                }
             }
         }
     }
 
-
     fn update_video_textures(&mut self, ctx: &Context) {
         update_camera_view(ctx, &self.rx_local, &mut self.local_texture, "local_camera");
-        update_camera_view(ctx, &self.rx_remote, &mut self.remote_texture, "remote_camera");
+        update_camera_view(
+            ctx,
+            &self.rx_remote,
+            &mut self.remote_texture,
+            "remote_camera",
+        );
     }
 
     fn show_local_camera(&mut self, ui: &mut Ui) {
-
         if let Some(texture) = &self.local_texture {
             let size = texture.size_vec2();
             let aspect_ratio = size.x / size.y;
@@ -192,7 +195,6 @@ impl RoomRTCApp {
     }
 
     fn show_remote_camera(&mut self, ui: &mut Ui) {
-
         if let Some(texture) = &self.remote_texture {
             let size = texture.size_vec2();
             let aspect_ratio = size.x / size.y;

@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 #[derive(PartialEq, Eq, Debug)]
-pub enum RTCPError {
+pub enum RtcpError {
     PoisonedLock,
     SocketCloneFailed,
     InvalidRTCPPacket,
@@ -10,19 +10,19 @@ pub enum RTCPError {
     TimedOut,
 }
 
-impl Display for RTCPError {
+impl Display for RtcpError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            RTCPError::PoisonedLock => write!(f, "Error: Poisoned lock"),
-            RTCPError::InvalidRTCPPacket => {
+            RtcpError::PoisonedLock => write!(f, "Error: Poisoned lock"),
+            RtcpError::InvalidRTCPPacket => {
                 write!(f, "Error: \"Invalid or corrupted RTCP packet\"")
             }
-            RTCPError::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
-            RTCPError::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
-            RTCPError::GoodbyeReceived => write!(f, "Error: \"Goodbye\""),
-            RTCPError::TimedOut => write!(f, "Error: \"Report receiver timed out\""),
+            RtcpError::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
+            RtcpError::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
+            RtcpError::GoodbyeReceived => write!(f, "Error: \"Goodbye\""),
+            RtcpError::TimedOut => write!(f, "Error: \"Report receiver timed out\""),
         }
     }
 }
 
-impl std::error::Error for RTCPError {}
+impl std::error::Error for RtcpError {}

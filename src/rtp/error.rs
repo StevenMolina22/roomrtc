@@ -2,13 +2,13 @@ use std::fmt::{Display, Formatter};
 
 /// Represents the different types of errors that can occur while handling RTP operations.
 #[derive(PartialEq, Eq, Debug)]
-pub enum RTPError {
+pub enum RtpError {
     /// The requested address is not available.
     AddrNotAvailable,
     /// Failed to acquire a lock due to a concurrent thread error.
     PoisonedLock,
-    /// Failed to bind or connect a UDP socket in non-blocking mode.
-    BlockingSocket,
+    /// Failed to configure socket.
+    SocketConfigFailed,
     /// Failed to clone a socket.
     SocketCloneFailed,
     /// Failed to send through the socket.
@@ -19,26 +19,27 @@ pub enum RTPError {
     InvalidRtpPacket,
     /// Failed to terminate an active RTP connection or related thread.
     TerminateFailed,
+    /// Failed to send or receive because connection has been closed
+    ConnectionClosed,
     /// RTCP Error
     RTCPError(String),
 }
 
-impl Display for RTPError {
+impl Display for RtpError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            RTPError::AddrNotAvailable => write!(f, "Error: \"Address not available\""),
-            RTPError::BlockingSocket => {
-                write!(f, "Error: \"Failed to bind or connect UDP socket\"")
-            }
-            RTPError::PoisonedLock => write!(f, "Error: \"Poisoned lock\""),
-            RTPError::SendFailed => write!(f, "Error: \"Failed to send RTP packet\""),
-            RTPError::ReceiveFailed => write!(f, "Error: \"Failed to receive RTP packet\""),
-            RTPError::InvalidRtpPacket => write!(f, "Error: \"Invalid or corrupted RTP packet\""),
-            RTPError::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
-            RTPError::TerminateFailed => write!(f, "Error: \"Failed to terminate\""),
-            RTPError::RTCPError(e) => write!(f, "{}", e),
+            RtpError::AddrNotAvailable => write!(f, "Error: \"Address not available\""),
+            RtpError::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
+            RtpError::PoisonedLock => write!(f, "Error: \"Poisoned lock\""),
+            RtpError::SendFailed => write!(f, "Error: \"Failed to send RTP packet\""),
+            RtpError::ReceiveFailed => write!(f, "Error: \"Failed to receive RTP packet\""),
+            RtpError::InvalidRtpPacket => write!(f, "Error: \"Invalid or corrupted RTP packet\""),
+            RtpError::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
+            RtpError::TerminateFailed => write!(f, "Error: \"Failed to terminate\""),
+            RtpError::ConnectionClosed => write!(f, "Error: \"Connection closed\""),
+            RtpError::RTCPError(e) => write!(f, "{}", e),
         }
     }
 }
 
-impl std::error::Error for RTPError {}
+impl std::error::Error for RtpError {}

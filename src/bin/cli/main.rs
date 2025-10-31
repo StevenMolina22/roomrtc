@@ -1,8 +1,7 @@
 use std::env::args;
 use std::io::{Read, stdin};
-use std::sync::mpsc;
 
-use roomrtc::client::client::Client;
+use roomrtc::client::Client;
 
 fn main() {
     let argv = args().collect::<Vec<String>>();
@@ -11,12 +10,7 @@ fn main() {
         return;
     }
 
-    // Create dummy channels for the CLI
-    let (local_tx, _local_rx) = mpsc::channel();
-    let (remote_tx, _remote_rx) = mpsc::channel();
-
-    let mut client = Client::new(local_tx, remote_tx);
-
+    let mut client = Client::new();
     match argv[1].as_str() {
         "0" => {
             // Offerer: Print offer, wait for answer

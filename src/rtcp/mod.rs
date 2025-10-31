@@ -1,6 +1,7 @@
-mod rtcp_package;
 mod error;
-pub mod rtcp_connection_handler;
+mod report_handler;
+mod rtcp_packet;
 
-pub(crate) use self::rtcp_package::RTCPPackage;
-pub(crate) use self::error::RTCPError;
+pub use self::error::RtcpError;
+pub use self::report_handler::RtcpReportHandler;
+pub use self::rtcp_packet::RtcpPacket;

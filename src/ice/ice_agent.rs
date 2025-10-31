@@ -101,6 +101,10 @@ impl IceAgent {
         Ok(())
     }
 
+    pub fn get_local_ip_str(&self) -> Result<String, Error> {
+        get_local_ip()
+    }
+
     #[must_use]
     pub fn get_local_candidate(&self) -> Option<&Candidate> {
         self.local_candidates.first()

@@ -16,7 +16,6 @@ pub struct Client {
     pub ice_agent: IceAgent,
 }
 
-
 impl Client {
     pub fn new() -> Self {
         let mut ice_agent = IceAgent::new();
@@ -31,12 +30,7 @@ impl Client {
             HashSet::from([MEDIA_FMT]),
         );
         media_description
-            .add_attribute(Attribute::RTPMap(
-                111,
-                "H264".into(),
-                48000,
-                None,
-            ))
+            .add_attribute(Attribute::RTPMap(111, "H264".into(), 48000, None))
             .unwrap();
 
         if let Some(candidate) = ice_agent.get_local_candidate() {
@@ -58,7 +52,8 @@ impl Client {
         let sdp_offer = SessionDescriptionProtocol::from_str(offer_str)
             .map_err(|e| Error::SdpCreationError(e.to_string()))?;
 
-        let answer = self.sdp
+        let answer = self
+            .sdp
             .create_answer(&sdp_offer)
             .map(|answer_sdp| answer_sdp.to_string())
             .map_err(|e| Error::SdpCreationError(e.to_string()))?;

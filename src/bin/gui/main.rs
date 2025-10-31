@@ -5,6 +5,6 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "RoomRTC App",
         options,
-        Box::new(|_cc| Ok(Box::new(RoomRTCApp::default()))),
+        Box::new(|_cc| Ok(Box::new(RoomRTCApp::new()))),
     )
 }

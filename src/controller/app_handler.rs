@@ -212,7 +212,9 @@ fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Fr
     let fr_id = chunks.first().unwrap().frame_id;
     chunks.sort_by_key(|c| c.chunk_id);
     let mut data = Vec::new();
-    let _ = chunks.iter().map(|c| data.extend(c.payload.clone()));
+    for c in chunks.iter() {
+        data.extend_from_slice(&c.payload);
+    }
     let (decoded_data, width, height) =decoder.decode_frame(&data).unwrap();
     
     Frame {

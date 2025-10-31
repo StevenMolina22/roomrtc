@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use super::error::ControllerError as Error;
 use std::thread;
+use std::thread::JoinHandle;
 use chrono::prelude::*;
 use crate::ice::CandidatePair;
 use crate::frame_handler::{Frame, EncodedFrame};
@@ -14,27 +15,28 @@ pub struct Controller {
     pub client: Client,
     pub tx_encoded: Sender<EncodedFrame>,
     pub rx_encoded: Arc<Mutex<Receiver<EncodedFrame>>>,
-    pub tx_raw: Sender<Frame>,
-    pub rx_raw: Arc<Mutex<Receiver<Frame>>>,
     pub tx_local: Sender<Frame>,
     pub tx_remote: Sender<Frame>,
-    connection_status: Arc<RwLock<ConnectionStatus>>,
+    pub connection_status: Arc<RwLock<ConnectionStatus>>,
+    pub camera_handler: Option<JoinHandle<()>>,
+    pub rtp_sender_handler: Option<JoinHandle<()>>,
+    pub rtp_receiver_handler: Option<JoinHandle<()>>,
 }
 
 impl Controller {
     pub fn new(tx_local: Sender<Frame>, tx_remote: Sender<Frame>) -> Self {
-        let (tx_raw, rx_raw) = channel();
         let (tx_encoded, rx_encoded) = channel();
 
         Self {
             client: Client::new(),
             tx_encoded,
             rx_encoded: Arc::new(Mutex::new(rx_encoded)),
-            tx_raw,
-            rx_raw: Arc::new(Mutex::new(rx_raw)),
             tx_local,
             tx_remote,
-            connection_status: Arc::new(RwLock::new(ConnectionStatus::Closed))
+            connection_status: Arc::new(RwLock::new(ConnectionStatus::Closed)),
+            camera_handler: None,
+            rtp_sender_handler: None,
+            rtp_receiver_handler: None,
         }
     }
 
@@ -96,45 +98,25 @@ impl Controller {
         let rtcp_receiver_socket = rtcp_sender_socket.try_clone().map_err(|e| Error::CloningSocketError(e.to_string()))?;
 
         self.spawn_camera_thread();
-        self.spawn_encoder_thread();
         self.spawn_rtp_sender_thread(rtp_sender_socket, rtcp_sender_socket, Arc::clone(&self.connection_status))?;
         self.spawn_rtp_receiver_thread(rtp_receiver_socket, rtcp_receiver_socket, Arc::clone(&self.connection_status));
 
         Ok(())
     }
 
-    pub fn spawn_camera_thread(&self) {
-        let tx_to_controller = self.tx_raw.clone();
+    pub fn spawn_camera_thread(&mut self) {
         let tx_local_cam = self.tx_local.clone();
-
-        let mut camera = Camera::new();
-        let rx_camera = camera.start();
-
-        thread::spawn(move || {
-            for frame in rx_camera {
-                if tx_local_cam.send(frame.clone()).is_err() || tx_to_controller.send(frame).is_err() {
-                    break;
-                }
-            }
-        });
-        
-        if let Ok(conn) = self.connection_status.read() {
-            if *conn == ConnectionStatus::Closed {
-                camera.stop();
-                // handler.join().unwrap();
-            }
-        }
-    }
-
-    fn spawn_encoder_thread(&self) {
         let tx_encoded = self.tx_encoded.clone();
-        let rx_raw = self.rx_raw.clone();
 
-        thread::spawn({
+        let handler = thread::spawn({
+            let mut camera = Camera::new();
+            let rx_camera = camera.start();
             let mut encoder = Encoder::new().unwrap();
             move || {
-                loop {
-                    let frame = rx_raw.lock().unwrap().recv().unwrap();
+                for frame in rx_camera {
+                    if tx_local_cam.send(frame.clone()).is_err() {
+                        break;
+                    }
                     let encoded = encoder.encode_frame(&frame).unwrap();
                     let encoded_frame = EncodedFrame {
                         id: frame.id,
@@ -147,10 +129,11 @@ impl Controller {
                 }
             }
         });
+        self.camera_handler = Some(handler);
     }
 
     fn spawn_rtp_sender_thread(
-        &self,
+        &mut self,
         rtp_socket: UdpSocket,
         rtcp_socket: UdpSocket,
         connection_status: Arc<RwLock<ConnectionStatus>>,
@@ -184,7 +167,6 @@ impl Controller {
                                 encoded_frame.chunks.len() as u16,
                             )
                             .unwrap();
-                        println!("sent frame to rtp receiver");
                     }
                 }
             }
@@ -204,7 +186,6 @@ impl Controller {
 
                 loop {
                     let rtp_packet = receiver.receive().map_err(|e| Error::RtpReceiverError(e.to_string())).unwrap();
-                    println!("received rtp packet");
                     match actual_frame {
                         Some(act_frame_id) => {
                             if act_frame_id == rtp_packet.frame_id {
@@ -215,13 +196,10 @@ impl Controller {
                             }
 
                             if rtp_packet.marker == chunks.len() as u16 {
-                                println!("complete frame received!");
                                 let frame_data = generate_frame_from(&mut chunks, &mut decoder);
-                                println!("frame data generated");
                                 tx_remote_cam_receiver.send(frame_data)
                                     .map_err(|e| Error::RtpSenderError(e.to_string()))
                                     .unwrap();
-                                println!("sent frame to interface");
                             }
                         },
                         None => {

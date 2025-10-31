@@ -16,7 +16,11 @@ pub enum FrameError {
     ///Error returned when a frame failed to be decoded.
     DecodingError,
     /// Error returned when no frame data is provided to the decoder.
-    EmptyFrameError
+    EmptyFrameError,
+    UnableToCreateFrameFromYUVError,
+    ReshapingFrameError,
+    TypeConversionError,
+    BytesConversionError,
 }
 
 impl Display for FrameError {
@@ -27,6 +31,10 @@ impl Display for FrameError {
             FrameError::DecoderInitializationError => write!(fmt, "Error: failed to initialize decoder"),
             FrameError::DecodingError => write!(fmt, "Error: failed to decode frame"),
             FrameError::EmptyFrameError => write!(fmt, "Error: no frame was provided"),
+            FrameError::UnableToCreateFrameFromYUVError => write!(fmt, "Error: failed to create a frame from yuv vec."),
+            FrameError::ReshapingFrameError => write!(fmt, "Error: failed to reshape frame"),
+            FrameError::TypeConversionError => write!(fmt, "Error: failed to convert frame from yuv to rgb"),
+            FrameError::BytesConversionError => write!(fmt, "Error: failed to convert frame to bytes"),
         }
     }
 }

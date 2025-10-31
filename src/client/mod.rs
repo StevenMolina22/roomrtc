@@ -1,3 +1,5 @@
-pub mod client;
-pub mod error;
-pub mod media_pipeline;
+mod client;
+mod error;
+
+pub use error::ClientError;
+pub use client::Client;

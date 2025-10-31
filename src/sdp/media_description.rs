@@ -4,27 +4,6 @@ use crate::ice::Candidate;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
-/*
-#[derive(Debug, PartialEq, Eq)]
-pub enum MediaDescriptionError {
-    InvalidAttributeFormat,
-    InvalidFormat,
-}
-
-impl Display for MediaDescriptionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidAttributeFormat => write!(f, "Invalid attribute format"),
-            Self::InvalidFormat => {
-                write!(f, "Invalid format for this media description")
-            }
-        }
-    }
-}
-
-impl std::error::Error for MediaDescriptionError {}
-
- */
 
 pub struct MediaDescription {
     pub media_type: String,

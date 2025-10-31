@@ -8,4 +8,5 @@ pub enum View {
         our_answer: Option<String>,
     },
     Call,
+    Connection
 }

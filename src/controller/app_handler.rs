@@ -133,7 +133,13 @@ impl Controller {
             let mut encoder = Encoder::new().unwrap();
             move || {
                 loop {
-                    let frame = rx_raw.lock().unwrap().recv().unwrap();
+                    let frame = match rx_raw.lock().unwrap().recv() {
+                        Ok(frame) => frame,
+                        Err(_) => {
+                            eprintln!("Encoder: Camera disconnected. Stopping thread.");
+                            break; // Exit loop
+                        }
+                    };
                     let encoded = encoder.encode_frame(&frame).unwrap();
                     let encoded_frame = EncodedFrame {
                         id: frame.id,
@@ -159,15 +165,18 @@ impl Controller {
                 rtp_socket
                     .try_clone()
                     .map_err(|e| Error::CloningSocketError(e.to_string()))?,
-                rtcp_socket
-                    .try_clone()
-                    .map_err(|e| Error::CloningSocketError(e.to_string()))?,
-                42,
+                42, // SSRC
             )
             .map_err(|e| Error::RtpSenderError(e.to_string()))?;
             move || {
                 loop {
-                    let encoded_frame = rx_encoded.lock().unwrap().recv().unwrap();
+                    let encoded_frame = match rx_encoded.lock().unwrap().recv() {
+                        Ok(frame) => frame,
+                        Err(_) => {
+                            eprintln!("RTP sender: Encoder disconnected. Stopping thread.");
+                            break; // Exit loop
+                        }
+                    };
                     println!("received frame from encoder thread");
                     for (i, c) in encoded_frame.chunks.iter().enumerate() {
                         let send_result = rtp_sender.send(
@@ -251,36 +260,48 @@ impl Controller {
 }
 fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {
     let fr_id = chunks.first()?.frame_id;
+
+    // Sort the chunks to ensure correct NAL unit order (SPS, PPS, then video)
     chunks.sort_by_key(|c| c.chunk_id);
-    let mut data = Vec::new();
-    for c in chunks.iter() {
-        data.extend(c.payload.clone());
+
+    let mut decoded_frame: Option<Frame> = None;
+
+    for chunk in chunks.iter() {
+        // Feed one NAL unit (one packet's payload) at a time
+        match decoder.decode_frame(&chunk.payload) {
+            Ok((decoded_data, width, height)) => {
+                // Success! This was likely the video (IDR) frame.
+                decoded_frame = Some(Frame {
+                    data: decoded_data,
+                    width,
+                    height,
+                    id: fr_id,
+                });
+                // We got our frame, no need to process subsequent NALs for this frame
+                // (though there shouldn't be any)
+                break;
+            }
+            Err(crate::frame_handler::FrameError::EmptyFrameError) => {
+                // This is expected. The decoder buffered the NAL (SPS/PPS)
+                // but isn't ready to output a video frame yet.
+                println!("Decoder buffered NAL unit (SPS/PPS).");
+                continue;
+            }
+            Err(e) => {
+                // An actual decoding error on this specific NAL unit
+                eprintln!(
+                    "Failed to decode NAL unit {} for frame {}: {}",
+                    chunk.chunk_id, fr_id, e
+                );
+                // If one chunk fails, the whole frame is bad.
+                return None;
+            }
+        }
     }
 
-    // Handle the decoding result gracefully instead of unwrap()
-    match decoder.decode_frame(&data) {
-        Ok((decoded_data, width, height)) => {
-            // Success, we have a frame
-            Some(Frame {
-                data: decoded_data,
-                width,
-                height,
-                id: fr_id,
-            })
-        }
-        Err(crate::frame_handler::FrameError::EmptyFrameError) => {
-            // Expected case: Decoder buffered data (e.g., SPS/PPS) but no picture yet.
-            println!("Decoder buffered data, no frame ready.");
-            None
-        }
-        Err(e) => {
-            // An actual decoding error
-            eprintln!("Failed to decode frame {}: {}", fr_id, e);
-            None
-        }
-    }
+    // Return the frame if we successfully decoded one
+    decoded_frame
 }
-
 /*
 
 use crate::ice::{Candidate, CandidatePair};

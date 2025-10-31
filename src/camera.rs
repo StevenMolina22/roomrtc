@@ -25,9 +25,17 @@ impl Camera {
         let frame_id = self.frame_id.clone();
 
         thread::spawn(move || {
-            let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY).unwrap();
-            if !videoio::VideoCapture::is_opened(&cam).unwrap() {
-                return;
+            let mut cam = match videoio::VideoCapture::new(0, videoio::CAP_ANY) {
+                Ok(cam) => cam,
+                Err(e) => {
+                    eprintln!("Failed to open camera: {}. Stopping camera thread.", e);
+                    return; // Exit thread
+                }
+            };
+
+            if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
+                eprintln!("Camera is not open. Stopping camera thread.");
+                return; // Exit thread
             }
             cam.set(videoio::CAP_PROP_FRAME_WIDTH, 640.0).unwrap();
             cam.set(videoio::CAP_PROP_FRAME_HEIGHT, 480.0).unwrap();

@@ -36,7 +36,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
 
     /// Attempts to receive an RTP packet. Returns Some(RtpPackage) if a packet was received, or None if no data is available.
     pub fn receive(&mut self) -> Result<RtpPacket, RtpError> {
-        let mut buf = [0u8; 1500];
+        let mut buf = [0u8; 65535];
         loop {
             match self.rtp_socket.recv_from(&mut buf) {
                 Ok((size, _addr)) => {

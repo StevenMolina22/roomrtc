@@ -37,16 +37,16 @@ impl Camera {
             cam.set(videoio::CAP_PROP_FRAME_HEIGHT, 480.0).unwrap();
 
             let mut mat = Mat::default();
-            let mut yuv = Mat::default();
+            let mut rgb = Mat::default();
             
             while *running.read().unwrap() {
                 if !cam.read(&mut mat).unwrap() || mat.empty() {
                     continue;
                 }
 
-                imgproc::cvt_color(&mat, &mut yuv, imgproc::COLOR_BGR2YUV_I420, 0).unwrap();
-                let data = yuv.data_bytes().unwrap().to_vec();
-
+                imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).unwrap();
+                let data = rgb.data_bytes().unwrap().to_vec();
+                
                 let id = {
                     let mut id_lock = frame_id.write().unwrap();
                     let id = *id_lock;
@@ -56,8 +56,8 @@ impl Camera {
 
                 let frame = Frame {
                     data,
-                    width: yuv.cols() as usize,
-                    height: yuv.rows() as usize,
+                    width: rgb.cols() as usize,
+                    height: rgb.rows() as usize,
                     id: id as u64
                 };
 

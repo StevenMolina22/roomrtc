@@ -1,5 +1,5 @@
 use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
-use openh264::formats::YUVBuffer;
+use openh264::formats::{RgbSliceU8, YUVBuffer, YUVSlices};
 use super::{frame::Frame, error::FrameError as Error};
 
 /// A basic H.264 video encoder using the OpenH264 library.
@@ -40,7 +40,9 @@ impl Encoder {
     ///
     /// - [`Error::EncodingError`] — if encoding fails due to invalid frame data.
     pub fn encode_frame(&mut self, frame: Frame) -> Result<Vec<Vec<u8>>, Error> {
-        let yuv = YUVBuffer::from_vec(frame.data, frame.width, frame.height);
+
+        let rgb_source = RgbSliceU8::new(&frame.data, (frame.width, frame.height));
+        let yuv = YUVBuffer::from_rgb8_source(rgb_source);
         let nalus = self.encoder.encode(&yuv).map_err(|_| Error::EncodingError)?;
         let chunks = generate_chunks_from_nalus(nalus, self.max_chunk_size);
 

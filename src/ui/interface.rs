@@ -25,8 +25,8 @@ impl RoomRTCApp {
     pub fn new() -> Self {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
-        let mut controller = Controller::new(tx_local, tx_remote);
-        controller.start_call().unwrap();
+        let controller = Controller::new(tx_local, tx_remote);
+        controller.spawn_camera_thread();
         Self {
             view: View::default(),
             controller,
@@ -50,12 +50,13 @@ impl eframe::App for RoomRTCApp {
 
             self.update_local_camera(ctx, ui);
 
-
             // match self.view {
             //     View::Menu => self.show_menu(ui),
             //     View::Connection => self.show_connection(ui),
             //     View::Call => self.show_call(ctx, ui),
             // }
+            
+            ctx.request_repaint();
         });
     }
 }
@@ -63,7 +64,6 @@ impl eframe::App for RoomRTCApp {
 impl RoomRTCApp {
     fn show_menu(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            // ...
             let create_btn = egui::Button::new("Create Call (Offer)")
                 .min_size(egui::vec2(200.0, 40.0));
             if ui.add_sized([200.0, 40.0], create_btn).clicked() {
@@ -174,12 +174,15 @@ impl RoomRTCApp {
 
 
         if let Some(frame) = last_frame {
-            let color_img = ColorImage::from_rgb([frame.height, frame.width], &frame.data);
-            self.local_texture = Some(ctx.load_texture("remote", color_img, TextureOptions::default()))
+            let color_img = ColorImage::from_rgb([frame.width, frame.height], &frame.data);
+            if let Some(texture) = &mut self.local_texture {
+                texture.set(color_img, TextureOptions::default());
+            } else {
+                self.local_texture = Some(ctx.load_texture("local_camera", color_img, TextureOptions::default()));
+            }
         }
 
         if let Some(texture) = &self.local_texture {
-            // Podés ajustar el tamaño del cuadro (por ejemplo, 320x240)
             let size = texture.size_vec2();
             let aspect_ratio = size.x / size.y;
             let desired_height = 240.0;

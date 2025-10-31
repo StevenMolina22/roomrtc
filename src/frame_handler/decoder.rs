@@ -42,17 +42,12 @@ impl Decoder {
     pub fn decode_frame(&mut self, encoded_data: &[u8]) -> Result<(Vec<u8>, usize, usize), Error> {
         match self.decoder.decode(encoded_data) {
             Ok(Some(yuv)) => {
-                let y = yuv.y();
-                let u = yuv.u();
-                let v = yuv.v();
-
                 let (width, height) = yuv.dimensions();
 
-                let mut data = Vec::with_capacity(y.len() + u.len() + v.len());
-                data.extend_from_slice(y);
-                data.extend_from_slice(u);
-                data.extend_from_slice(v);
-                Ok((data, width, height))
+                let mut rgb8_data = vec![0u8; width * height * 3];
+                yuv.write_rgb8(&mut rgb8_data);
+
+                Ok((rgb8_data, width, height))
             }
             Ok(None) => Err(Error::EmptyFrameError),
             Err(_) => Err(Error::DecodingError),

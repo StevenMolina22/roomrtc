@@ -87,20 +87,18 @@ impl Controller {
         Ok(())
     }
 
-    fn spawn_camera_thread(&self) {
-        //let tx_to_controller = self.tx_raw.clone();
-        let tx_local_cam_receiver = self.tx_local.clone();
+    pub fn spawn_camera_thread(&self) {
+        let tx_to_controller = self.tx_raw.clone();
+        let tx_local_cam = self.tx_local.clone();
 
         let mut camera = Camera::new();
         let rx_camera = camera.start();
 
         thread::spawn(move || {
             for frame in rx_camera {
-                let rgb_frame = frame.to_rgb().unwrap();
-                tx_local_cam_receiver.send(rgb_frame).unwrap();
-
-                // tx_to_controller.send(frame).unwrap();
-                // Maybe we can encode and send in this thread
+                if tx_local_cam.send(frame.clone()).is_err() || tx_to_controller.send(frame).is_err() {
+                    break;
+                }
             }
         });
     }

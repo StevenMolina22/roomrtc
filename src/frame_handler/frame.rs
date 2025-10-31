@@ -44,8 +44,8 @@ impl Frame {
         }
 
         let id = u64::from_le_bytes(bytes[0..8].try_into().ok()?);
-        let width = u32::from_le_bytes(bytes[8..12].try_into().ok()?) as usize;
-        let height = u32::from_le_bytes(bytes[12..16].try_into().ok()?) as usize;
+        let width = usize::from_le_bytes(bytes[8..12].try_into().ok()?);
+        let height = usize::from_le_bytes(bytes[12..16].try_into().ok()?);
 
         let data = bytes[16..].to_vec();
 

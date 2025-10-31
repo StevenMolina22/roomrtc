@@ -108,6 +108,7 @@ impl RoomRTCApp {
 
             let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
+                self.controller.shut_down();
                 self.view = View::Menu;
             }
         });

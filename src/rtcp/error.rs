@@ -13,14 +13,14 @@ pub enum RtcpError {
 impl Display for RtcpError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            RtcpError::PoisonedLock => write!(f, "Error: Poisoned lock"),
-            RtcpError::InvalidRTCPPacket => {
+            Self::PoisonedLock => write!(f, "Error: Poisoned lock"),
+            Self::InvalidRTCPPacket => {
                 write!(f, "Error: \"Invalid or corrupted RTCP packet\"")
             }
-            RtcpError::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
-            RtcpError::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
-            RtcpError::GoodbyeReceived => write!(f, "Error: \"Goodbye\""),
-            RtcpError::TimedOut => write!(f, "Error: \"Report receiver timed out\""),
+            Self::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
+            Self::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
+            Self::GoodbyeReceived => write!(f, "Error: \"Goodbye\""),
+            Self::TimedOut => write!(f, "Error: \"Report receiver timed out\""),
         }
     }
 }

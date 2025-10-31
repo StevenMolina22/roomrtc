@@ -13,10 +13,9 @@ pub struct RtpSender<S: Socket + Send + Sync + 'static> {
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
-    pub fn new(rtp_socket: S, rtcp_socket: S, ssrc: u32) -> Result<Self, RtpError> {
-        let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
-
+    pub fn new(rtp_socket: S, rtcp_socket: S, ssrc: u32, connection_status: Arc<RwLock<ConnectionStatus>>) -> Result<Self, RtpError> {
         let report_handler = RtcpReportHandler::new(rtcp_socket, Arc::clone(&connection_status));
+       
         report_handler
             .start()
             .map_err(|e| RtpError::RTCPError(e.to_string()))?;
@@ -96,7 +95,7 @@ mod tests {
             sent_data: Arc::clone(&rtcp_sent),
         };
 
-        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0)?;
+        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0, Arc::new(RwLock::new(ConnectionStatus::Open)))?;
 
         for i in 0..3 {
             let payload = vec![i];
@@ -123,7 +122,7 @@ mod tests {
             sent_data: Arc::clone(&rtcp_sent),
         };
 
-        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0).unwrap();
+        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0, Arc::new(RwLock::new(ConnectionStatus::Open))).unwrap();
 
         sender.terminate().unwrap();
 

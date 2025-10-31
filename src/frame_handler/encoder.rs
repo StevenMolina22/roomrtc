@@ -1,5 +1,5 @@
 use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
-use openh264::formats::{RgbSliceU8, YUVBuffer, YUVSlices};
+use openh264::formats::{RgbSliceU8, YUVBuffer};
 use super::{frame::Frame, error::FrameError as Error};
 
 /// A basic H.264 video encoder using the OpenH264 library.

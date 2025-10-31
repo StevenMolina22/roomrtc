@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 const MEDIA_TYPE: &str = "video";
-const MEDIA_PORT: u16 = 4000;
 const MEDIA_PROTOCOL: &str = "RTP/AVP";
 const MEDIA_FMT: u8 = 111;
 
@@ -17,15 +16,15 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new() -> Self {
+    pub fn new(media_port: u16) -> Self {
         let mut ice_agent = IceAgent::new();
-        if ice_agent.gather_candidates(MEDIA_PORT).is_err() {
+        if ice_agent.gather_candidates(media_port).is_err() {
             panic!("Failed to gather ICE candidates");
         }
 
         let mut media_description = MediaDescription::new(
             MEDIA_TYPE.into(),
-            MEDIA_PORT,
+            media_port,
             MEDIA_PROTOCOL.into(),
             HashSet::from([MEDIA_FMT]),
         );

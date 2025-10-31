@@ -10,7 +10,7 @@ fn main() {
         return;
     }
 
-    let mut client = Client::new();
+    let mut client = Client::new(0);
     match argv[1].as_str() {
         "0" => {
             // Offerer: Print offer, wait for answer

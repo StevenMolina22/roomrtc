@@ -14,6 +14,7 @@ pub enum IceError {
     InvalidConnectivityState,
     UnsupportedCandidateType,
     InternalError,
+    NoSelectedPair,
 }
 
 impl Display for IceError {
@@ -37,6 +38,7 @@ impl Display for IceError {
                 write!(f, "Error: \"unsupported candidate type\"")
             }
             IceError::InternalError => write!(f, "Error: \"internal error\""),
+            IceError::NoSelectedPair => write!(f, "Error: \"no selected pair available\""),
         }
     }
 }

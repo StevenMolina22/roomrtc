@@ -103,13 +103,13 @@ mod tests {
             sender.send(&payload, 96, 1234 + i as u32, 0, i.into(), 5)?;
         }
 
-        let sent = rtp_sent.lock().unwrap();
+        let sent = rtp_sent.lock().map_err(|_| RtpError::PoisonedLock)?;
         assert_eq!(sent.len(), 3, "There should have been three packets sent");
         Ok(())
     }
 
     #[test]
-    fn test_terminate_closes_connection_and_sends_goodbye() {
+    fn test_terminate_closes_connection_and_sends_goodbye() -> Result<(), RtpError> {
         let rtp_sent = Arc::new(Mutex::new(Vec::new()));
         let rtcp_sent = Arc::new(Mutex::new(Vec::new()));
 
@@ -123,19 +123,20 @@ mod tests {
             sent_data: Arc::clone(&rtcp_sent),
         };
 
-        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0).unwrap();
+        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0)?;
 
-        sender.terminate().unwrap();
+        sender.terminate()?;
 
-        let status = sender.connection_status.read().unwrap();
+        let status = sender.connection_status.read().map_err(|_| RtpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Closed);
 
-        let rtcp_sent_data = rtcp_sent.lock().unwrap();
+        let rtcp_sent_data = rtcp_sent.lock().map_err(|_| RtpError::PoisonedLock)?;
         assert!(
             rtcp_sent_data
                 .iter()
                 .any(|d| d == &RtcpPacket::Goodbye.as_bytes().to_vec()),
             "A Goodbye packet should have been sent"
         );
+        Ok(())
     }
 }

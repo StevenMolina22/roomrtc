@@ -96,7 +96,7 @@ impl RoomRTCApp {
             let boton = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             let msg_btn = egui::Button::new("send").min_size(egui::vec2(150.0, 40.0));
 
-            if self.socket.is_none() && let Some(pair) = self.controller.client.ice_agent.get_selected_pair() {
+            if self.socket.is_none() && let Ok(pair) = self.controller.client.ice_agent.get_selected_pair() {
                 let local_addr = format!("{}:{}", pair.local.address, pair.local.port);
                 let remote_addr = format!("{}:{}", pair.remote.address, pair.remote.port);
                 self.addr = local_addr.clone();

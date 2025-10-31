@@ -100,15 +100,17 @@ mod tests {
     use crate::sdp::attribute::Attribute;
 
     #[test]
-    fn test_from_str_valid_media_description() {
+    fn test_from_str_valid_media_description() -> Result<(), Error> {
         let line = "audio 5004 RTP/AVP 96 97";
-        let md = MediaDescription::from_str(line).unwrap();
+        let md = MediaDescription::from_str(line)?;
 
         assert_eq!(md.media_type, "audio");
         assert_eq!(md.port, 5004);
         assert_eq!(md.protocol, "RTP/AVP");
         assert!(md.fmts.contains(&96));
         assert!(md.fmts.contains(&97));
+
+        Ok(())
     }
 
     #[test]

@@ -9,6 +9,7 @@ pub enum ControllerError {
     CloningSocketError(String),
     RtpSenderError(String),
     RtpReceiverError(String),
+    ClientCreationError(String),
 }
 
 impl Display for ControllerError {
@@ -20,6 +21,7 @@ impl Display for ControllerError {
             Self::CloningSocketError(e) => write!(f, "Error: \"Failed to clone UDP socket\" Details: {}", e),
             Self::RtpSenderError(e) => write!(f, "Error: \"Failed to create RTP sender. Details: {}", e),
             Self::RtpReceiverError(e) => write!(f, "Error: \"Failed to create RTP receiver. Details: {}", e),
+            Self::ClientCreationError(e) => write!(f, "Error: \"Failed to create Client. Details: {}", e),
         }
     }
 }

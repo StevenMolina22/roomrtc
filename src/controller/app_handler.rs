@@ -140,7 +140,7 @@ impl Controller {
     ) -> Result<(), Error> {
         let rx_encoded = self.rx_encoded.clone();
 
-        thread::spawn({
+        let handler = thread::spawn({
             let mut rtp_sender = RtpSender::new(
                 rtp_socket
                     .try_clone()
@@ -171,6 +171,7 @@ impl Controller {
                 }
             }
         });
+        self.rtp_sender_handler = Some(handler);
         Ok(())
     }
 

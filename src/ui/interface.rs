@@ -25,9 +25,11 @@ impl RoomRTCApp {
     pub fn new() -> Self {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
+        let mut controller = Controller::new(tx_local, tx_remote);
+        controller.start_call().unwrap();
         Self {
             view: View::default(),
-            controller: Controller::new(tx_local, tx_remote),
+            controller,
             rx_local,
             rx_remote,
             socket: None,
@@ -46,11 +48,14 @@ impl eframe::App for RoomRTCApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
 
-            match self.view {
-                View::Menu => self.show_menu(ui),
-                View::Connection => self.show_connection(ui),
-                View::Call => self.show_call(ctx, ui),
-            }
+            self.update_local_camera(ctx, ui);
+
+
+            // match self.view {
+            //     View::Menu => self.show_menu(ui),
+            //     View::Connection => self.show_connection(ui),
+            //     View::Call => self.show_call(ctx, ui),
+            // }
         });
     }
 }
@@ -89,6 +94,7 @@ impl RoomRTCApp {
         }
 
         if ui.button("Cancel").clicked() {
+            self.controller.start_call().unwrap();
             self.view = View::Menu;
         }
     }
@@ -136,7 +142,7 @@ impl RoomRTCApp {
         ui.separator();
         ui.label("1. Paste the remote user's offer below:");
         ui.add(
-            egui::TextEdit::multiline(&mut self.remote_sdp.clone()).hint_text("Paste SDP Offer..."),
+            egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Offer..."),
         );
 
         if self.our_answer.is_none() {
@@ -181,12 +187,11 @@ impl RoomRTCApp {
 
             let image = egui::Image::new(texture)
                 .fit_to_exact_size(egui::vec2(desired_width, desired_height));
-            
-            ui.add(image);            
+
+            ui.add(image);
         } else {
             ui.label("No se recibió video todavía...");
         }
-        //hacer el display de self.local_texture
     }
 }
 

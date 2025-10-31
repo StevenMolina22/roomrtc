@@ -1,4 +1,3 @@
-use opencv::core;
 use opencv::imgproc;
 use opencv::prelude::*;
 use super::FrameError as Error;
@@ -12,7 +11,7 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn to_rgb(&self) -> Result<Vec<u8>, Error> {
+    pub fn to_rgb(&self) -> Result<Self, Error> {
         let temp_mat = Mat::from_slice(&self.data)
             .map_err(|_| Error::UnableToCreateFrameFromYUVError)?;
 
@@ -26,11 +25,17 @@ impl Frame {
             &yuv_mat,
             &mut rgb_mat,
             imgproc::COLOR_YUV2RGB_I420,
-            0,
-            core::AlgorithmHint::ALGO_HINT_DEFAULT,
+            0
         ).map_err(|_| Error::TypeConversionError)?;
 
-        Ok(rgb_mat.data_bytes().map_err(|_| Error::BytesConversionError)?.to_vec())
+        Ok(
+            Self {
+                data: rgb_mat.data_bytes().map_err(|_| Error::BytesConversionError)?.to_vec(),
+                width: self.width,
+                height: self.height,
+                id: self.id,
+            }
+        )
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {

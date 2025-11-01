@@ -4,16 +4,31 @@ use crate::ice::CandidateType;
 use std::fmt;
 use std::str::FromStr;
 
+/// SDP attribute keys used by the parser.
 const CANDIDATE_ATTR_KEY: &str = "candidate";
 const RTPMAP_ATTR_KEY: &str = "rtpmap";
 
+/// SDP attribute representation used by this module.
+///
+/// The `Attribute` enum models a subset of SDP `a=` attributes that the
+/// project needs to parse and emit: ICE candidates (`candidate`) and
+/// payload mapping (`rtpmap`). Each variant contains the parsed data for
+/// that attribute.
 #[derive(Clone)]
 pub enum Attribute {
+    /// An ICE candidate attribute containing a full `Candidate`.
     Candidate(Candidate),
+
+    /// An `rtpmap` attribute with payload type, encoding name, clock
+    /// rate and optional encoding parameters.
     RTPMap(u8, String, u32, Option<String>),
 }
 
 impl fmt::Display for Attribute {
+    /// Render the attribute back to SDP attribute line form.
+    ///
+    /// - Candidate: `a=candidate:<foundation> <component> <transport> <priority> <address> <port> typ <type>`
+    /// - RTPMap: `a=rtpmap:<fmt> <encoding_name>/<clock_rate>[/<encoding_params>]`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Candidate(candidate) => {
@@ -44,6 +59,11 @@ impl fmt::Display for Attribute {
 impl FromStr for Attribute {
     type Err = Error;
 
+    /// Parse an SDP attribute line (without the leading `a=`) into an
+    /// `Attribute`.
+    ///
+    /// The expected forms are `candidate:...` and `rtpmap:...`. Unknown
+    /// or malformed inputs produce an appropriate `SdpError`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once(':') {
             Some((key, value)) if key == CANDIDATE_ATTR_KEY => parse_candidate_attr_values(value),
@@ -53,6 +73,9 @@ impl FromStr for Attribute {
     }
 }
 
+/// Parse an `rtpmap` attribute value part into `Attribute::RTPMap`.
+///
+/// Expects a form like: `"96 opus/48000/2"`.
 fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
     let parts = values.split_whitespace().collect::<Vec<&str>>();
     if parts.len() < 2 {
@@ -83,6 +106,10 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
     ))
 }
 
+/// Parse a `candidate` attribute value into `Attribute::Candidate`.
+///
+/// The expected form follows the ICE candidate attribute grammar used in
+/// SDP: `<foundation> <component> <transport> <priority> <address> <port> typ <type>`.
 fn parse_candidate_attr_values(values: &str) -> Result<Attribute, Error> {
     let parts = values.split_whitespace().collect::<Vec<&str>>();
     if parts.len() < 8 {

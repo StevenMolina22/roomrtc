@@ -6,15 +6,34 @@ use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
 
+/// SDP keys used when parsing session description lines.
 const MEDIA_DESCRIPTION_KEY: &str = "m";
 const ATTRIBUTE_KEY: &str = "a";
 
+/// In-memory representation of a SDP session description.
+///
+/// This struct holds a reduced subset of SDP fields needed by the
+/// project: version, origin id, session name, timing, a list of media
+/// descriptions and connection data. Only `media_descriptions` is
+/// publicly exposed; other fields are initialized with defaults when
+/// parsing.
 pub struct SessionDescriptionProtocol {
+    /// SDP version (`v=`). Defaults to 0 in created instances.
     version: u8,
+
+    /// Origin/session id. Stored as `usize`.
     origin_id: usize,
+
+    /// Session name (`s=`) - default `-`.
     session_name: String,
+
+    /// Timing (`t=`) string, default `"0 0"`.
     timing: String,
+
+    /// Media descriptions (`m=` sections) parsed from the SDP.
     pub media_descriptions: Vec<MediaDescription>,
+
+    /// Connection data (`c=`), e.g. `IN IP4 0.0.0.0` by default.
     connection_data: String,
 }
 
@@ -36,9 +55,13 @@ impl FromStr for SessionDescriptionProtocol {
 
             match key {
                 MEDIA_DESCRIPTION_KEY => {
+                    // parse an `m=` media description line and append it
+                    // to the list of media descriptions
                     handle_media_description_line(value, &mut media_descriptions)?;
                 }
                 ATTRIBUTE_KEY => {
+                    // parse an `a=` attribute line and attach it to the
+                    // last media description
                     handle_attribute_line(value, &mut media_descriptions)?;
                 }
                 _ => {}
@@ -75,7 +98,13 @@ impl SessionDescriptionProtocol {
             connection_data: "IN IP4 0.0.0.0".into(),
         }
     }
-
+    /// Create an SDP answer based on this local description and a remote
+    /// offer description (`offer_sdp`).
+    ///
+    /// The function compares local media descriptions with the offer and
+    /// builds answer media descriptions that preserve compatible
+    /// formats/attributes. It returns a new `SessionDescriptionProtocol`
+    /// containing only the compatible media sections.
     pub fn create_answer(&self, offer_sdp: &Self) -> Result<Self, Error> {
         let mut answer_media_descriptions = Vec::new();
 
@@ -95,6 +124,7 @@ impl SessionDescriptionProtocol {
         Ok(Self::new(answer_media_descriptions))
     }
 
+    /// Set the `c=` connection data for the session description.
     pub fn set_connection_data(&mut self, net_type: &str, addr_type: &str, address: &str) {
         self.connection_data = format!("{net_type} {addr_type} {address}");
     }
@@ -153,6 +183,7 @@ fn handle_media_description_line(
     line: &str,
     media_descriptions: &mut Vec<MediaDescription>,
 ) -> Result<(), Error> {
+    // Parse the media description `m=` line and append to the list.
     media_descriptions.push(MediaDescription::from_str(line)?);
     Ok(())
 }
@@ -162,7 +193,7 @@ fn handle_attribute_line(
     media_descriptions: &mut [MediaDescription],
 ) -> Result<(), Error> {
     let attribute = Attribute::from_str(line)?;
-
+    // Attach the parsed attribute to the last media description in the list.
     match media_descriptions.last_mut() {
         Some(m) => m.add_attribute(attribute)?,
         None => return Err(Error::MissingMediaDescriptionError),

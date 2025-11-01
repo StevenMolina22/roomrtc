@@ -8,6 +8,8 @@ pub enum RtcpError {
     SocketConfigFailed,
     GoodbyeReceived,
     TimedOut,
+    ConnectionStatusLockFailed,
+    InvalidConfigDuration,
 }
 
 impl Display for RtcpError {
@@ -21,6 +23,12 @@ impl Display for RtcpError {
             Self::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
             Self::GoodbyeReceived => write!(f, "Error: \"Goodbye\""),
             Self::TimedOut => write!(f, "Error: \"Report receiver timed out\""),
+            Self::ConnectionStatusLockFailed => {
+                write!(f, "Error: \"Failed to acquire connection status lock\"")
+            }
+            Self::InvalidConfigDuration => {
+                write!(f, "Error: \"Invalid configuration duration\"")
+            }
         }
     }
 }

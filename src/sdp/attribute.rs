@@ -46,11 +46,8 @@ impl FromStr for Attribute {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once(':') {
-            Some((CANDIDATE_ATTR_KEY, value)) => {
-                parse_candidate_attr_values(value).map_err(|_| Error::InvalidCandidateParsingError)
-            }
-
-            Some((RTPMAP_ATTR_KEY, value)) => parse_rptmap_attr_values(value),
+            Some((key, value)) if key == CANDIDATE_ATTR_KEY => parse_candidate_attr_values(value),
+            Some((key, value)) if key == RTPMAP_ATTR_KEY => parse_rptmap_attr_values(value),
             _ => Err(Error::InvalidRtpMapFormatError),
         }
     }
@@ -68,10 +65,11 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
 
     let mut parts = parts[1].split('/');
     let encoding_name = parts.next().ok_or(Error::MissingEncodingNameError)?;
-    if encoding_name.is_empty() {
-        return Err(Error::MissingEncodingNameError);
-    }
-    let clock_rate = parts.next().ok_or(Error::MissingClockRateError)?.parse::<u32>().map_err(|_| Error::InvalidClockRateParsingError)?;
+    let clock_rate = parts
+        .next()
+        .ok_or(Error::MissingClockRateError)?
+        .parse::<u32>()
+        .map_err(|_| Error::InvalidClockRateParsingError)?;
     let encoding_params = parts.next().map(std::string::ToString::to_string);
 
     if parts.next().is_some() {
@@ -121,25 +119,26 @@ mod tests {
     use crate::ice::{Candidate, CandidateType};
 
     #[test]
-    fn test_rtpmap_from_str_valid_basic() {
+    fn test_rtpmap_from_str_valid_basic() -> Result<(), Error> {
         let line = "rtpmap:96 opus/48000/2";
-        let attr = Attribute::from_str(line).unwrap();
+        let attr = Attribute::from_str(line)?;
 
         match attr {
             Attribute::RTPMap(fmt, enc, rate, params) => {
                 assert_eq!(fmt, 96);
                 assert_eq!(enc, "opus");
                 assert_eq!(rate, 48000);
-                assert_eq!(params.unwrap(), "2");
+                assert_eq!(params, Some("2".to_string()));
             }
             _ => panic!("Expected Attribute::RTPMap"),
         }
+        Ok(())
     }
 
     #[test]
-    fn test_rtpmap_from_str_valid_no_params() {
+    fn test_rtpmap_from_str_valid_no_params() -> Result<(), Error> {
         let line = "rtpmap:97 PCMU/8000";
-        let attr = Attribute::from_str(line).unwrap();
+        let attr = Attribute::from_str(line)?;
 
         match attr {
             Attribute::RTPMap(fmt, enc, rate, params) => {
@@ -150,6 +149,7 @@ mod tests {
             }
             _ => panic!("Expected Attribute::RTPMap"),
         }
+        Ok(())
     }
 
     #[test]
@@ -194,9 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn test_candidate_from_str_valid() {
+    fn test_candidate_from_str_valid() -> Result<(), Error> {
         let line = "candidate:1 1 udp 2122252543 192.168.1.5 54400 typ host";
-        let attr = Attribute::from_str(line).unwrap();
+        let attr = Attribute::from_str(line)?;
 
         match attr {
             Attribute::Candidate(cand) => {
@@ -210,6 +210,7 @@ mod tests {
             }
             _ => panic!("Expected Attribute::Candidate"),
         }
+        Ok(())
     }
 
     #[test]
@@ -262,7 +263,7 @@ mod tests {
     fn test_candidate_from_str_invalid_port() {
         let candidate = "candidate:1 1 udp 2122252543 192.168.1.5 port typ host";
         let attr = Attribute::from_str(candidate);
-
+        
         assert!(matches!(attr, Err(Error::InvalidPortError)));
     }
 
@@ -270,9 +271,9 @@ mod tests {
     fn test_candidate_from_str_invalid_component_id() {
         let candidate = "candidate:1 id udp 2122252543 192.168.1.5 54400 typ host";
         let attr = Attribute::from_str(candidate);
-
         assert!(matches!(attr, Err(Error::InvalidComponentIdError)));
     }
+
     #[test]
     fn test_display_candidate() {
         let candidate = Candidate::new(

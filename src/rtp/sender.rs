@@ -1,21 +1,27 @@
+use std::sync::{Arc, RwLock};
+
 use crate::rtcp::RtcpReportHandler;
-use crate::rtp::connection_status::ConnectionStatus;
+use crate::rtp::ConnectionStatus;
 use crate::rtp::error::RtpError;
 use crate::rtp::rtp_packet::RtpPacket;
 use crate::tools::Socket;
-use std::sync::{Arc, RwLock};
 
 pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
+    ssrc: u32,
     report_handler: RtcpReportHandler<S>,
     connection_status: Arc<RwLock<ConnectionStatus>>,
-    ssrc: u32,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
-    pub fn new(rtp_socket: S, rtcp_socket: S, ssrc: u32, connection_status: Arc<RwLock<ConnectionStatus>>) -> Result<Self, RtpError> {
+    pub fn new(
+        rtp_socket: S,
+        rtcp_socket: S,
+        ssrc: u32,
+        connection_status: Arc<RwLock<ConnectionStatus>>,
+    ) -> Result<Self, RtpError> {
         let report_handler = RtcpReportHandler::new(rtcp_socket, Arc::clone(&connection_status));
-       
+
         report_handler
             .start()
             .map_err(|e| RtpError::RTCPError(e.to_string()))?;
@@ -95,7 +101,12 @@ mod tests {
             sent_data: Arc::clone(&rtcp_sent),
         };
 
-        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0, Arc::new(RwLock::new(ConnectionStatus::Open)))?;
+        let mut sender = RtpSender::new(
+            rtp_socket,
+            rtcp_socket,
+            0,
+            Arc::new(RwLock::new(ConnectionStatus::Open)),
+        )?;
 
         for i in 0..3 {
             let payload = vec![i];
@@ -122,7 +133,13 @@ mod tests {
             sent_data: Arc::clone(&rtcp_sent),
         };
 
-        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0, Arc::new(RwLock::new(ConnectionStatus::Open))).unwrap();
+        let mut sender = RtpSender::new(
+            rtp_socket,
+            rtcp_socket,
+            0,
+            Arc::new(RwLock::new(ConnectionStatus::Open)),
+        )
+        .unwrap();
 
         sender.terminate().unwrap();
 

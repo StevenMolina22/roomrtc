@@ -1,6 +1,6 @@
-use openh264::decoder::{Decoder as H264Decoder};
-use openh264::formats::YUVSource;
 use super::error::FrameError as Error;
+use openh264::decoder::Decoder as H264Decoder;
+use openh264::formats::YUVSource;
 
 /// A basic H.264 video decoder using the OpenH264 library.
 ///
@@ -55,3 +55,45 @@ impl Decoder {
     }
 }
 
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use opencv::{core, imgproc, prelude::*, videoio};
+//     use openh264::encoder::Encoder as H264Encoder;
+//     use openh264::formats::YUVBuffer;
+
+//     #[test]
+//     fn test_decoded_frame_has_the_expected_size() -> Result<(), Error> {
+//         let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY)
+//             .map_err(|_| Error::DecoderInitializationError)?;
+//         assert!(
+//             videoio::VideoCapture::is_opened(&cam)
+//                 .map_err(|_| Error::DecoderInitializationError)?
+//         );
+
+//         let mut mat = Mat::default();
+//         cam.read(&mut mat).map_err(|_| Error::DecodingError)?;
+//         assert!(!mat.empty());
+
+//         let width = mat.cols();
+//         let height = mat.rows();
+
+//         let mut yuv = Mat::default();
+//         //imgproc::cvt_color(&mat, &mut yuv, imgproc::COLOR_BGR2YUV_I420, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT);
+//         let yuv_bytes = yuv.data_bytes().map_err(|_| Error::DecodingError)?.to_vec();
+//         let yuv_buff = YUVBuffer::from_vec(yuv_bytes, width as usize, height as usize);
+
+//         let mut encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
+//         let encoded = encoder
+//             .encode(&yuv_buff)
+//             .map_err(|_| Error::EncodingError)?
+//             .to_vec();
+
+//         let mut decoder = Decoder::new()?;
+//         let decoded_rgb = decoder.decode_frame(&encoded)?;
+
+//         let expected_len = (width * height * 3) as usize;
+//         assert_eq!(decoded_rgb.len(), expected_len);
+//         Ok(())
+//     }
+// }

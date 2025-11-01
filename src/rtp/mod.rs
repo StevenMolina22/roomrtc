@@ -1,4 +1,4 @@
-mod connection_status;
+pub mod connection_status;
 mod error;
 mod receiver;
 mod rtp_packet;

@@ -35,7 +35,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
 
     /// Attempts to receive an RTP packet. Returns Some(RtpPackage) if a packet was received, or None if no data is available.
     pub fn receive(&mut self) -> Result<RtpPacket, RtpError> {
-        let mut buf = [0u8; 1500];
+        let mut buf = [0u8; 65535];
         loop {
             match self.rtp_socket.recv_from(&mut buf) {
                 Ok((size, _addr)) => {
@@ -46,7 +46,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                     }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    let conn = self.connection_status.read().unwrap();
+                    let conn = self.connection_status.read().map_err(|_| RtpError::ConnectionStatusLockFailed)?;
                     if *conn == ConnectionStatus::Closed {
                         return Err(RtpError::ConnectionClosed);
                     } else {

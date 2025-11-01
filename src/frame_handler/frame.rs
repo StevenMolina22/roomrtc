@@ -1,19 +1,19 @@
-use opencv::imgproc;
-use opencv::{prelude::*, core};
 use super::FrameError as Error;
+use opencv::imgproc;
+use opencv::prelude::*;
 
 #[derive(Clone)]
 pub struct Frame {
     pub data: Vec<u8>,
     pub width: usize,
     pub height: usize,
-    pub id: u64
+    pub id: u64,
 }
 
 impl Frame {
     pub fn to_rgb(&self) -> Result<Self, Error> {
-        let temp_mat = Mat::from_slice(&self.data)
-            .map_err(|_| Error::UnableToCreateFrameFromYUVError)?;
+        let temp_mat =
+            Mat::from_slice(&self.data).map_err(|_| Error::UnableToCreateFrameFromYUVError)?;
 
         let yuv_mat = temp_mat
             .reshape(1, (self.height * 3 / 2) as i32)
@@ -21,22 +21,18 @@ impl Frame {
 
         let mut rgb_mat = Mat::default();
 
-        imgproc::cvt_color(
-            &yuv_mat,
-            &mut rgb_mat,
-            imgproc::COLOR_YUV2RGB_I420,
-            0,
-            core::AlgorithmHint::ALGO_HINT_DEFAULT
-        ).map_err(|_| Error::TypeConversionError)?;
+        imgproc::cvt_color(&yuv_mat, &mut rgb_mat, imgproc::COLOR_YUV2RGB_I420, 0)
+            .map_err(|_| Error::TypeConversionError)?;
 
-        Ok(
-            Self {
-                data: rgb_mat.data_bytes().map_err(|_| Error::BytesConversionError)?.to_vec(),
-                width: self.width,
-                height: self.height,
-                id: self.id,
-            }
-        )
+        Ok(Self {
+            data: rgb_mat
+                .data_bytes()
+                .map_err(|_| Error::BytesConversionError)?
+                .to_vec(),
+            width: self.width,
+            height: self.height,
+            id: self.id,
+        })
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -50,7 +46,12 @@ impl Frame {
 
         let data = bytes[16..].to_vec();
 
-        Some(Self { data, width, height, id })
+        Some(Self {
+            data,
+            width,
+            height,
+            id,
+        })
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -62,4 +63,3 @@ impl Frame {
         buf
     }
 }
-

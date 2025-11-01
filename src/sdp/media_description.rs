@@ -100,22 +100,27 @@ mod tests {
     use crate::sdp::attribute::Attribute;
 
     #[test]
-    fn test_from_str_valid_media_description() {
+    fn test_from_str_valid_media_description() -> Result<(), Error> {
         let line = "audio 5004 RTP/AVP 96 97";
-        let md = MediaDescription::from_str(line).unwrap();
+        let md = MediaDescription::from_str(line)?;
 
         assert_eq!(md.media_type, "audio");
         assert_eq!(md.port, 5004);
         assert_eq!(md.protocol, "RTP/AVP");
         assert!(md.fmts.contains(&96));
         assert!(md.fmts.contains(&97));
+
+        Ok(())
     }
 
     #[test]
     fn test_from_str_invalid_format_missing_fields() {
         let line = "audio 5004 RTP/AVP";
         let result = MediaDescription::from_str(line);
-        assert!(matches!(result, Err(Error::InvalidMediaDescriptionFormatError)));
+        assert!(matches!(
+            result,
+            Err(Error::InvalidMediaDescriptionFormatError)
+        ));
     }
 
     #[test]
@@ -151,7 +156,9 @@ mod tests {
 
         let attr = Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into()));
         let result = md.add_attribute(attr);
-        assert!(matches!(result, Err(Error::UnmatchingMediaDescriptionAndAttributeError)));
+        assert!(matches!(
+            result,
+            Err(Error::UnmatchingMediaDescriptionAndAttributeError)
+        ));
     }
 }
-

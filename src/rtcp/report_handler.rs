@@ -10,7 +10,7 @@ use crate::tools::Socket;
 
 const REPORT_PERIOD_SEC: u64 = 3;
 const REPORT_RECEIVE_LIMIT: Duration = Duration::from_secs(2);
-const RETRY_LIMIT: usize = 3;
+const RETRY_LIMIT: usize = 10;
 
 pub struct RtcpReportHandler<S: Socket + Send + Sync + 'static> {
     socket: Arc<S>,
@@ -48,10 +48,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     .send(RtcpPacket::ConnectivityReport.as_bytes())
                     .is_err()
                 {
-                    if let Ok(mut conn) = shared_connection_status.write() {
-                        *conn = ConnectionStatus::Closed;
-                    }
-                    break;
+                    eprintln!("[RTCP] Failed to send connectivity report, will retry.");
                 }
 
                 thread::sleep(Duration::from_secs(REPORT_PERIOD_SEC));
@@ -106,7 +103,7 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
     report_socket: &S,
     last_report_time: &mut DateTime<Local>,
 ) -> Result<(), RtcpError> {
-    let mut buf = [0u8; 1024];
+    let mut buf = [0u8; 65500];
 
     match report_socket.recv_from(&mut buf) {
         Ok((size, _src_addr)) => match RtcpPacket::from_bytes(&buf[..size]) {
@@ -119,7 +116,8 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
         },
         Err(_) => {
             if Local::now() - *last_report_time
-                > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT).unwrap()
+                > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT)
+                    .map_err(|_| RtcpError::InvalidConfigDuration)?
             {
                 Err(RtcpError::TimedOut)
             } else {
@@ -138,7 +136,7 @@ mod tests {
     use std::sync::{Arc, Mutex, RwLock};
 
     #[test]
-    fn test_report_handler_receives_connectivity_report() {
+    fn test_report_handler_receives_connectivity_report() -> Result<(), RtcpError> {
         let data_to_receive = vec![RtcpPacket::ConnectivityReport.as_bytes().to_vec()];
         let sent_data = Arc::new(Mutex::new(Vec::new()));
         let mock_socket = MockSocket {
@@ -149,18 +147,21 @@ mod tests {
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
         let handler = RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status));
 
-        handler.start().unwrap();
+        handler.start()?;
         thread::sleep(Duration::from_millis(100));
 
-        let status = connection_status.read().unwrap();
+        let status = connection_status
+            .read()
+            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Open);
 
-        let sent = sent_data.lock().unwrap();
+        let sent = sent_data.lock().map_err(|_| RtcpError::PoisonedLock)?;
         assert_eq!(sent[0], RtcpPacket::ConnectivityReport.as_bytes());
+        Ok(())
     }
 
     #[test]
-    fn test_close_connection_sets_status_closed() {
+    fn test_close_connection_sets_status_closed() -> Result<(), RtcpError> {
         let mock_socket = MockSocket {
             data_to_receive: vec![],
             sent_data: Arc::new(Mutex::new(Vec::new())),
@@ -168,14 +169,17 @@ mod tests {
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
         let handler = RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status));
 
-        handler.close_connection().unwrap();
+        handler.close_connection()?;
 
-        let status = connection_status.read().unwrap();
+        let status = connection_status
+            .read()
+            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Closed);
+        Ok(())
     }
 
     #[test]
-    fn test_connection_closes_after_inactivity() {
+    fn test_connection_closes_after_inactivity() -> Result<(), RtcpError> {
         let mock_socket = MockSocket {
             data_to_receive: vec![],
             sent_data: Arc::new(Mutex::new(Vec::new())),
@@ -184,12 +188,15 @@ mod tests {
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
         let handler = RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status));
 
-        handler.start().unwrap();
+        handler.start()?;
 
         let wait_time = REPORT_RECEIVE_LIMIT * (RETRY_LIMIT as u32 + 1);
         thread::sleep(wait_time);
 
-        let status = connection_status.read().unwrap();
+        let status = connection_status
+            .read()
+            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Closed);
+        Ok(())
     }
 }

@@ -1,6 +1,6 @@
-use super::{error::FrameError as Error, frame::Frame};
-use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
+use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder, EncoderConfig, IntraFramePeriod};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
+use super::{frame::Frame, error::FrameError as Error};
 
 /// A basic H.264 video encoder using the OpenH264 library.
 ///
@@ -10,7 +10,9 @@ use openh264::formats::{RgbSliceU8, YUVBuffer};
 /// reassembled and decoded on the receiving side.
 pub struct Encoder {
     encoder: H264Encoder,
-    max_chunk_size: usize,
+    frame_count: usize,
+    idr_interval: usize,
+    max_chunk_size: usize
 }
 
 impl Encoder {
@@ -25,11 +27,13 @@ impl Encoder {
     /// Returns [`Error::EncoderIntializationError`] if the encoder cannot
     /// be created by the OpenH264 library.
     pub fn new() -> Result<Self, Error> {
+        let config = EncoderConfig::new().intra_frame_period(IntraFramePeriod::from_num_frames(15));
         let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
-        Ok(Self {
-            encoder,
-            max_chunk_size: 1200,
-        })
+
+        Ok(Self { encoder,
+            frame_count: 0,
+            idr_interval: 15,
+            max_chunk_size: 1200 })
     }
 
     /// Encodes a raw frame into H.264 byte chunks.
@@ -45,11 +49,15 @@ impl Encoder {
     pub fn encode_frame(&mut self, frame: &Frame) -> Result<Vec<Vec<u8>>, Error> {
         let rgb_source = RgbSliceU8::new(&frame.data, (frame.width, frame.height));
         let yuv = YUVBuffer::from_rgb8_source(rgb_source);
-        let nalus = self
-            .encoder
-            .encode(&yuv)
-            .map_err(|_| Error::EncodingError)?;
-        let chunks = generate_chunks_from_nalus(nalus);
+
+        if self.frame_count % self.idr_interval == 0 {
+            self.encoder.force_intra_frame();
+        }
+
+        let nalus = self.encoder.encode(&yuv).map_err(|_| Error::EncodingError)?;
+        let chunks = generate_chunks_from_nalus(nalus, self.max_chunk_size);
+
+        self.frame_count += 1;
 
         Ok(chunks)
     }

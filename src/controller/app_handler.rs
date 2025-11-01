@@ -1,7 +1,7 @@
-use super::error::ControllerError as Error;
+use super::error::{ControllerError as Error, ThreadsError};
 use crate::frame_handler::{EncodedFrame, Frame};
 use crate::ice::CandidatePair;
-use crate::rtp::RtpPacket;
+use crate::rtp::{ConnectionStatus, RtpPacket};
 use crate::{
     camera::Camera,
     client::Client,
@@ -12,26 +12,37 @@ use chrono::prelude::*;
 use std::net::SocketAddr;
 use std::net::UdpSocket;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
+use std::thread::JoinHandle;
 
 pub struct Controller {
     pub client: Client,
+
+    //Channels
     pub tx_encoded: Sender<EncodedFrame>,
     pub rx_encoded: Arc<Mutex<Receiver<EncodedFrame>>>,
-    pub tx_raw: Sender<Frame>,
-    pub rx_raw: Arc<Mutex<Receiver<Frame>>>,
     pub tx_local: Sender<Frame>,
     pub tx_remote: Sender<Frame>,
+    pub tx_thread: Sender<ThreadsError>,
+    pub rx_thread: Arc<Mutex<Receiver<ThreadsError>>>,
 
-    rtp_socket: UdpSocket,
-    rtcp_socket: UdpSocket,
+    //Connection status
+    pub connection_status: Arc<RwLock<ConnectionStatus>>,
+
+    //Camera
+    pub camera: Arc<Mutex<Camera>>,
+
+    //Thread's handlers
+    pub camera_handler: Option<JoinHandle<()>>,
+    pub rtp_sender_handler: Option<JoinHandle<()>>,
+    pub rtp_receiver_handler: Option<JoinHandle<()>>,
 }
 
 impl Controller {
     pub fn new(tx_local: Sender<Frame>, tx_remote: Sender<Frame>) -> Self {
-        let (tx_raw, rx_raw) = channel();
         let (tx_encoded, rx_encoded) = channel();
+        let (tx_thread, rx_thread) = channel();
 
         let rtp_socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind RTP socket");
         let rtp_port = rtp_socket.local_addr().unwrap().port();
@@ -45,17 +56,27 @@ impl Controller {
             client: Client::new(rtp_port),
             tx_encoded,
             rx_encoded: Arc::new(Mutex::new(rx_encoded)),
-            tx_raw,
-            rx_raw: Arc::new(Mutex::new(rx_raw)),
             tx_local,
             tx_remote,
-
-            rtp_socket,
-            rtcp_socket,
+            tx_thread,
+            rx_thread: Arc::new(Mutex::new(rx_thread)),
+            connection_status: Arc::new(RwLock::new(ConnectionStatus::Closed)),
+            camera: Arc::new(Mutex::new(Camera::new())),
+            camera_handler: None,
+            rtp_sender_handler: None,
+            rtp_receiver_handler: None,
         }
     }
 
     pub fn start_call(&mut self) -> Result<(), Error> {
+        {
+            let mut conn = self
+                .connection_status
+                .write()
+                .map_err(|_| Error::PoisonedLock)?;
+            *conn = ConnectionStatus::Open;
+        }
+
         let pair_opt = {
             let client_ref = &self.client;
             client_ref.ice_agent.get_selected_pair().cloned()
@@ -68,6 +89,17 @@ impl Controller {
         Ok(())
     }
 
+    pub fn shut_down(&mut self) -> Result<(), Error> {
+        let mut conn = self
+            .connection_status
+            .write()
+            .map_err(|_| Error::PoisonedLock)?;
+        *conn = ConnectionStatus::Closed;
+        self.camera.lock().unwrap().stop();
+
+        Ok(())
+    }
+
     fn generate_media_threads(&mut self, pair: &CandidatePair) -> Result<(), Error> {
         let remote_rtp: SocketAddr = format!("{}:{}", pair.remote.address, pair.remote.port)
             .parse()
@@ -76,7 +108,12 @@ impl Controller {
             .parse()
             .map_err(|e| Error::ParsingSocketAddressError(e))?;
 
-        self.rtp_socket
+        let rtp_sender_socket =
+            UdpSocket::bind(local_rtp).map_err(|e| Error::BindingAddressError(e.to_string()))?;
+        let rtcp_sender_socket =
+            UdpSocket::bind(local_rtcp).map_err(|e| Error::BindingAddressError(e.to_string()))?;
+
+        rtp_sender_socket
             .connect(remote_rtp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
         self.rtcp_socket
@@ -99,132 +136,151 @@ impl Controller {
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
 
-        self.spawn_camera_thread();
-        self.spawn_encoder_thread();
-        self.spawn_rtp_sender_thread(rtp_sender_socket, rtcp_sender_socket)?;
-        self.spawn_rtp_receiver_thread(rtp_receiver_socket, rtcp_receiver_socket);
+        self.spawn_camera_thread()?;
+        self.spawn_rtp_sender_thread(
+            rtp_sender_socket,
+            rtcp_sender_socket,
+            Arc::clone(&self.connection_status),
+        )?;
+        self.spawn_rtp_receiver_thread(
+            rtp_receiver_socket,
+            rtcp_receiver_socket,
+            Arc::clone(&self.connection_status),
+        )?;
+        self.handle_threads_errors();
 
         Ok(())
     }
 
-    pub fn spawn_camera_thread(&self) {
-        let tx_to_controller = self.tx_raw.clone();
+    pub fn spawn_camera_thread(&mut self) -> Result<(), Error> {
         let tx_local_cam = self.tx_local.clone();
-
-        let mut camera = Camera::new();
-        let rx_camera = camera.start();
-
-        thread::spawn(move || {
-            for frame in rx_camera {
-                if tx_local_cam.send(frame.clone()).is_err()
-                    || tx_to_controller.send(frame).is_err()
-                {
-                    break;
-                }
-            }
-        });
-    }
-
-    fn spawn_encoder_thread(&self) {
         let tx_encoded = self.tx_encoded.clone();
-        let rx_raw = self.rx_raw.clone();
+        let tx_thread = self.tx_thread.clone();
+        let rx_camera = self.camera.lock().map_err(|_| Error::PoisonedLock)?.start();
+        let status = self.connection_status.clone();
 
-        thread::spawn({
-            let mut encoder = Encoder::new().unwrap();
+        let handler = thread::spawn({
+            let mut encoder = Encoder::new().map_err(|e| Error::MapError(e.to_string()))?;
             move || {
-                loop {
-                    let frame = match rx_raw.lock().unwrap().recv() {
-                        Ok(frame) => frame,
-                        Err(_) => {
-                            eprintln!("Encoder: Camera disconnected. Stopping thread.");
-                            break; // Exit loop
+                for frame in rx_camera {
+                    if *status.read().unwrap() == ConnectionStatus::Closed {
+                        break;
+                    }
+                    if let Err(e) = tx_local_cam.send(frame.clone()) {
+                        let error = ThreadsError::Fatal(e.to_string());
+                        tx_thread.send(error).unwrap();
+                    }
+                    let encoded = match encoder.encode_frame(&frame) {
+                        Ok(enc) => enc,
+                        Err(e) => {
+                            let error = ThreadsError::Fatal(e.to_string());
+                            tx_thread.send(error).unwrap();
+                            return;
                         }
                     };
-                    let encoded = encoder.encode_frame(&frame).unwrap();
+
                     let encoded_frame = EncodedFrame {
                         id: frame.id,
                         chunks: encoded,
                         width: frame.width,
                         height: frame.height,
                     };
+
                     tx_encoded.send(encoded_frame).unwrap();
                 }
             }
         });
+        self.camera_handler = Some(handler);
+        Ok(())
     }
 
     fn spawn_rtp_sender_thread(
-        &self,
+        &mut self,
         rtp_socket: UdpSocket,
         rtcp_socket: UdpSocket,
+        connection_status: Arc<RwLock<ConnectionStatus>>,
     ) -> Result<(), Error> {
         let rx_encoded = self.rx_encoded.clone();
+        let tx_thread = self.tx_thread.clone();
+        let status = self.connection_status.clone();
 
-        thread::spawn({
+        let handler = thread::spawn({
             let mut rtp_sender = RtpSender::new(
                 rtp_socket
                     .try_clone()
                     .map_err(|e| Error::CloningSocketError(e.to_string()))?,
-                42, // SSRC
+                rtcp_socket
+                    .try_clone()
+                    .map_err(|e| Error::CloningSocketError(e.to_string()))?,
+                42,
+                connection_status,
             )
             .map_err(|e| Error::RtpSenderError(e.to_string()))?;
             move || {
                 loop {
-                    let encoded_frame = match rx_encoded.lock().unwrap().recv() {
-                        Ok(frame) => frame,
-                        Err(_) => {
-                            eprintln!("RTP sender: Encoder disconnected. Stopping thread.");
-                            break; // Exit loop
+                    if *status.read().unwrap() == ConnectionStatus::Closed {
+                        break;
+                    }
+                    let frame_lock = rx_encoded.lock().unwrap();
+                    let encoded_frame = match frame_lock.recv() {
+                        Ok(f) => f,
+                        Err(e) => {
+                            let error = ThreadsError::Fatal(e.to_string());
+                            tx_thread.send(error).unwrap();
+                            return;
                         }
                     };
-                    println!("received frame from encoder thread");
                     for (i, c) in encoded_frame.chunks.iter().enumerate() {
-                        let send_result = rtp_sender.send(
+                        if let Err(e) = rtp_sender.send(
                             c,
                             96,
                             Local::now().timestamp_millis() as u32,
                             encoded_frame.id,
                             i as u64,
                             encoded_frame.chunks.len() as u16,
-                        );
-
-                        if let Err(e) = send_result {
-                            eprintln!("RTP sender thread failed: {}. Stopping.", e);
-                            break; // Stop the loop
+                        ) {
+                            let error = ThreadsError::Fatal(e.to_string());
+                            tx_thread.send(error).unwrap();
                         }
-                        println!("sent frame to rtp receiver");
                     }
                 }
             }
         });
+        self.rtp_sender_handler = Some(handler);
         Ok(())
     }
 
     fn spawn_rtp_receiver_thread(
-        &self,
+        &mut self,
         rtp_receiver_socket: UdpSocket,
         rtcp_receiver_socket: UdpSocket,
-    ) {
+        connection_status: Arc<RwLock<ConnectionStatus>>,
+    ) -> Result<(), Error> {
         let tx_remote_cam_receiver = self.tx_remote.clone();
+        let tx_thread = self.tx_thread.clone();
+        let status = self.connection_status.clone();
 
-        thread::spawn({
-            let mut receiver = RtpReceiver::new(rtp_receiver_socket, rtcp_receiver_socket)
-                .map_err(|e| Error::RtpReceiverError(e.to_string()))
-                .unwrap();
-            let mut decoder = Decoder::new().unwrap();
+        let handler = thread::spawn({
+            let mut receiver =
+                RtpReceiver::new(rtp_receiver_socket, rtcp_receiver_socket, connection_status)
+                    .map_err(|e| Error::RtpReceiverError(e.to_string()))?;
+            let mut decoder = Decoder::new().map_err(|e| Error::MapError(e.to_string()))?;
             move || {
                 let mut actual_frame = None;
                 let mut chunks = Vec::new();
 
                 loop {
+                    if *status.read().unwrap() == ConnectionStatus::Closed {
+                        break;
+                    }
                     let rtp_packet = match receiver.receive() {
                         Ok(packet) => packet,
                         Err(e) => {
-                            eprintln!("RTP receiver thread failed: {}. Stopping.", e);
-                            break; // Stop the loop
+                            let error = ThreadsError::Fatal(e.to_string());
+                            tx_thread.send(error).unwrap();
+                            return;
                         }
                     };
-                    println!("received rtp packet");
                     match actual_frame {
                         Some(act_frame_id) => {
                             if act_frame_id == rtp_packet.frame_id {
@@ -235,16 +291,10 @@ impl Controller {
                             }
 
                             if rtp_packet.marker == chunks.len() as u16 {
-                                println!("complete frame received!");
-                                if let Some(frame_data) =
-                                    generate_frame_from(&mut chunks, &mut decoder)
-                                {
-                                    println!("frame data generated");
-                                    if tx_remote_cam_receiver.send(frame_data).is_err() {
-                                        eprintln!("Receiver thread: GUI closed.");
-                                        break; // Exit thread
-                                    }
-                                    println!("sent frame to interface");
+                                let frame_data = generate_frame_from(&mut chunks, &mut decoder);
+                                if let Err(e) = tx_remote_cam_receiver.send(frame_data) {
+                                    let error = ThreadsError::Fatal(e.to_string());
+                                    tx_thread.send(error).unwrap();
                                 }
                             }
                         }
@@ -256,6 +306,38 @@ impl Controller {
                 }
             }
         });
+        self.rtp_receiver_handler = Some(handler);
+        Ok(())
+    }
+
+    fn handle_threads_errors(&mut self) {
+        let rx_thread = Arc::clone(&self.rx_thread);
+        let connection_status = Arc::clone(&self.connection_status);
+
+        thread::spawn(move || {
+            loop {
+                match rx_thread.lock().unwrap().recv() {
+                    Ok(err) => match err {
+                        ThreadsError::Recoverable(msg) => {
+                            eprintln!("[WARN] Thread error (recoverable): {}", msg);
+                        }
+                        ThreadsError::Fatal(msg) => {
+                            eprintln!("[FATAL] Thread error: {}", msg);
+                            if let Ok(mut conn) = connection_status.write() {
+                                *conn = ConnectionStatus::Closed;
+                            }
+                            break;
+                        }
+                    },
+                    Err(_) => {
+                        eprintln!("[ERROR] Monitor channel closed — all threads finished?");
+                        break;
+                    }
+                }
+            }
+
+            eprintln!("Monitor thread exiting.");
+        });
     }
 }
 fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {
@@ -263,200 +345,16 @@ fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Op
 
     // Sort the chunks to ensure correct NAL unit order (SPS, PPS, then video)
     chunks.sort_by_key(|c| c.chunk_id);
-
-    let mut decoded_frame: Option<Frame> = None;
-
-    for chunk in chunks.iter() {
-        // Feed one NAL unit (one packet's payload) at a time
-        match decoder.decode_frame(&chunk.payload) {
-            Ok((decoded_data, width, height)) => {
-                // Success! This was likely the video (IDR) frame.
-                decoded_frame = Some(Frame {
-                    data: decoded_data,
-                    width,
-                    height,
-                    id: fr_id,
-                });
-                // We got our frame, no need to process subsequent NALs for this frame
-                // (though there shouldn't be any)
-                break;
-            }
-            Err(crate::frame_handler::FrameError::EmptyFrameError) => {
-                // This is expected. The decoder buffered the NAL (SPS/PPS)
-                // but isn't ready to output a video frame yet.
-                println!("Decoder buffered NAL unit (SPS/PPS).");
-                continue;
-            }
-            Err(e) => {
-                // An actual decoding error on this specific NAL unit
-                eprintln!(
-                    "Failed to decode NAL unit {} for frame {}: {}",
-                    chunk.chunk_id, fr_id, e
-                );
-                // If one chunk fails, the whole frame is bad.
-                return None;
-            }
-        }
+    let mut data = Vec::new();
+    for c in chunks.iter() {
+        data.extend_from_slice(&c.payload);
     }
+    let (decoded_data, width, height) = decoder.decode_frame(&data).unwrap();
 
-    // Return the frame if we successfully decoded one
-    decoded_frame
-}
-/*
-
-use crate::ice::{Candidate, CandidatePair};
-use nokhwa::Camera;
-use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
-use openh264::formats::{RgbSliceU8, YUVBuffer, YUVSource};
-use std::sync::mpsc::Sender;
-use std::sync::{mpsc, Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
-
-use anyhow::Result;
-
-const FRAME_RATE: u32 = 30;
-
-impl Client {
-    pub fn start_media_threads(&mut self, selected_pair: CandidatePair) -> Result<(), Error> {
-        // Create and store RTP communicators
-        let remote_addr: SocketAddr = format!(
-            "{}:{}",
-            selected_pair.remote.address, selected_pair.remote.port
-        )
-            .parse()
-            .map_err(|_| Error::IceConnectionError("Invalid remote addr".into()))?;
-
-        let sender = RtpSender::new(remote_addr, remote_addr, 12345) // SSRC 12345
-            .map_err(|e| Error::IceConnectionError(e.to_string()))?;
-        let receiver = RtpReceiver::new(selected_pair.local.port) // Bind to our local port
-            .map_err(|e| Error::IceConnectionError(e.to_string()))?;
-
-        self.rtp_sender = Some(Arc::new(Mutex::new(sender)));
-        self.rtp_receiver = Some(Arc::new(Mutex::new(receiver)));
-
-        // Spawn the sending (camera) thread
-        let sender_clone = self.rtp_sender.as_ref().unwrap().clone();
-        let local_gui_sender = self.local_video_sender.clone();
-        std::thread::spawn(move || {
-            if let Err(e) = Self::run_sending_pipeline(sender_clone, local_gui_sender) {
-                eprintln!("Sending pipeline error: {}", e);
-            }
-        });
-
-        // Spawn the receiving (decoder) thread
-        let receiver_clone = self.rtp_receiver.as_ref().unwrap().clone();
-        let remote_gui_sender = self.remote_video_sender.clone();
-        std::thread::spawn(move || {
-            if let Err(e) = Self::run_receiving_pipeline(receiver_clone, remote_gui_sender) {
-                eprintln!("Receiving pipeline error: {}", e);
-            }
-        });
-
-        Ok(())
-    }
-
-    fn run_sending_pipeline(
-        rtp_sender: Arc<Mutex<RtpSender>>,
-        gui_sender: Sender<VideoFrame>,
-    ) -> Result<()> {
-        // Init Camera
-        let mut camera = Camera::new(
-            CameraIndex::Index(0),
-            RequestedFormat::new::<nokhwa::pixel_format::RgbFormat>(
-                RequestedFormatType::AbsoluteHighestFrameRate,
-            ),
-        )
-            .unwrap();
-        camera.open_stream().unwrap();
-
-        // Init H264 Encoder
-        let mut encoder = Encoder::new().unwrap();
-
-        let frame_duration = Duration::from_millis(1000 / FRAME_RATE as u64);
-
-        loop {
-            let start_time = Instant::now();
-
-            // Capture Frame
-            let frame = camera.frame().unwrap();
-            let resolution = frame.resolution();
-            let width = resolution.width_x;
-            let height = resolution.height_y;
-            let rgb_data = frame.buffer().to_vec();
-
-            let gui_frame = VideoFrame {
-                rgb_data: frame.buffer().to_vec(), // Nokhwa gives RGB by default from MJPEG
-                width,
-                height,
-            };
-            let _ = gui_sender.send(gui_frame); // Ignore error if GUI closed
-
-            // Encode Frame
-            let rgb_source = RgbSliceU8::new(&rgb_data, (width as usize, height as usize));
-
-            let yuv_buffer = YUVBuffer::from_rgb_source(rgb_source);
-
-            // Encode the YUV buffer
-            let bitstream = encoder.encode(&yuv_buffer)?;
-            let h264_nal = bitstream.to_vec();
-
-            // Packetize & Send (Simple Approach)
-            let timestamp = start_time.elapsed().as_millis() as u32;
-
-            let mut sender = rtp_sender.lock().unwrap();
-            sender.send(&h264_nal, 96, timestamp, true)?;
-
-            // Sleep to maintain framerate
-            let elapsed = start_time.elapsed();
-            if elapsed < frame_duration {
-                std::thread::sleep(frame_duration - elapsed);
-            }
-        }
-    }
-
-    fn run_receiving_pipeline(
-        rtp_receiver: Arc<Mutex<RtpReceiver>>,
-        gui_sender: Sender<VideoFrame>,
-    ) -> Result<()> {
-        // Init H264 Decoder
-        let mut decoder = Decoder::new()?;
-
-        loop {
-            // Receive Packet
-            let mut receiver = rtp_receiver.lock().unwrap();
-            match receiver.try_receive()? {
-                Some(rtp_package) => {
-                    // De-packetize (Simple Approach)
-                    let h264_nal = rtp_package.payload;
-
-                    // Decode
-                    if let Some(yuv_frame) = decoder.decode(&h264_nal)? {
-                        // Convert YUV back to RGB for EGUI
-                        // TODO: Implement yuv_to_rgb(yuv_frame)
-                        let (width, height) = yuv_frame.dimensions();
-
-                        let rgb_data = vec![128; (width * height * 3) as usize]; // Placeholder gray frame
-
-                        let gui_frame = VideoFrame {
-                            rgb_data,
-                            width: width as u32,
-                            height: height as u32,
-                        };
-
-                        // Send to GUI
-                        if gui_sender.send(gui_frame).is_err() {
-                            break; // GUI closed, exit thread
-                        }
-                    }
-                }
-                None => {
-                    // No packet, sleep briefly to prevent 100% CPU
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-            }
-        }
-
-        Ok(())
+    Frame {
+        data: decoded_data,
+        width,
+        height,
+        id: fr_id,
     }
 }
- */

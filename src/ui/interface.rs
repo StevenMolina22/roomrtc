@@ -148,7 +148,7 @@ impl RoomRTCApp {
                     // TODO: Show this error in the GUI
                 } else {
                     self.controller.start_call().unwrap();
-                    self.view = View::Call;
+                    self.view = View::WaitingForPeer;
                 }
             }
         }
@@ -181,7 +181,7 @@ impl RoomRTCApp {
                     eprintln!("Failed to start call: {}", e);
                     // TODO: Show this error in the GUI
                 } else {
-                    self.view = View::Call;
+                    self.view = View::WaitingForPeer;
                 }
             }
         }
@@ -243,7 +243,7 @@ impl RoomRTCApp {
             }
         });
     }
-    
+
     fn show_waiting(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
@@ -254,7 +254,8 @@ impl RoomRTCApp {
                     .font(FontId::proportional(28.0)),
             );
 
-            self.controller.wait_for_peer_connection();
+            self.controller.wait_for_peer_connection().unwrap();
+            self.controller.start_call().unwrap();
             self.view = View::Call;
         });
     }

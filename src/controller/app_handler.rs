@@ -37,6 +37,9 @@ pub struct Controller {
     pub camera_handler: Option<JoinHandle<()>>,
     pub rtp_sender_handler: Option<JoinHandle<()>>,
     pub rtp_receiver_handler: Option<JoinHandle<()>>,
+
+    rtp_socket: UdpSocket,
+    rtcp_socket: UdpSocket,
 }
 
 impl Controller {
@@ -65,6 +68,8 @@ impl Controller {
             camera_handler: None,
             rtp_sender_handler: None,
             rtp_receiver_handler: None,
+            rtp_socket,
+            rtcp_socket,
         }
     }
 
@@ -108,12 +113,7 @@ impl Controller {
             .parse()
             .map_err(|e| Error::ParsingSocketAddressError(e))?;
 
-        let rtp_sender_socket =
-            UdpSocket::bind(local_rtp).map_err(|e| Error::BindingAddressError(e.to_string()))?;
-        let rtcp_sender_socket =
-            UdpSocket::bind(local_rtcp).map_err(|e| Error::BindingAddressError(e.to_string()))?;
-
-        rtp_sender_socket
+        self.rtp_socket
             .connect(remote_rtp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
         self.rtcp_socket
@@ -291,10 +291,13 @@ impl Controller {
                             }
 
                             if rtp_packet.marker == chunks.len() as u16 {
-                                let frame_data = generate_frame_from(&mut chunks, &mut decoder);
-                                if let Err(e) = tx_remote_cam_receiver.send(frame_data) {
-                                    let error = ThreadsError::Fatal(e.to_string());
-                                    tx_thread.send(error).unwrap();
+                                if let Some(frame_data) =
+                                    generate_frame_from(&mut chunks, &mut decoder)
+                                {
+                                    if let Err(e) = tx_remote_cam_receiver.send(frame_data) {
+                                        let error = ThreadsError::Fatal(e.to_string());
+                                        tx_thread.send(error).unwrap();
+                                    }
                                 }
                             }
                         }
@@ -349,12 +352,12 @@ fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Op
     for c in chunks.iter() {
         data.extend_from_slice(&c.payload);
     }
-    let (decoded_data, width, height) = decoder.decode_frame(&data).unwrap();
+    let (decoded_data, width, height) = decoder.decode_frame(&data).ok()?;
 
-    Frame {
+    Some(Frame {
         data: decoded_data,
         width,
         height,
         id: fr_id,
-    }
+    })
 }

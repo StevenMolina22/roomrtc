@@ -119,7 +119,8 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
         },
         Err(_) => {
             if Local::now() - *last_report_time
-                > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT).map_err(|_| RtcpError::InvalidConfigDuration)?
+                > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT)
+                    .map_err(|_| RtcpError::InvalidConfigDuration)?
             {
                 Err(RtcpError::TimedOut)
             } else {
@@ -152,7 +153,9 @@ mod tests {
         handler.start()?;
         thread::sleep(Duration::from_millis(100));
 
-        let status = connection_status.read().map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
+        let status = connection_status
+            .read()
+            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Open);
 
         let sent = sent_data.lock().map_err(|_| RtcpError::PoisonedLock)?;
@@ -171,7 +174,9 @@ mod tests {
 
         handler.close_connection()?;
 
-        let status = connection_status.read().map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
+        let status = connection_status
+            .read()
+            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Closed);
         Ok(())
     }
@@ -191,7 +196,9 @@ mod tests {
         let wait_time = REPORT_RECEIVE_LIMIT * (RETRY_LIMIT as u32 + 1);
         thread::sleep(wait_time);
 
-        let status = connection_status.read().map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
+        let status = connection_status
+            .read()
+            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Closed);
         Ok(())
     }

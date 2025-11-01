@@ -1,6 +1,8 @@
-use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder, EncoderConfig, IntraFramePeriod};
+use super::{error::FrameError as Error, frame::Frame};
+use openh264::encoder::{
+    EncodedBitStream, Encoder as H264Encoder, EncoderConfig, IntraFramePeriod,
+};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
-use super::{frame::Frame, error::FrameError as Error};
 
 /// A basic H.264 video encoder using the OpenH264 library.
 ///
@@ -12,7 +14,7 @@ pub struct Encoder {
     encoder: H264Encoder,
     frame_count: usize,
     idr_interval: usize,
-    max_chunk_size: usize
+    max_chunk_size: usize,
 }
 
 impl Encoder {
@@ -30,10 +32,12 @@ impl Encoder {
         let config = EncoderConfig::new().intra_frame_period(IntraFramePeriod::from_num_frames(15));
         let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
 
-        Ok(Self { encoder,
+        Ok(Self {
+            encoder,
             frame_count: 0,
             idr_interval: 15,
-            max_chunk_size: 1200 })
+            max_chunk_size: 1200,
+        })
     }
 
     /// Encodes a raw frame into H.264 byte chunks.
@@ -54,8 +58,11 @@ impl Encoder {
             self.encoder.force_intra_frame();
         }
 
-        let nalus = self.encoder.encode(&yuv).map_err(|_| Error::EncodingError)?;
-        let chunks = generate_chunks_from_nalus(nalus, self.max_chunk_size);
+        let nalus = self
+            .encoder
+            .encode(&yuv)
+            .map_err(|_| Error::EncodingError)?;
+        let chunks = generate_chunks_from_nalus(nalus);
 
         self.frame_count += 1;
 

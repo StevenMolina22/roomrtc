@@ -1,5 +1,5 @@
 use crate::frame_handler::Frame;
-use opencv::{imgproc, prelude::*, videoio, core};
+use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -48,7 +48,7 @@ impl Camera {
                     continue;
                 }
 
-                imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT).unwrap();
+                imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).unwrap();
                 let data = rgb.data_bytes().unwrap().to_vec();
 
                 let id = {

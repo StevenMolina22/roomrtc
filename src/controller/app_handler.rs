@@ -1,6 +1,5 @@
 use super::error::{ControllerError as Error, ThreadsError};
 use crate::frame_handler::{EncodedFrame, Frame};
-use crate::ice::CandidatePair;
 use crate::rtp::{ConnectionStatus, RtpPacket};
 use crate::{
     camera::Camera,
@@ -68,26 +67,8 @@ impl Controller {
     }
     
     pub fn wait_for_peer_connection(&mut self) -> Result<(), Error> {
-        let pair = match self.client.ice_agent.get_selected_pair().cloned(){
-            Ok(pair) => pair,
-            Err(e) => return Err(Error::MapError(e.to_string())),
-        };
-        
-        let remote_rtp: SocketAddr = format!("{}:{}", pair.remote.address, pair.remote.port)
-            .parse()
-            .map_err(|e| Error::ParsingSocketAddressError(e))?;
-        let remote_rtcp: SocketAddr = format!("{}:{}", pair.remote.address, pair.remote.port + 1)
-            .parse()
-            .map_err(|e| Error::ParsingSocketAddressError(e))?;
-        
-        self.rtp_socket
-            .connect(remote_rtp)
-            .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
-        self.rtcp_socket
-            .connect(remote_rtcp)
-            .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
-        
-        self.rtp_socket.send(&RtpPacket::default().to_bytes()).unwrap();
+        self.connect()?;
+
         loop {
             let mut buffer = [0u8; 1500];
             match self.rtp_socket.recv(&mut buffer) {
@@ -101,8 +82,35 @@ impl Controller {
                 }
             }
         }
-        
+
         Ok(())
+    }
+
+    pub fn join(&mut self) -> Result<(), Error> {
+        self.connect()?;
+        self.rtp_socket.send(&RtpPacket::default().to_bytes()).map_err(|e| Error::MapError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn connect(&mut self) -> Result<(), Error> {
+        let pair = match self.client.ice_agent.get_selected_pair().cloned(){
+            Ok(pair) => pair,
+            Err(e) => return Err(Error::MapError(e.to_string())),
+        };
+
+        let remote_rtp: SocketAddr = format!("{}:{}", pair.remote.address, pair.remote.port)
+            .parse()
+            .map_err(|e| Error::ParsingSocketAddressError(e))?;
+        let remote_rtcp: SocketAddr = format!("{}:{}", pair.remote.address, pair.remote.port + 1)
+            .parse()
+            .map_err(|e| Error::ParsingSocketAddressError(e))?;
+
+        self.rtp_socket
+            .connect(remote_rtp)
+            .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
+        self.rtcp_socket
+            .connect(remote_rtcp)
+            .map_err(|e| Error::ConnectionSocketError(e.to_string()))
     }
 
     pub fn start_call(&mut self) -> Result<(), Error> {
@@ -114,17 +122,7 @@ impl Controller {
             *conn = ConnectionStatus::Open;
         }
 
-        let pair_opt = {
-            let client_ref = &self.client;
-            client_ref.ice_agent.get_selected_pair().cloned()
-        };
-
-        if let Ok(pair) = pair_opt {
-            self.generate_media_threads()?;
-        }
-        self.generate_media_threads();
-
-        Ok(())
+        self.generate_media_threads()
     }
 
     pub fn shut_down(&mut self) -> Result<(), Error> {

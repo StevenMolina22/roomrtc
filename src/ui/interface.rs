@@ -181,7 +181,12 @@ impl RoomRTCApp {
                     eprintln!("Failed to start call: {}", e);
                     // TODO: Show this error in the GUI
                 } else {
-                    self.view = View::WaitingForPeer;
+                    if self.controller.join().is_err() {
+                       self.view = View::Error 
+                    } else {
+                        self.controller.start_call().unwrap();
+                        self.view = View::Call;
+                    }
                 }
             }
         }

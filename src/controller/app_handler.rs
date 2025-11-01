@@ -239,7 +239,7 @@ impl Controller {
                             i as u64,
                             encoded_frame.chunks.len() as u16,
                         ) {
-                            let error = ThreadsError::Fatal(e.to_string());
+                            let error = ThreadsError::Recoverable(e.to_string());
                             tx_thread.send(error).unwrap();
                         }
                     }

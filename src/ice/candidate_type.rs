@@ -1,13 +1,33 @@
 use super::error::IceError as Error;
 use std::str::FromStr;
+
+/// Type of an ICE candidate.
+///
+/// Represents the origin category of an ICE candidate. The enum covers
+/// the candidate types used in this implementation and provides helper
+/// utilities such as a RFC-compliant priority value.
 #[derive(Debug, PartialEq, Clone)]
 pub enum CandidateType {
+    /// Host candidate (direct local interface address).
     Host,
+
+    /// Server reflexive candidate.
     ServerReflexive,
 }
 
 impl CandidateType {
-    /// Returns the candidate type priority according to RFC 8445
+    /// Returns the candidate type preference according to RFC 8445.
+    ///
+    /// The returned value is the type preference used when computing a
+    /// candidate's overall priority. It is a small integer (u32) that
+    /// reflects how desirable the candidate type is (higher is better).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::ice::candidate_type::CandidateType;
+    /// assert_eq!(CandidateType::Host.priority(), 126);
+    /// ```
     #[must_use]
     pub const fn priority(&self) -> u32 {
         match self {
@@ -18,6 +38,8 @@ impl CandidateType {
 }
 
 impl std::fmt::Display for CandidateType {
+    /// Formats the candidate type as the short string used in SDP/ICE
+    /// exchanges: `"host"` or `"srflx"`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Host => write!(f, "host"),
@@ -27,6 +49,11 @@ impl std::fmt::Display for CandidateType {
 }
 
 impl FromStr for CandidateType {
+    /// Parses a string into a `CandidateType`.
+    ///
+    /// Accepts the canonical short forms used in SDP/ICE: `"host"` and
+    /// `"srflx"`. Returns `IceError::InvalidCandidateType` for unknown
+    /// inputs.
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

@@ -1,15 +1,42 @@
 use crate::ice::candidate::Candidate;
 use crate::ice::connectivity_state::ConnectivityState;
 
+/// A pair of ICE candidates consisting of a local and a remote candidate.
+///
+/// This `struct` represents a tuple (local, remote) used during the
+/// connectivity-checking phase to probe candidate pairs. Each pair has a
+/// priority computed according to the ICE formula (see
+/// `calculate_pair_priority`) and a connectivity state.
 #[derive(Clone)]
 pub struct CandidatePair {
+    /// The local candidate (from this agent).
     pub local: Candidate,
+
+    /// The remote candidate (from the remote peer).
     pub remote: Candidate,
+
+    /// Pair priority computed using the ICE formula.
+    ///
+    /// The priority is calculated from the `priority` fields of the local
+    /// and remote candidates and stored as a `u64`.
     pub priority: u64,
+
+    /// Current connectivity state of the pair.
     pub state: ConnectivityState,
 }
 
 impl CandidatePair {
+    /// Creates a new `CandidatePair` from a local and remote candidate.
+    ///
+    /// # Parameters
+    ///
+    /// - `local`: the local `Candidate`.
+    /// - `remote`: the remote `Candidate`.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `CandidatePair` with the computed priority and the initial
+    /// state set to `ConnectivityState::Waiting`.
     #[must_use]
     pub fn new(local: Candidate, remote: Candidate) -> Self {
         let priority = Self::calculate_pair_priority(&local, &remote);
@@ -21,6 +48,19 @@ impl CandidatePair {
         }
     }
 
+    /// Computes the pair priority according to the ICE formula.
+    ///
+    /// The formula used is:
+    ///
+    /// g = min(local.priority, remote.priority)
+    /// l = max(local.priority, remote.priority)
+    /// priority = (1<<32) * g + 2*l + (local > remote ? 1 : 0)
+    ///
+    /// # Notes
+    ///
+    /// - This method is private because priority is computed internally when
+    ///   constructing the pair.
+    /// - Returns `u64` to avoid overflow when combining values.
     fn calculate_pair_priority(local: &Candidate, remote: &Candidate) -> u64 {
         let g = u64::from(std::cmp::min(local.priority, remote.priority));
         let l = u64::from(std::cmp::max(local.priority, remote.priority));
@@ -29,6 +69,7 @@ impl CandidatePair {
 }
 
 impl std::fmt::Display for CandidatePair {
+    /// Formats a `CandidatePair` as `"<local> <-> <remote> [<state>] (priority: <priority>)"`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -70,7 +111,6 @@ mod tests {
 
     #[test]
     fn test_candidate_pair_priority_calculation() {
-        // local = 300, remote = 100
         let local = build_candidate(300);
         let remote = build_candidate(100);
 

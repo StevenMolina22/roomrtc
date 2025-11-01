@@ -4,6 +4,13 @@ use super::connectivity_state::ConnectivityState;
 use super::error::IceError as Error;
 use if_addrs;
 
+/// An ICE agent that gathers local candidates, accepts remote candidates
+/// and forms candidate pairs for connectivity checks.
+///
+/// This agent implements a small subset of ICE functionality:
+/// gathering local host candidates, adding
+/// remote candidates, creating candidate pairs, and selecting a pair after
+/// simulated connectivity checks.
 pub struct IceAgent {
     local_candidates: Vec<Candidate>,
     remote_candidates: Vec<Candidate>,
@@ -18,7 +25,9 @@ impl Default for IceAgent {
 }
 
 impl IceAgent {
-    /// Creates a new empty ICE agent
+    /// Create a new, empty `IceAgent`.
+    ///
+    /// The agent starts with no local or remote candidates and no pairs.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -29,8 +38,11 @@ impl IceAgent {
         }
     }
 
-    /// Gathers local candidates (available IP addresses)
-    /// This implementation only gets the local IP
+    /// Gather local candidates and add them to the agent.
+    ///
+    /// This implementation performs a minimal gather: it selects a single
+    /// non-loopback IPv4 address from the host and creates a host
+    /// candidate.
     pub fn gather_candidates(&mut self, port: u16) -> Result<(), Error> {
         // Find my local IP and create a candidate
         let local_ip = get_local_ip()?;
@@ -42,13 +54,16 @@ impl IceAgent {
         Ok(())
     }
 
-    /// Adds a single remote candidate and creates pairs
+    /// Add a single remote candidate and create candidate pairs.
+    ///
+    /// Returns an error if no local candidates are available.
     pub fn add_remote_candidate(&mut self, candidate: Candidate) -> Result<(), Error> {
         self.remote_candidates.push(candidate);
         self.create_candidate_pair()
     }
 
-    /// Adds remote candidates received from the other peer and creates candidate pairs
+    /// Add multiple remote candidates (e.g., received from the peer) and
+    /// create candidate pairs for them.
     pub fn add_remote_candidates(&mut self, candidates: Vec<Candidate>) -> Result<(), Error> {
         for candidate in candidates {
             self.remote_candidates.push(candidate);
@@ -56,6 +71,10 @@ impl IceAgent {
         self.create_candidate_pair()
     }
 
+    /// Create pairs between all local and remote candidates.
+    ///
+    /// Validates that both local and remote candidate lists are non-empty
+    /// and constructs `CandidatePair` instances for every combination.
     fn create_candidate_pair(&mut self) -> Result<(), Error> {
         if self.local_candidates.is_empty() {
             return Err(Error::NoLocalCandidates);
@@ -74,7 +93,10 @@ impl IceAgent {
         Ok(())
     }
 
-    /// Starts connectivity checks and selects the best pair
+    /// Start connectivity checks and select a working pair.
+    ///
+    /// This function simulates connectivity checks by selecting the first
+    /// pair and marking it as `Succeeded`.
     pub fn start_connectivity_checks(&mut self) -> Result<(), Error> {
         if self.candidate_pairs.is_empty() {
             return Err(Error::NoCandidatePairs);
@@ -101,18 +123,23 @@ impl IceAgent {
         Ok(())
     }
 
+    /// Return a reference to the first local candidate, if any.
     #[must_use]
     pub fn get_local_candidate(&self) -> Option<&Candidate> {
         self.local_candidates.first()
     }
 
+    /// Return the selected candidate pair or an error if none was selected.
     #[must_use]
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
     }
 }
 
-/// Gets the local IP using if_addrs
+/// Get a non-loopback IPv4 address from the host using `if_addrs`.
+///
+/// Returns an error if no suitable interface is found or if the
+/// underlying call to list interfaces fails.
 fn get_local_ip() -> Result<String, Error> {
     let interfaces = if_addrs::get_if_addrs().map_err(|_| Error::NetworkInterfaceError)?;
 

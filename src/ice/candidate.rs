@@ -1,18 +1,52 @@
 use crate::ice::candidate_type::CandidateType;
 
-// Represents an ICE candidate
+/// An ICE candidate.
+///
+/// This struct represents an ICE candidate as used in connectivity checks.
+/// It contains the candidate type (host, server-reflexive, etc.), the
+/// computed priority and the addressing information required to perform
+/// connectivity checks (address, port, transport, component id).
 #[derive(Clone)]
 pub struct Candidate {
+    /// The type/category of the candidate (e.g. host, srflx).
     pub candidate_type: CandidateType,
+
+    /// Computed priority for this candidate instance.
+    ///
+    /// The priority is calculated following the ICE/RFC 8445 formula and
+    /// is used to sort and select candidate pairs.
     pub priority: u32,
+
+    /// IP address or hostname of the candidate.
     pub address: String,
+
+    /// Port number for the candidate.
     pub port: u16,
+
+    /// Component ID
     pub component_id: u8,
+
+    /// Foundation string used in ICE to group related candidates.
     pub foundation: String,
+
+    /// Transport protocol ("UDP").
     pub transport: String,
 }
 
 impl Candidate {
+    /// Create a new `Candidate` with all fields specified.
+    ///
+    /// # Parameters
+    /// - `candidate_type`: the candidate category.
+    /// - `priority`: computed priority value.
+    /// - `address`: IP address or host name.
+    /// - `port`: transport port number.
+    /// - `component_id`: component identifier.
+    /// - `foundation`: foundation string.
+    /// - `transport`: transport protocol string.
+    ///
+    /// # Returns
+    /// A `Candidate` instance containing the provided values.
     #[must_use]
     pub const fn new(
         candidate_type: CandidateType,
@@ -34,7 +68,10 @@ impl Candidate {
         }
     }
 
-    /// Creates a new Host type candidate with the specified IP address
+    /// Create a new host candidate with a given IP address and component id.
+    ///
+    /// The produced candidate uses a high local preference and sets default
+    /// values for foundation and transport. The port is initialized to 0.
     #[must_use]
     pub fn new_host(address: String, component_id: u8) -> Self {
         let candidate_type = CandidateType::Host;
@@ -53,6 +90,11 @@ impl Candidate {
         }
     }
 
+    /// Calculate the candidate priority using the ICE formula.
+    ///
+    /// The formula implemented here follows RFC 8445: combine type
+    /// preference, local preference and component id into a single `u32`
+    /// priority value.
     fn calculate_priority(candidate_type: &CandidateType, local_preference: u16) -> u32 {
         let type_preference = match candidate_type {
             CandidateType::Host => 126,
@@ -63,6 +105,7 @@ impl Candidate {
 }
 
 impl std::fmt::Display for Candidate {
+    /// Format the candidate for debug/logging: `address:port@type (priority)`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,

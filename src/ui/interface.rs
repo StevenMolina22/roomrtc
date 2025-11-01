@@ -1,7 +1,8 @@
-use std::sync::{mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::sync::mpsc::Receiver;
 use eframe::egui;
-use egui::{ColorImage, Context, TextureHandle, TextureOptions, Ui};
+use eframe::epaint::{Color32, FontId};
+use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
 use super::views::View;
 use crate::{controller::Controller};
 use crate::frame_handler::Frame;
@@ -9,11 +10,18 @@ use crate::frame_handler::Frame;
 pub struct RoomRTCApp {
     view: View,
     controller: Controller,
+
+    //Receivers
     rx_local: Receiver<Frame>,
     rx_remote: Receiver<Frame>,
+    rx_event: Receiver<String>,
+
+    //SDP
     our_offer: String,
     remote_sdp: String,
     our_answer: Option<String>,
+
+    //Textures
     local_texture: Option<TextureHandle>,
     remote_texture: Option<TextureHandle>,
 }
@@ -22,12 +30,14 @@ impl RoomRTCApp {
     pub fn new() -> Self {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
+        let (tx_event, rx_event) = mpsc::channel();
 
         Self {
             view: View::default(),
-            controller: Controller::new(tx_local, tx_remote),
+            controller: Controller::new(tx_local, tx_remote, tx_event),
             rx_local,
             rx_remote,
+            rx_event,
             our_offer: String::new(),
             remote_sdp: String::new(),
             our_answer: None,
@@ -41,11 +51,16 @@ impl eframe::App for RoomRTCApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
+            while let Ok(_) = self.rx_event.try_recv() {
+                self.view = View::Error;
+            }
 
             match self.view {
                 View::Menu => self.show_menu(ui),
                 View::Connection => self.show_connection(ui),
                 View::Call => self.show_call(ctx, ui),
+                View::Error => {
+                    self.show_error(ui)},
             }
 
             ctx.request_repaint();
@@ -206,6 +221,27 @@ impl RoomRTCApp {
         } else {
             ui.label("No se recibió video todavía...");
         }
+    }
+
+    fn show_error(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(50.0);
+
+            ui.label(
+                RichText::new("⚠️ Error en la llamada")
+                    .color(Color32::RED)
+                    .font(FontId::proportional(28.0)),
+            );
+
+            ui.add_space(20.0);
+
+            if ui
+                .add_sized([200.0, 40.0], egui::Button::new("Back to menu"))
+                .clicked()
+            {
+                self.view = View::Menu;
+            }
+        });
     }
 }
 

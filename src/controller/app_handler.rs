@@ -21,6 +21,7 @@ pub struct Controller {
     pub tx_remote: Sender<Frame>,
     pub tx_thread: Sender<ThreadsError>,
     pub rx_thread: Arc<Mutex<Receiver<ThreadsError>>>,
+    pub tx_event: Sender<String>,
 
     //Connection status
     pub connection_status: Arc<RwLock<ConnectionStatus>>,
@@ -35,7 +36,7 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new(tx_local: Sender<Frame>, tx_remote: Sender<Frame>) -> Self {
+    pub fn new(tx_local: Sender<Frame>, tx_remote: Sender<Frame>, tx_event: Sender<String>) -> Self {
         let (tx_encoded, rx_encoded) = channel();
         let (tx_thread, rx_thread) = channel();
 
@@ -46,6 +47,7 @@ impl Controller {
             tx_local,
             tx_remote,
             tx_thread,
+            tx_event,
             rx_thread: Arc::new(Mutex::new(rx_thread)),
             connection_status: Arc::new(RwLock::new(ConnectionStatus::Closed)),
             camera: Arc::new(Mutex::new(Camera::new())),
@@ -276,6 +278,7 @@ impl Controller {
     fn handle_threads_errors(&mut self) {
         let rx_thread = Arc::clone(&self.rx_thread);
         let connection_status = Arc::clone(&self.connection_status);
+        let tx_event = self.tx_event.clone();
 
         thread::spawn(move || {
             loop {
@@ -289,6 +292,7 @@ impl Controller {
                             if let Ok(mut conn) = connection_status.write() {
                                 *conn = ConnectionStatus::Closed;
                             }
+                            tx_event.send(msg).unwrap();
                             break;
                         }
                     },

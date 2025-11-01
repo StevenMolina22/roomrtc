@@ -3,5 +3,6 @@ pub enum View {
     #[default]
     Menu,
     Call,
-    Connection
+    Connection,
+    Error
 }

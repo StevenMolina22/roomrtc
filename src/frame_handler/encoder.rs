@@ -62,7 +62,9 @@ impl Encoder {
             .encoder
             .encode(&yuv)
             .map_err(|_| Error::EncodingError)?;
-        let chunks = generate_chunks_from_nalus(nalus);
+
+        // let chunks = generate_chunks_from_nalus(nalus);
+        let chunks = generate_chunks_from_nalus(nalus, self.max_chunk_size);
 
         self.frame_count += 1;
 
@@ -70,15 +72,24 @@ impl Encoder {
     }
 }
 
-fn generate_chunks_from_nalus(nalus: EncodedBitStream) -> Vec<Vec<u8>> {
-    let mut chunks = Vec::new();
-    for layer_index in 0..nalus.num_layers() {
-        let layer = nalus.layer(layer_index).unwrap();
+// fn generate_chunks_from_nalus(nalus: EncodedBitStream) -> Vec<Vec<u8>> {
+//     let mut chunks = Vec::new();
+//     for layer_index in 0..nalus.num_layers() {
+//         let layer = nalus.layer(layer_index).unwrap();
 
-        for nal_index in 0..layer.nal_count() {
-            let nal_slice = layer.nal_unit(nal_index).unwrap();
-            chunks.push(nal_slice.to_vec());
-        }
+//         for nal_index in 0..layer.nal_count() {
+//             let nal_slice = layer.nal_unit(nal_index).unwrap();
+//             chunks.push(nal_slice.to_vec());
+//         }
+//     }
+//     chunks
+// }
+
+fn generate_chunks_from_nalus(nalus: EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
+    let nalu_units = nalus.to_vec();
+    let mut chunks = Vec::new();
+    for chunk in nalu_units.chunks(max_chunk_size) {
+        chunks.push(chunk.to_vec());
     }
     chunks
 }

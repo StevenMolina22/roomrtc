@@ -29,7 +29,6 @@ impl Encoder {
     /// Returns [`Error::EncoderIntializationError`] if the encoder cannot
     /// be created by the OpenH264 library.
     pub fn new() -> Result<Self, Error> {
-        let config = EncoderConfig::new().intra_frame_period(IntraFramePeriod::from_num_frames(15));
         let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
 
         Ok(Self {
@@ -58,12 +57,7 @@ impl Encoder {
             self.encoder.force_intra_frame();
         }
 
-        let nalus = self
-            .encoder
-            .encode(&yuv)
-            .map_err(|_| Error::EncodingError)?;
-
-        // let chunks = generate_chunks_from_nalus(nalus);
+        let nalus = self.encoder.encode(&yuv).map_err(|_| Error::EncodingError)?;
         let chunks = generate_chunks_from_nalus(nalus, self.max_chunk_size);
 
         self.frame_count += 1;
@@ -71,19 +65,6 @@ impl Encoder {
         Ok(chunks)
     }
 }
-
-// fn generate_chunks_from_nalus(nalus: EncodedBitStream) -> Vec<Vec<u8>> {
-//     let mut chunks = Vec::new();
-//     for layer_index in 0..nalus.num_layers() {
-//         let layer = nalus.layer(layer_index).unwrap();
-
-//         for nal_index in 0..layer.nal_count() {
-//             let nal_slice = layer.nal_unit(nal_index).unwrap();
-//             chunks.push(nal_slice.to_vec());
-//         }
-//     }
-//     chunks
-// }
 
 fn generate_chunks_from_nalus(nalus: EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
     let nalu_units = nalus.to_vec();

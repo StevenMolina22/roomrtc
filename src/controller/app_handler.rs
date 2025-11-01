@@ -350,7 +350,6 @@ impl Controller {
 fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {
     let fr_id = chunks.first()?.frame_id;
 
-    // Sort the chunks to ensure correct NAL unit order (SPS, PPS, then video)
     chunks.sort_by_key(|c| c.chunk_id);
     let mut data = Vec::new();
     for c in chunks.iter() {

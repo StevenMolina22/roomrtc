@@ -8,9 +8,9 @@ use crate::rtcp::RtcpPacket;
 use crate::rtp::ConnectionStatus;
 use crate::tools::Socket;
 
-const REPORT_PERIOD_SEC: u64 = 3;
-const REPORT_RECEIVE_LIMIT: Duration = Duration::from_secs(2);
-const RETRY_LIMIT: usize = 10;
+const REPORT_PERIOD_MILLIS: u64 = 1000;
+const REPORT_RECEIVE_LIMIT: Duration = Duration::from_millis(3000);
+const RETRY_LIMIT: usize = 5;
 
 pub struct RtcpReportHandler<S: Socket + Send + Sync + 'static> {
     socket: Arc<S>,
@@ -39,8 +39,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         thread::spawn(move || {
             loop {
                 if let Ok(conn) = shared_connection_status.read()
-                    && *conn == ConnectionStatus::Closed
-                {
+                    && *conn == ConnectionStatus::Closed {
                     break;
                 }
 
@@ -48,10 +47,13 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     .send(RtcpPacket::ConnectivityReport.as_bytes())
                     .is_err()
                 {
-                    eprintln!("[RTCP] Failed to send connectivity report, will retry.");
+                    if let Ok(mut conn) = shared_connection_status.write() {
+                        *conn = ConnectionStatus::Closed;
+                    }
+                    break;
                 }
 
-                thread::sleep(Duration::from_secs(REPORT_PERIOD_SEC));
+                thread::sleep(Duration::from_millis(REPORT_PERIOD_MILLIS));
             }
         });
     }
@@ -103,7 +105,7 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
     report_socket: &S,
     last_report_time: &mut DateTime<Local>,
 ) -> Result<(), RtcpError> {
-    let mut buf = [0u8; 65500];
+    let mut buf = [0u8; 1024];
 
     match report_socket.recv_from(&mut buf) {
         Ok((size, _src_addr)) => match RtcpPacket::from_bytes(&buf[..size]) {
@@ -112,7 +114,15 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
                 Ok(())
             }
             Some(RtcpPacket::Goodbye) => Err(RtcpError::GoodbyeReceived),
-            None => Err(RtcpError::TimedOut),
+            None => {
+                if Local::now() - *last_report_time
+                    > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT).unwrap()
+                {
+                    Err(RtcpError::TimedOut)
+                } else {
+                    Ok(())
+                }
+            },
         },
         Err(_) => {
             if Local::now() - *last_report_time

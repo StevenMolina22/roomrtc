@@ -1,4 +1,4 @@
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc};
 use std::sync::mpsc::Receiver;
 use eframe::egui;
 use eframe::epaint::{Color32, FontId};
@@ -31,10 +31,11 @@ impl RoomRTCApp {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
         let (tx_event, rx_event) = mpsc::channel();
+        let controller = Controller::new(tx_local, tx_remote, tx_event).unwrap();
 
         Self {
             view: View::default(),
-            controller: Controller::new(tx_local, tx_remote, tx_event),
+            controller,
             rx_local,
             rx_remote,
             rx_event,
@@ -59,6 +60,7 @@ impl eframe::App for RoomRTCApp {
                 View::Menu => self.show_menu(ui),
                 View::Connection => self.show_connection(ui),
                 View::Call => self.show_call(ctx, ui),
+                View::WaitingForPeer => self.show_waiting(ui),
                 View::Error => {
                     self.show_error(ui)},
             }
@@ -226,8 +228,8 @@ impl RoomRTCApp {
             ui.add_space(50.0);
 
             ui.label(
-                RichText::new("⚠️ Error en la llamada")
-                    .color(Color32::RED)
+                RichText::new("Call is off. The other client hung up")
+                    .color(Color32::WHITE)
                     .font(FontId::proportional(28.0)),
             );
 
@@ -239,6 +241,21 @@ impl RoomRTCApp {
             {
                 self.view = View::Menu;
             }
+        });
+    }
+    
+    fn show_waiting(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(50.0);
+
+            ui.label(
+                RichText::new("Waiting for other peer...")
+                    .color(Color32::WHITE)
+                    .font(FontId::proportional(28.0)),
+            );
+
+            self.controller.wait_for_peer_connection();
+            self.view = View::Call;
         });
     }
 }

@@ -1,3 +1,5 @@
+use std::default::Default;
+
 #[derive(Debug, Clone)]
 
 pub struct RtpPacket {
@@ -11,6 +13,20 @@ pub struct RtpPacket {
     pub payload: Vec<u8>,
 }
 
+impl Default for RtpPacket {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            marker: 0,
+            payload_type: 0,
+            frame_id: 0,
+            chunk_id: 0,
+            timestamp: 0,
+            ssrc: 0,
+            payload: Vec::new(),
+        }
+    }
+}
 impl RtpPacket {
     pub fn new(
         marker: u16,

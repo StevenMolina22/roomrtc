@@ -11,6 +11,7 @@ pub enum ControllerError {
     RtpReceiverError(String),
     PoisonedLock,
     MapError(String),
+    EmptyRTPSenderError,
 }
 
 pub enum ThreadsError {
@@ -45,6 +46,7 @@ impl Display for ControllerError {
             ),
             Self::PoisonedLock => write!(f, "Error: \"Poisoned lock\""),
             Self::MapError(e) => write!(f, "{}", e),
+            Self::EmptyRTPSenderError => write!(f, "Error: \"there is no RTP sender built yet\""),
         }
     }
 }

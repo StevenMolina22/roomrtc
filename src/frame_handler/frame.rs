@@ -1,6 +1,7 @@
 use super::FrameError as Error;
 use opencv::imgproc;
 use opencv::prelude::*;
+use opencv::core;
 
 #[derive(Clone)]
 pub struct Frame {
@@ -21,7 +22,7 @@ impl Frame {
 
         let mut rgb_mat = Mat::default();
 
-        imgproc::cvt_color(&yuv_mat, &mut rgb_mat, imgproc::COLOR_YUV2RGB_I420, 0)
+        imgproc::cvt_color(&yuv_mat, &mut rgb_mat, imgproc::COLOR_YUV2RGB_I420, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT)
             .map_err(|_| Error::TypeConversionError)?;
 
         Ok(Self {

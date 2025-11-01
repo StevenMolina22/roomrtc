@@ -21,6 +21,8 @@ pub enum RtpError {
     TerminateFailed,
     /// Failed to send or receive because connection has been closed
     ConnectionClosed,
+    /// Failed to acquire connection status lock
+    ConnectionStatusLockFailed,
     /// RTCP Error
     RTCPError(String),
 }
@@ -38,6 +40,7 @@ impl Display for RtpError {
             RtpError::TerminateFailed => write!(f, "Error: \"Failed to terminate\""),
             RtpError::ConnectionClosed => write!(f, "Error: \"Connection closed\""),
             RtpError::RTCPError(e) => write!(f, "{}", e),
+            RtpError::ConnectionStatusLockFailed => write!(f, "Error: \"Failed to acquire connection status lock\""),
         }
     }
 }

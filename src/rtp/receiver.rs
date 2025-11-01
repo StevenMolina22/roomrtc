@@ -47,7 +47,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                     }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    let conn = self.connection_status.read().unwrap();
+                    let conn = self.connection_status.read().map_err(|_| RtpError::ConnectionStatusLockFailed)?;
                     if *conn == ConnectionStatus::Closed {
                         return Err(RtpError::ConnectionClosed);
                     } else {

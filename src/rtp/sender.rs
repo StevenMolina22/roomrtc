@@ -45,3 +45,74 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rtcp::RtcpPacket;
+    use crate::rtp::ConnectionStatus;
+    use crate::tools::MockSocket;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn test_send_multiple_rtp_packets_increments_sequence() -> Result<(), RtpError> {
+        let rtp_sent = Arc::new(Mutex::new(Vec::new()));
+        let rtcp_sent = Arc::new(Mutex::new(Vec::new()));
+
+        let rtp_socket = MockSocket {
+            data_to_receive: vec![],
+            sent_data: Arc::clone(&rtp_sent),
+        };
+
+        let rtcp_socket = MockSocket {
+            data_to_receive: vec![],
+            sent_data: Arc::clone(&rtcp_sent),
+        };
+
+        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0)?;
+
+        for i in 0..3 {
+            let payload = vec![i];
+            sender.send(&payload, 96, 1234 + i as u32, 0, i.into(), 5)?;
+        }
+
+        let sent = rtp_sent.lock().map_err(|_| RtpError::PoisonedLock)?;
+        assert_eq!(sent.len(), 3, "There should have been three packets sent");
+        Ok(())
+    }
+
+    #[test]
+    fn test_terminate_closes_connection_and_sends_goodbye() -> Result<(), RtpError> {
+        let rtp_sent = Arc::new(Mutex::new(Vec::new()));
+        let rtcp_sent = Arc::new(Mutex::new(Vec::new()));
+
+        let rtp_socket = MockSocket {
+            data_to_receive: vec![],
+            sent_data: Arc::clone(&rtp_sent),
+        };
+
+        let rtcp_socket = MockSocket {
+            data_to_receive: vec![],
+            sent_data: Arc::clone(&rtcp_sent),
+        };
+
+        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0)?;
+
+        sender.terminate()?;
+
+        let status = sender
+            .connection_status
+            .read()
+            .map_err(|_| RtpError::ConnectionStatusLockFailed)?;
+        assert_eq!(*status, ConnectionStatus::Closed);
+
+        let rtcp_sent_data = rtcp_sent.lock().map_err(|_| RtpError::PoisonedLock)?;
+        assert!(
+            rtcp_sent_data
+                .iter()
+                .any(|d| d == &RtcpPacket::Goodbye.as_bytes().to_vec()),
+            "A Goodbye packet should have been sent"
+        );
+        Ok(())
+    }
+}

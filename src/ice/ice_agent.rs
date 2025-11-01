@@ -111,8 +111,8 @@ impl IceAgent {
     }
 
     #[must_use]
-    pub const fn get_selected_pair(&self) -> Option<&CandidatePair> {
-        self.selected_pair.as_ref()
+    pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
+        self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
     }
 }
 
@@ -156,7 +156,7 @@ mod tests {
         assert!(agent.local_candidates.is_empty());
         assert!(agent.remote_candidates.is_empty());
         assert!(agent.candidate_pairs.is_empty());
-        assert!(agent.get_selected_pair().is_none());
+        assert!(agent.get_selected_pair().is_err());
     }
 
     #[test]
@@ -175,9 +175,9 @@ mod tests {
     }
 
     #[test]
-    fn test_add_remote_candidate_creates_pairs() {
+    fn test_add_remote_candidate_creates_pairs() -> Result<(), Error> {
         let mut agent = IceAgent::new();
-        agent.gather_candidates(4000).unwrap();
+        agent.gather_candidates(4000)?;
 
         let remote = sample_remote_candidate();
 
@@ -190,21 +190,24 @@ mod tests {
         let pair = &agent.candidate_pairs[0];
         assert_eq!(pair.local.address, agent.local_candidates[0].address);
         assert_eq!(pair.remote.address, remote.address);
+        Ok(())
     }
 
     #[test]
-    fn test_start_connectivity_checks_selects_pair() {
+    fn test_start_connectivity_checks_selects_pair() -> Result<(), Error> {
         let mut agent = IceAgent::new();
-        agent.gather_candidates(4000).unwrap();
+        agent.gather_candidates(4000)?;
 
         let remote = sample_remote_candidate();
-        agent.add_remote_candidate(remote).unwrap();
+        agent.add_remote_candidate(remote)?;
 
         let result = agent.start_connectivity_checks();
         assert!(result.is_ok());
 
-        let selected = agent.get_selected_pair().unwrap();
+        let selected = agent.get_selected_pair()?;
         assert_eq!(selected.state, ConnectivityState::Succeeded);
+        
+        Ok(())
     }
 
     #[test]

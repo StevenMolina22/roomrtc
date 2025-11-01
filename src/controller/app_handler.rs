@@ -61,7 +61,7 @@ impl Controller {
             client_ref.ice_agent.get_selected_pair().cloned()
         };
 
-        if let Some(pair) = pair_opt {
+        if let Ok(pair) = pair_opt {
             self.generate_media_threads(&pair)?;
         }
 

@@ -1,4 +1,4 @@
-use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
+use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder, EncoderConfig, IntraFramePeriod};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
 use super::{frame::Frame, error::FrameError as Error};
 
@@ -27,10 +27,12 @@ impl Encoder {
     /// Returns [`Error::EncoderIntializationError`] if the encoder cannot
     /// be created by the OpenH264 library.
     pub fn new() -> Result<Self, Error> {
+        let config = EncoderConfig::new().intra_frame_period(IntraFramePeriod::from_num_frames(15));
         let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
+
         Ok(Self { encoder,
             frame_count: 0,
-            idr_interval: 20,
+            idr_interval: 15,
             max_chunk_size: 1200 })
     }
 

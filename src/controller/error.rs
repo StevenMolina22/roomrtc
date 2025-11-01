@@ -10,6 +10,12 @@ pub enum ControllerError {
     RtpSenderError(String),
     RtpReceiverError(String),
     PoisonedLock,
+    MapError(String),
+}
+
+pub enum ThreadsError {
+    Recoverable(String),
+    Fatal(String),
 }
 
 impl Display for ControllerError {
@@ -19,9 +25,10 @@ impl Display for ControllerError {
             Self::BindingAddressError(e) => write!(f, "Error: \"Failed to bind socket\". Details: {}", e),
             Self::ConnectionSocketError(e) => write!(f, "Error: \"Failed to connect\". Details: {}", e),
             Self::CloningSocketError(e) => write!(f, "Error: \"Failed to clone UDP socket\" Details: {}", e),
-            Self::RtpSenderError(e) => write!(f, "Error: \"Failed to create RTP sender. Details: {}", e),
-            Self::RtpReceiverError(e) => write!(f, "Error: \"Failed to create RTP receiver. Details: {}", e),
+            Self::RtpSenderError(e) => write!(f, "Error: \"Failed to create RTP sender\". Details: {}", e),
+            Self::RtpReceiverError(e) => write!(f, "Error: \"Failed to create RTP receiver\". Details: {}", e),
             Self::PoisonedLock => write!(f, "Error: \"Poisoned lock\""),
+            Self::MapError(e) => write!(f, "{}", e),
         }
     }
 }

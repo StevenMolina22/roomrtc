@@ -10,12 +10,25 @@ const MEDIA_TYPE: &str = "video";
 const MEDIA_PROTOCOL: &str = "RTP/AVP";
 const MEDIA_FMT: u8 = 111;
 
+/// High-level client that exposes SDP and ICE operations used by the UI
+/// and signaling code.
+///
+/// `Client` holds a local `SessionDescriptionProtocol` and an `IceAgent`.
+/// It can create an SDP offer, process remote offers/answers and drive
+/// ICE connectivity checks.
 pub struct Client {
+    /// Local SDP state representing current media descriptions.
     pub sdp: SessionDescriptionProtocol,
+
+    /// ICE agent responsible for gathering local candidates and
+    /// performing connectivity checks with remote candidates.
     pub ice_agent: IceAgent,
 }
 
 impl Client {
+    /// Create a new `Client` configured to advertise a single video
+    /// media description on `media_port` and with a gathered local
+    /// ICE candidate.
     pub fn new(media_port: u16) -> Self {
         let mut ice_agent = IceAgent::new();
         if ice_agent.gather_candidates(media_port).is_err() {
@@ -47,6 +60,11 @@ impl Client {
         Self { sdp, ice_agent }
     }
 
+    /// Process an SDP offer string and return the generated SDP answer
+    /// string. The method parses the incoming SDP, generates a local
+    /// answer using the current local SDP state, and adds remote ICE
+    /// candidates to the local `IceAgent` so connectivity checks can
+    /// start.
     pub fn process_offer(&mut self, offer_str: &str) -> Result<String, Error> {
         let sdp_offer = SessionDescriptionProtocol::from_str(offer_str)
             .map_err(|e| Error::SdpCreationError(e.to_string()))?;
@@ -61,6 +79,10 @@ impl Client {
 
         Ok(answer)
     }
+
+    /// Process an SDP answer string (from the remote peer). This will
+    /// parse the SDP and add any remote ICE candidates found to the
+    /// local `IceAgent` and start connectivity checks.
     pub fn process_answer(&mut self, answer_str: &str) -> Result<(), Error> {
         let sdp_answer = SessionDescriptionProtocol::from_str(answer_str)
             .map_err(|e| Error::SdpCreationError(e.to_string()))?;
@@ -70,10 +92,15 @@ impl Client {
         Ok(())
     }
 
+    /// Return the local SDP offer string generated from the current
+    /// `SessionDescriptionProtocol` state.
     pub fn get_offer(&self) -> String {
         self.sdp.to_string()
     }
 
+    /// Internal helper that walks a remote `SessionDescriptionProtocol`,
+    /// adds remote ICE candidates to the `IceAgent` and starts
+    /// connectivity checks.
     fn process_remote_sdp(&mut self, sdp: &SessionDescriptionProtocol) -> Result<(), Error> {
         for md in &sdp.media_descriptions {
             for candidate in md.get_candidates() {

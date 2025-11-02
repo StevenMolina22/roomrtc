@@ -13,6 +13,7 @@ use std::net::UdpSocket;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
+use std::thread::JoinHandle;
 
 pub struct Controller {
     pub client: Client,
@@ -36,6 +37,9 @@ pub struct Controller {
     //Sockets
     rtp_socket: UdpSocket,
     rtcp_socket: UdpSocket,
+
+    //Thread's handlers
+    pub handlers: Vec<JoinHandle<()>>,
 }
 
 impl Controller {
@@ -63,6 +67,7 @@ impl Controller {
             rtp_sender: None,
             rtp_socket,
             rtcp_socket,
+            handlers: Vec::new(),
         })
     }
 
@@ -88,7 +93,6 @@ impl Controller {
     }
 
     pub fn start_call(&mut self) -> Result<(), Error> {
-        self.rtp_sender = None;
         {
             let mut conn = self
                 .connection_status
@@ -154,9 +158,10 @@ impl Controller {
         let tx_local_cam = self.tx_local.clone();
         let tx_encoded = self.tx_encoded.clone();
         let tx_thread = self.tx_thread.clone();
-        let rx_camera = self.camera.lock().map_err(|_| Error::PoisonedLock)?.start();
 
-        thread::spawn({
+        let handler = thread::spawn({
+            let camera = Arc::clone(&self.camera);
+            let rx_camera = camera.lock().map_err(|_| Error::PoisonedLock)?.start();
             let mut encoder = Encoder::new().map_err(|e| Error::MapError(e.to_string()))?;
             move || {
                 for frame in rx_camera {
@@ -180,10 +185,14 @@ impl Controller {
                         height: frame.height,
                     };
 
-                    tx_encoded.send(encoded_frame).unwrap();
+                    if tx_encoded.send(encoded_frame).is_err() {
+                        camera.lock().unwrap().stop();
+                        break
+                    }
                 }
             }
         });
+        self.handlers.push(handler);
         Ok(())
     }
 
@@ -205,7 +214,7 @@ impl Controller {
         let rtp_sender = Arc::new(Mutex::new(rtp_sender));
         self.rtp_sender = Some(rtp_sender.clone());
         
-        thread::spawn({
+        let handler = thread::spawn({
             move || {
                 loop {
                     if *status.read().unwrap() == ConnectionStatus::Closed {
@@ -244,6 +253,7 @@ impl Controller {
                 }
             }
         });
+        self.handlers.push(handler);
         Ok(())
     }
 
@@ -257,7 +267,7 @@ impl Controller {
         let tx_thread = self.tx_thread.clone();
         let status = self.connection_status.clone();
 
-        thread::spawn({
+        let handler = thread::spawn({
             let mut receiver =
                 RtpReceiver::new(rtp_receiver_socket, rtcp_receiver_socket, connection_status)
                     .map_err(|e| Error::RtpReceiverError(e.to_string()))?;
@@ -306,6 +316,7 @@ impl Controller {
                 }
             }
         });
+        self.handlers.push(handler);
         Ok(())
     }
 
@@ -343,6 +354,13 @@ impl Controller {
 
     pub fn stop_local_camera(&mut self) -> Result<(), Error> {
         self.camera.lock().map_err(|e| Error::PoisonedLock)?.stop();
+        Ok(())
+    }
+
+    pub fn end_threads(&mut self) -> Result<(), Error> {
+        for handler in self.handlers.drain(..) {
+            handler.join().map_err(|_| Error::JoinThreadError)?;
+        }
         Ok(())
     }
 }

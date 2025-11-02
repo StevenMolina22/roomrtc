@@ -53,7 +53,7 @@ impl eframe::App for RoomRTCApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
             while let Ok(_) = self.rx_event.try_recv() {
-                self.controller.stop_local_camera().unwrap();
+                //self.controller.stop_local_camera().unwrap();
                 self.reset_controller();
                 self.view = View::Error;
             }
@@ -244,6 +244,8 @@ impl RoomRTCApp {
     }
 
     pub fn reset_controller(&mut self) {
+        self.controller.end_threads().unwrap();
+
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
         let (tx_event, rx_event) = mpsc::channel();

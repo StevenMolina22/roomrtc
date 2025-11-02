@@ -5,12 +5,25 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
+/// A camera that runs a capture thread and produces
+/// `Frame` instances over a channel.
+///
+/// `Camera` is a convenience wrapper around OpenCV's `VideoCapture`.
+/// It exposes `start`/`stop` operations and internally uses shared
+/// state (`Arc<RwLock<...>>`) to control the capture thread and to
+/// produce incremental frame ids.
 pub struct Camera {
+    /// Flag used to signal the capture thread to keep running.
     running: Arc<RwLock<bool>>,
+
+    /// Monotonic counter used to assign `Frame.id` values.
     frame_id: Arc<RwLock<usize>>,
 }
 
 impl Camera {
+    /// Create a new `Camera`. The capture thread is not
+    /// started automatically; call `start()` to begin producing
+    /// frames.
     pub fn new() -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
@@ -76,6 +89,8 @@ impl Camera {
         rx
     }
 
+    /// Stop the capture thread by clearing the running flag. The
+    /// capture thread will observe this and exit shortly.
     pub fn stop(&self) {
         let mut run = self.running.write().unwrap();
         *run = false;

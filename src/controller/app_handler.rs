@@ -65,34 +65,6 @@ impl Controller {
             rtcp_socket,
         })
     }
-    
-    pub fn wait_for_peer_connection(&mut self) -> Result<(), Error> {
-        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
-        
-        loop {
-            let mut buffer = [0u8; 1500];
-            match socket.recv(&mut buffer) {
-                Ok(size) => {
-                    if let Some(_) = RtpPacket::from_bytes(&buffer[..size]) {
-                        break;
-                    }
-                },
-                Err(e) => {
-                    return Err(Error::MapError(e.to_string()));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn join(&mut self) -> Result<(), Error> {
-        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
-        let pair = self.client.ice_agent.get_selected_pair().map_err(|e| Error::MapError(e.to_string()))?;
-        socket.connect(format!("{}:{}",pair.remote.address, pair.remote.port)).map_err(|e| Error::MapError(e.to_string()))?;
-
-        socket.send(&RtpPacket::default().to_bytes()).map_err(|e| Error::MapError(e.to_string()))?;
-        Ok(())
-    }
 
     pub fn connect(&mut self) -> Result<(), Error> {
         let pair = match self.client.ice_agent.get_selected_pair().cloned(){
@@ -128,12 +100,10 @@ impl Controller {
     }
 
     pub fn shut_down(&mut self) -> Result<(), Error> {
-        let mut conn = self
-            .connection_status
-            .write()
-            .map_err(|_| Error::PoisonedLock)?;
-        *conn = ConnectionStatus::Closed;
-        self.camera.lock().unwrap().stop();
+        {
+            self.camera.lock().unwrap().stop();
+        }
+
         match &self.rtp_sender {
             Some(sender_lock) => {
                 let mut sender = sender_lock.lock().map_err(|_| Error::PoisonedLock)?;
@@ -141,6 +111,7 @@ impl Controller {
             },
             None => return Err(Error::EmptyRTPSenderError),
         };
+
         self.rtp_sender = None;
 
         Ok(())
@@ -185,15 +156,11 @@ impl Controller {
         let tx_encoded = self.tx_encoded.clone();
         let tx_thread = self.tx_thread.clone();
         let rx_camera = self.camera.lock().map_err(|_| Error::PoisonedLock)?.start();
-        let status = self.connection_status.clone();
         
         thread::spawn({
             let mut encoder = Encoder::new().map_err(|e| Error::MapError(e.to_string()))?;
             move || {
                 for frame in rx_camera {
-                    if *status.read().unwrap() == ConnectionStatus::Closed {
-                        break;
-                    }
                     if let Err(e) = tx_local_cam.send(frame.clone()) {
                         let error = ThreadsError::Fatal(e.to_string());
                         tx_thread.send(error).unwrap();
@@ -271,7 +238,7 @@ impl Controller {
                             i as u64,
                             encoded_frame.chunks.len() as u16,
                         ) {
-                            let error = ThreadsError::Recoverable(e.to_string());
+                            let error = ThreadsError::Fatal(e.to_string());
                             tx_thread.send(error).unwrap();
                         }
                     }
@@ -373,6 +340,11 @@ impl Controller {
 
             eprintln!("Monitor thread exiting.");
         });
+    }
+
+    pub fn stop_local_camera(&mut self) -> Result<(), Error> {
+        self.camera.lock().map_err(|e| Error::PoisonedLock)?.stop();
+        Ok(())
     }
 }
 fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {

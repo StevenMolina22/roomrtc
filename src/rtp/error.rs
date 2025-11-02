@@ -12,7 +12,7 @@ pub enum RtpError {
     /// Failed to send through the socket.
     SendFailed,
     /// Failed to receive from the socket.
-    ReceiveFailed,
+    ReceiveFailed(String),
     /// The received RTP packet was invalid, malformed, or corrupted.
     InvalidRtpPacket,
     /// Failed to terminate an active RTP connection or related thread.
@@ -31,7 +31,7 @@ impl Display for RtpError {
             RtpError::AddrNotAvailable => write!(f, "Error: \"Address not available\""),
             RtpError::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
             RtpError::SendFailed => write!(f, "Error: \"Failed to send RTP packet\""),
-            RtpError::ReceiveFailed => write!(f, "Error: \"Failed to receive RTP packet\""),
+            RtpError::ReceiveFailed(e) => write!(f, "Error: \"Failed to receive RTP packet. Details: {}\"", e),
             RtpError::InvalidRtpPacket => write!(f, "Error: \"Invalid or corrupted RTP packet\""),
             RtpError::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
             RtpError::TerminateFailed => write!(f, "Error: \"Failed to terminate\""),

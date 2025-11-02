@@ -53,11 +53,11 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                         continue;
                     }
                 }
-                Err(_) => {
+                Err(e) => {
                     self.report_handler
                         .close_connection()
                         .map_err(|e| RtpError::RTCPError(e.to_string()))?;
-                    return Err(RtpError::ReceiveFailed);
+                    return Err(RtpError::ReceiveFailed(e.to_string()));
                 }
             }
         }

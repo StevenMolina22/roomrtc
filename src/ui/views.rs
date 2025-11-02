@@ -4,6 +4,5 @@ pub enum View {
     Menu,
     Call,
     Connection,
-    WaitingForPeer,
     Error
 }

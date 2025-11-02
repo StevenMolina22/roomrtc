@@ -2,7 +2,6 @@ use chrono::{DateTime, Local};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-
 use crate::rtcp::RtcpError;
 use crate::rtcp::RtcpPacket;
 use crate::rtp::ConnectionStatus;
@@ -78,7 +77,10 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
                 match try_receive_report(&*report_socket, &mut last_report_time) {
                     Ok(_) => retries = 0,
-                    Err(RtcpError::GoodbyeReceived) => retries = RETRY_LIMIT,
+                    Err(RtcpError::GoodbyeReceived) => {
+                        println!("Goodbye recibido!");
+                        retries = RETRY_LIMIT
+                    },
                     Err(_) => retries += 1,
                 };
             }
@@ -96,6 +98,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
             *conn = ConnectionStatus::Closed;
         }
 
+        println!("envio goodbye");
         let _ = self.socket.send(RtcpPacket::Goodbye.as_bytes());
         Ok(())
     }

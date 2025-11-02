@@ -35,8 +35,15 @@ impl Display for RtcpError {
     /// Format the RTCP error as a short human-readable string.
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            RtcpError::PoisonedLock => write!(f, "Error: Poisoned lock"),
-            RtcpError::ConnectionStatusLockFailed => {
+            Self::PoisonedLock => write!(f, "Error: Poisoned lock"),
+            Self::InvalidRTCPPacket => {
+                write!(f, "Error: \"Invalid or corrupted RTCP packet\"")
+            }
+            Self::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
+            Self::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
+            Self::GoodbyeReceived => write!(f, "Error: \"Goodbye\""),
+            Self::TimedOut => write!(f, "Error: \"Report receiver timed out\""),
+            Self::ConnectionStatusLockFailed => {
                 write!(f, "Error: \"Failed to acquire connection status lock\"")
             }
             RtcpError::InvalidRTCPPacket => {

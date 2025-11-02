@@ -29,8 +29,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
     /// This configures a read timeout on the RTP socket and starts the
     /// RTCP report handler in the background. Returns an `RtpError` if
     /// configuration or RTCP handler start fails.
-    pub fn new(rtp_socket: S, rtcp_socket: S) -> Result<Self, RtpError> {
-        let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
+    pub fn new(rtp_socket: S, rtcp_socket: S, connection_status: Arc<RwLock<ConnectionStatus>>) -> Result<Self, RtpError> {
         rtp_socket
             .set_read_timeout(Some(Duration::from_millis(RTP_READ_TIMEOUT_MILLIS)))
             .map_err(|_| RtpError::SocketConfigFailed)?;
@@ -56,7 +55,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
     ///
     /// On success returns the decoded `RtpPacket`.
     pub fn receive(&mut self) -> Result<RtpPacket, RtpError> {
-        let mut buf = [0u8; 1500];
+        let mut buf = [0u8; 65535];
         loop {
             match self.rtp_socket.recv_from(&mut buf) {
                 Ok((size, _addr)) => {
@@ -108,7 +107,7 @@ mod tests {
             sent_data: Arc::new(Mutex::new(Vec::new())),
         };
 
-        let mut receiver = RtpReceiver::new(rtp_socket, rtcp_socket)?;
+        let mut receiver = RtpReceiver::new(rtp_socket, rtcp_socket, Arc::new(RwLock::new(ConnectionStatus::Open)))?;
         let received = receiver.receive()?;
 
         assert_eq!(received.payload, fake_payload);

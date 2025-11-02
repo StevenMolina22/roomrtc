@@ -88,10 +88,11 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
 
     let mut parts = parts[1].split('/');
     let encoding_name = parts.next().ok_or(Error::MissingEncodingNameError)?;
-    if encoding_name.is_empty() {
-        return Err(Error::MissingEncodingNameError);
-    }
-    let clock_rate = parts.next().ok_or(Error::MissingClockRateError)?.parse::<u32>().map_err(|_| Error::InvalidClockRateParsingError)?;
+    let clock_rate = parts
+        .next()
+        .ok_or(Error::MissingClockRateError)?
+        .parse::<u32>()
+        .map_err(|_| Error::InvalidClockRateParsingError)?;
     let encoding_params = parts.next().map(std::string::ToString::to_string);
 
     if parts.next().is_some() {

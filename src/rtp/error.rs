@@ -5,8 +5,6 @@ use std::fmt::{Display, Formatter};
 pub enum RtpError {
     /// The requested address is not available.
     AddrNotAvailable,
-    /// Failed to acquire a lock due to a concurrent thread error.
-    PoisonedLock,
     /// Failed to configure socket.
     SocketConfigFailed,
     /// Failed to clone a socket.
@@ -33,7 +31,6 @@ impl Display for RtpError {
         match self {
             RtpError::AddrNotAvailable => write!(f, "Error: \"Address not available\""),
             RtpError::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
-            RtpError::PoisonedLock => write!(f, "Error: \"Poisoned lock\""),
             RtpError::SendFailed => write!(f, "Error: \"Failed to send RTP packet\""),
             RtpError::ReceiveFailed => write!(f, "Error: \"Failed to receive RTP packet\""),
             RtpError::InvalidRtpPacket => write!(f, "Error: \"Invalid or corrupted RTP packet\""),

@@ -1,4 +1,4 @@
-use roomrtc::{ui::interface::RoomRTCApp};
+use roomrtc::ui::interface::RoomRTCApp;
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions::default();

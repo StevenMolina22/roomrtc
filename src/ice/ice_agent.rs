@@ -123,6 +123,10 @@ impl IceAgent {
         Ok(())
     }
 
+    pub fn get_local_ip_str(&self) -> Result<String, Error> {
+        get_local_ip()
+    }
+
     /// Return a reference to the first local candidate, if any.
     #[must_use]
     pub fn get_local_candidate(&self) -> Option<&Candidate> {

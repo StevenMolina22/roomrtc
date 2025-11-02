@@ -1,51 +1,71 @@
-use std::net::UdpSocket;
-use std::sync::mpsc;
+use std::sync::{mpsc};
 use std::sync::mpsc::Receiver;
 use eframe::egui;
-use egui::Ui;
+use eframe::epaint::{Color32, FontId};
+use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
 use super::views::View;
 use crate::{controller::Controller};
+use crate::frame_handler::Frame;
 
 pub struct RoomRTCApp {
     view: View,
     controller: Controller,
-    rx_local: Receiver<Vec<u8>>,
-    rx_remote: Receiver<Vec<u8>>,
-    socket: Option<UdpSocket>,
-    addr: String,
+
+    //Receivers
+    rx_local: Receiver<Frame>,
+    rx_remote: Receiver<Frame>,
+    rx_event: Receiver<String>,
+
+    //SDP
     our_offer: String,
     remote_sdp: String,
     our_answer: Option<String>,
+
+    //Textures
+    local_texture: Option<TextureHandle>,
+    remote_texture: Option<TextureHandle>,
 }
 
 impl RoomRTCApp {
     pub fn new() -> Self {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
+        let (tx_event, rx_event) = mpsc::channel();
+        let controller = Controller::new(tx_local, tx_remote, tx_event).unwrap();
+
         Self {
             view: View::default(),
-            controller: Controller::new(tx_local, tx_remote),
+            controller,
             rx_local,
             rx_remote,
-            socket: None,
-            addr: String::new(),
+            rx_event,
             our_offer: String::new(),
             remote_sdp: String::new(),
             our_answer: None,
+            local_texture: None,
+            remote_texture: None,
         }
     }
 }
 
 impl eframe::App for RoomRTCApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
+            while let Ok(_) = self.rx_event.try_recv() {
+                self.view = View::Error;
+            }
 
             match self.view {
                 View::Menu => self.show_menu(ui),
                 View::Connection => self.show_connection(ui),
-                View::Call => self.show_call(ui),
+                View::Call => self.show_call(ctx, ui),
+                View::WaitingForPeer => self.show_waiting(ui),
+                View::Error => {
+                    self.show_error(ui)},
             }
+
+            ctx.request_repaint();
         });
     }
 }
@@ -53,9 +73,8 @@ impl eframe::App for RoomRTCApp {
 impl RoomRTCApp {
     fn show_menu(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            // ...
-            let create_btn = egui::Button::new("Create Call (Offer)")
-                .min_size(egui::vec2(200.0, 40.0));
+            let create_btn =
+                egui::Button::new("Create Call (Offer)").min_size(egui::vec2(200.0, 40.0));
             if ui.add_sized([200.0, 40.0], create_btn).clicked() {
                 self.our_offer = self.controller.client.get_offer();
                 self.remote_sdp = String::new();
@@ -65,8 +84,8 @@ impl RoomRTCApp {
 
             ui.add_space(10.0);
 
-            let join_btn = egui::Button::new("Join Call (Answer)")
-                .min_size(egui::vec2(200.0, 40.0));
+            let join_btn =
+                egui::Button::new("Join Call (Answer)").min_size(egui::vec2(200.0, 40.0));
             if ui.add_sized([200.0, 40.0], join_btn).clicked() {
                 self.our_offer = String::new();
                 self.remote_sdp = String::new();
@@ -88,38 +107,26 @@ impl RoomRTCApp {
         }
     }
 
-    fn show_call(&mut self, ui: &mut Ui) {
+    fn show_call(&mut self, ctx: & Context, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
             ui.heading("Llamada");
             ui.add_space(20.0);
 
-            let boton = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
-            let msg_btn = egui::Button::new("send").min_size(egui::vec2(150.0, 40.0));
+            self.update_video_textures(&ctx);
 
-            if self.socket.is_none() && let Ok(pair) = self.controller.client.ice_agent.get_selected_pair() {
-                let local_addr = format!("{}:{}", pair.local.address, pair.local.port);
-                let remote_addr = format!("{}:{}", pair.remote.address, pair.remote.port);
-                self.addr = local_addr.clone();
+            ui.horizontal_centered(|ui| {
+                ui.vertical(|ui| {
+                    self.show_local_camera(ui);
+                });
+                ui.vertical(|ui| {
+                    self.show_remote_camera(ui);
+                });
+            });
 
-                let socket = UdpSocket::bind(local_addr).unwrap();
-                socket.connect(remote_addr).unwrap();
-                socket.set_nonblocking(true).unwrap();
-                self.socket = Some(socket);
-            }
-
-            if let Some(socket) = &self.socket {
-                let mut buf = [0u8; 1024];
-                if !socket.recv(&mut buf).is_err() {
-                    println!("{}", String::from_utf8(buf.to_vec()).unwrap());
-                }
-
-                if ui.add(msg_btn).clicked() {
-                    socket.send(format!("hola soy {}", self.addr).as_bytes()).unwrap();
-                }
-
-                if ui.add_sized([150.0, 40.0], boton).clicked() {
-                    self.view = View::Menu;
-                }
+            let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
+            if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
+                self.controller.shut_down().unwrap();
+                self.view = View::Menu;
             }
         });
     }
@@ -132,9 +139,7 @@ impl RoomRTCApp {
         ui.separator();
 
         ui.label("2. Paste the remote user's answer below:");
-        ui.add(
-            egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Answer..."),
-        );
+        ui.add(egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Answer..."));
 
         if !self.remote_sdp.is_empty() {
             if ui.button("Connect").clicked() {
@@ -142,7 +147,8 @@ impl RoomRTCApp {
                     eprintln!("Failed to process answer: {}", e);
                     // TODO: Show this error in the GUI
                 } else {
-                    self.view = View::Call;
+                    self.controller.start_call().unwrap();
+                    self.view = View::WaitingForPeer;
                 }
             }
         }
@@ -152,9 +158,7 @@ impl RoomRTCApp {
         ui.heading("You are the Answerer");
         ui.separator();
         ui.label("1. Paste the remote user's offer below:");
-        ui.add(
-            egui::TextEdit::multiline(&mut self.remote_sdp.clone()).hint_text("Paste SDP Offer..."),
-        );
+        ui.add(egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Offer..."));
 
         if self.our_answer.is_none() {
             if !self.remote_sdp.is_empty() && ui.button("Generate Answer").clicked() {
@@ -173,8 +177,112 @@ impl RoomRTCApp {
 
             let join_btn = egui::Button::new("Join Call");
             if ui.add(join_btn).clicked() {
-                self.view = View::Call;
+                if let Err(e) = self.controller.start_call() {
+                    eprintln!("Failed to start call: {}", e);
+                    // TODO: Show this error in the GUI
+                } else {
+                    if self.controller.join().is_err() {
+                       self.view = View::Error 
+                    } else {
+                        self.controller.start_call().unwrap();
+                        self.view = View::Call;
+                    }
+                }
             }
+        }
+    }
+
+
+    fn update_video_textures(&mut self, ctx: &Context) {
+        update_camera_view(ctx, &self.rx_local, &mut self.local_texture, "local_camera");
+        update_camera_view(ctx, &self.rx_remote, &mut self.remote_texture, "remote_camera");
+    }
+
+    fn show_local_camera(&mut self, ui: &mut Ui) {
+        if let Some(texture) = &self.local_texture {
+            let size = texture.size_vec2();
+            let aspect_ratio = size.x / size.y;
+            let desired_height = 240.0;
+            let desired_width = desired_height * aspect_ratio;
+
+            let image = egui::Image::new(texture)
+                .fit_to_exact_size(egui::vec2(desired_width, desired_height));
+            ui.add(image);
+        } else {
+            ui.label("No se recibió video todavía...");
+        }
+    }
+
+    fn show_remote_camera(&mut self, ui: &mut Ui) {
+        if let Some(texture) = &self.remote_texture {
+            let size = texture.size_vec2();
+            let aspect_ratio = size.x / size.y;
+            let desired_height = 240.0;
+            let desired_width = desired_height * aspect_ratio;
+
+            let image = egui::Image::new(texture)
+                .fit_to_exact_size(egui::vec2(desired_width, desired_height));
+            ui.add(image);
+        } else {
+            ui.label("No se recibió video todavía...");
+        }
+    }
+
+    fn show_error(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(50.0);
+
+            ui.label(
+                RichText::new("Call is off. The other client hung up")
+                    .color(Color32::WHITE)
+                    .font(FontId::proportional(28.0)),
+            );
+
+            ui.add_space(20.0);
+
+            if ui
+                .add_sized([200.0, 40.0], egui::Button::new("Back to menu"))
+                .clicked()
+            {
+                self.view = View::Menu;
+            }
+        });
+    }
+
+    fn show_waiting(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(50.0);
+
+            ui.label(
+                RichText::new("Waiting for other peer...")
+                    .color(Color32::WHITE)
+                    .font(FontId::proportional(28.0)),
+            );
+
+            self.controller.wait_for_peer_connection().unwrap();
+            self.controller.start_call().unwrap();
+            self.view = View::Call;
+        });
+    }
+}
+
+fn update_camera_view(
+    ctx: &Context,
+    rx: &Receiver<Frame>,
+    texture: &mut Option<TextureHandle>,
+    texture_name: &str,
+) {
+    let mut last_frame: Option<Frame> = None;
+    while let Ok(frame) = rx.try_recv() {
+        last_frame = Some(frame);
+    }
+
+    if let Some(frame) = last_frame {
+        let color_img = ColorImage::from_rgb([frame.width, frame.height], &frame.data);
+        if let Some(t) = texture {
+            t.set(color_img, TextureOptions::default());
+        } else {
+            *texture = Some(ctx.load_texture(texture_name, color_img, TextureOptions::default()));
         }
     }
 }

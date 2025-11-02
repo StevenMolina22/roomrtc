@@ -1,3 +1,5 @@
+use std::default::Default;
+
 /// RTP packet used by the project transport layer.
 ///
 /// This struct models a simplified RTP-like packet used on top of the
@@ -31,6 +33,20 @@ pub struct RtpPacket {
     pub payload: Vec<u8>,
 }
 
+impl Default for RtpPacket {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            marker: 0,
+            payload_type: 0,
+            frame_id: 0,
+            chunk_id: 0,
+            timestamp: 0,
+            ssrc: 0,
+            payload: Vec::new(),
+        }
+    }
+}
 impl RtpPacket {
     /// Create a new `RtpPacket` with the supplied fields.
     ///
@@ -72,7 +88,7 @@ impl RtpPacket {
         buf.extend_from_slice(&self.chunk_id.to_be_bytes());
         buf.extend_from_slice(&self.timestamp.to_be_bytes());
         buf.extend_from_slice(&(self.marker).to_be_bytes());
-        buf.extend_from_slice(&(self.ssrc as u16).to_be_bytes());
+        buf.extend_from_slice(&self.ssrc.to_be_bytes());
         buf.extend_from_slice(&self.payload);
 
         buf
@@ -81,7 +97,7 @@ impl RtpPacket {
     /// Decode an `RtpPacket` from a byte slice previously produced by
     /// `to_bytes`. Returns `None` if the slice is too short or malformed.
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < 26 {
+        if data.len() < 28 {
             return None;
         }
 
@@ -91,8 +107,8 @@ impl RtpPacket {
         let chunk_id = u64::from_be_bytes(array_from_slice::<8>(&data[10..18]));
         let timestamp = u32::from_be_bytes(array_from_slice::<4>(&data[18..22]));
         let total_chunks = u16::from_be_bytes(array_from_slice::<2>(&data[22..24]));
-        let ssrc = u16::from_be_bytes(array_from_slice::<2>(&data[24..26])) as u32;
-        let payload = data[26..].to_vec();
+        let ssrc = u32::from_be_bytes(array_from_slice::<4>(&data[24..28]));
+        let payload = data[28..].to_vec();
 
         Some(Self {
             version,

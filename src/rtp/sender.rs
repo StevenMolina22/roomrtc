@@ -1,9 +1,11 @@
+use std::sync::{Arc, RwLock};
+
 use crate::rtcp::RtcpReportHandler;
-use crate::rtp::connection_status::ConnectionStatus;
+use crate::rtp::ConnectionStatus;
 use crate::rtp::error::RtpError;
 use crate::rtp::rtp_packet::RtpPacket;
 use crate::tools::Socket;
-use std::sync::{Arc, RwLock};
+
 
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
 ///
@@ -12,9 +14,9 @@ use std::sync::{Arc, RwLock};
 /// `RtpPacket`s and `terminate` to gracefully close the session.
 pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
+    ssrc: u32,
     report_handler: RtcpReportHandler<S>,
     connection_status: Arc<RwLock<ConnectionStatus>>,
-    ssrc: u32,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
@@ -23,10 +25,14 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
     ///
     /// The RTCP report handler is started; on failure an `RtpError` is
     /// returned.
-    pub fn new(rtp_socket: S, rtcp_socket: S, ssrc: u32) -> Result<Self, RtpError> {
-        let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
-
+    pub fn new(
+        rtp_socket: S,
+        rtcp_socket: S,
+        ssrc: u32,
+        connection_status: Arc<RwLock<ConnectionStatus>>,
+    ) -> Result<Self, RtpError> {
         let report_handler = RtcpReportHandler::new(rtcp_socket, Arc::clone(&connection_status));
+
         report_handler
             .start()
             .map_err(|e| RtpError::RTCPError(e.to_string()))?;
@@ -114,20 +120,25 @@ mod tests {
             sent_data: Arc::clone(&rtcp_sent),
         };
 
-        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0)?;
+        let mut sender = RtpSender::new(
+            rtp_socket,
+            rtcp_socket,
+            0,
+            Arc::new(RwLock::new(ConnectionStatus::Open)),
+        )?;
 
         for i in 0..3 {
             let payload = vec![i];
             sender.send(&payload, 96, 1234 + i as u32, 0, i.into(), 5)?;
         }
 
-        let sent = rtp_sent.lock().map_err(|_| RtpError::PoisonedLock)?;
+        let sent = rtp_sent.lock().unwrap();
         assert_eq!(sent.len(), 3, "There should have been three packets sent");
         Ok(())
     }
 
     #[test]
-    fn test_terminate_closes_connection_and_sends_goodbye() -> Result<(), RtpError> {
+    fn test_terminate_closes_connection_and_sends_goodbye() {
         let rtp_sent = Arc::new(Mutex::new(Vec::new()));
         let rtcp_sent = Arc::new(Mutex::new(Vec::new()));
 
@@ -141,20 +152,25 @@ mod tests {
             sent_data: Arc::clone(&rtcp_sent),
         };
 
-        let mut sender = RtpSender::new(rtp_socket, rtcp_socket, 0)?;
+        let mut sender = RtpSender::new(
+            rtp_socket,
+            rtcp_socket,
+            0,
+            Arc::new(RwLock::new(ConnectionStatus::Open)),
+        )
+        .unwrap();
 
-        sender.terminate()?;
+        sender.terminate().unwrap();
 
-        let status = sender.connection_status.read().map_err(|_| RtpError::ConnectionStatusLockFailed)?;
+        let status = sender.connection_status.read().unwrap();
         assert_eq!(*status, ConnectionStatus::Closed);
 
-        let rtcp_sent_data = rtcp_sent.lock().map_err(|_| RtpError::PoisonedLock)?;
+        let rtcp_sent_data = rtcp_sent.lock().unwrap();
         assert!(
             rtcp_sent_data
                 .iter()
                 .any(|d| d == &RtcpPacket::Goodbye.as_bytes().to_vec()),
             "A Goodbye packet should have been sent"
         );
-        Ok(())
     }
 }

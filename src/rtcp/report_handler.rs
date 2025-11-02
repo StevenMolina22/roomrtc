@@ -9,15 +9,15 @@ use crate::rtp::ConnectionStatus;
 use crate::tools::Socket;
 
 /// How often (in seconds) a connectivity report is sent.
-const REPORT_PERIOD_SEC: u64 = 3;
+const REPORT_PERIOD_MILLIS: u64 = 1000;
 
 /// How long the receiver waits for a report before considering it a
 /// receive timeout.
-const REPORT_RECEIVE_LIMIT: Duration = Duration::from_secs(2);
+const REPORT_RECEIVE_LIMIT: Duration = Duration::from_millis(3000);
 
 /// How many consecutive receive failures to tolerate before closing the
 /// connection.
-const RETRY_LIMIT: usize = 3;
+const RETRY_LIMIT: usize = 5;
 
 /// RTCP report handler that periodically sends connectivity reports and
 /// listens for incoming reports (or goodbye messages) from the peer.
@@ -60,8 +60,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         thread::spawn(move || {
             loop {
                 if let Ok(conn) = shared_connection_status.read()
-                    && *conn == ConnectionStatus::Closed
-                {
+                    && *conn == ConnectionStatus::Closed {
                     break;
                 }
 
@@ -75,7 +74,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     break;
                 }
 
-                thread::sleep(Duration::from_secs(REPORT_PERIOD_SEC));
+                thread::sleep(Duration::from_millis(REPORT_PERIOD_MILLIS));
             }
         });
     }
@@ -144,11 +143,20 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
                 Ok(())
             }
             Some(RtcpPacket::Goodbye) => Err(RtcpError::GoodbyeReceived),
-            None => Err(RtcpError::TimedOut),
+            None => {
+                if Local::now() - *last_report_time
+                    > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT).unwrap()
+                {
+                    Err(RtcpError::TimedOut)
+                } else {
+                    Ok(())
+                }
+            },
         },
         Err(_) => {
             if Local::now() - *last_report_time
-                > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT).map_err(|_| RtcpError::InvalidConfigDuration)?
+                > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT)
+                    .map_err(|_| RtcpError::InvalidConfigDuration)?
             {
                 Err(RtcpError::TimedOut)
             } else {
@@ -181,7 +189,9 @@ mod tests {
         handler.start()?;
         thread::sleep(Duration::from_millis(100));
 
-        let status = connection_status.read().map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
+        let status = connection_status
+            .read()
+            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Open);
 
         let sent = sent_data.lock().map_err(|_| RtcpError::PoisonedLock)?;
@@ -200,7 +210,9 @@ mod tests {
 
         handler.close_connection()?;
 
-        let status = connection_status.read().map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
+        let status = connection_status
+            .read()
+            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Closed);
         Ok(())
     }
@@ -220,7 +232,9 @@ mod tests {
         let wait_time = REPORT_RECEIVE_LIMIT * (RETRY_LIMIT as u32 + 1);
         thread::sleep(wait_time);
 
-        let status = connection_status.read().map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
+        let status = connection_status
+            .read()
+            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Closed);
         Ok(())
     }

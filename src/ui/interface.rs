@@ -53,7 +53,8 @@ impl eframe::App for RoomRTCApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
             while let Ok(_) = self.rx_event.try_recv() {
-                //self.controller.stop_local_camera().unwrap();
+                self.controller.stop_local_camera().unwrap();
+                self.controller.end_threads().unwrap();
                 self.reset_controller();
                 self.view = View::Error;
             }
@@ -129,6 +130,7 @@ impl RoomRTCApp {
             let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
                 self.controller.shut_down().unwrap();
+                self.controller.end_threads().unwrap();
                 self.reset_controller();
                 self.view = View::Menu;
             }
@@ -149,7 +151,6 @@ impl RoomRTCApp {
             if ui.button("Connect").clicked() {
                 if let Err(e) = self.controller.client.process_answer(&self.remote_sdp) {
                     eprintln!("Failed to process answer: {}", e);
-                    // TODO: Show this error in the GUI
                 } else {
                     self.controller.start_call().unwrap();
                     self.view = View::Call;
@@ -254,7 +255,7 @@ impl RoomRTCApp {
         self.rx_remote = rx_remote;
         self.rx_event = rx_event;
 
-        self.controller = Controller::new(tx_local, tx_remote, tx_event).unwrap()
+        self.controller.reset(tx_local, tx_remote, tx_event).unwrap();
     }
 }
 

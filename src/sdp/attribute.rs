@@ -87,7 +87,9 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
         .map_err(|_| Error::InvalidRtpMapFormatError)?;
 
     let mut parts = parts[1].split('/');
-    let encoding_name = parts.next().ok_or(Error::MissingEncodingNameError)?;
+    let encoding_name = parts.next()
+        .filter(|s| !s.is_empty())
+        .ok_or(Error::MissingEncodingNameError)?;
     let clock_rate = parts
         .next()
         .ok_or(Error::MissingClockRateError)?

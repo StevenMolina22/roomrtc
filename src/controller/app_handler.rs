@@ -67,11 +67,11 @@ impl Controller {
     }
     
     pub fn wait_for_peer_connection(&mut self) -> Result<(), Error> {
-        self.connect()?;
-
+        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
+        
         loop {
             let mut buffer = [0u8; 1500];
-            match self.rtp_socket.recv(&mut buffer) {
+            match socket.recv(&mut buffer) {
                 Ok(size) => {
                     if let Some(_) = RtpPacket::from_bytes(&buffer[..size]) {
                         break;
@@ -82,13 +82,15 @@ impl Controller {
                 }
             }
         }
-
         Ok(())
     }
 
     pub fn join(&mut self) -> Result<(), Error> {
-        self.connect()?;
-        self.rtp_socket.send(&RtpPacket::default().to_bytes()).map_err(|e| Error::MapError(e.to_string()))?;
+        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
+        let pair = self.client.ice_agent.get_selected_pair().map_err(|e| Error::MapError(e.to_string()))?;
+        socket.connect(format!("{}:{}",pair.remote.address, pair.remote.port)).map_err(|e| Error::MapError(e.to_string()))?;
+
+        socket.send(&RtpPacket::default().to_bytes()).map_err(|e| Error::MapError(e.to_string()))?;
         Ok(())
     }
 
@@ -121,7 +123,7 @@ impl Controller {
                 .map_err(|_| Error::PoisonedLock)?;
             *conn = ConnectionStatus::Open;
         }
-
+        self.connect()?;
         self.generate_media_threads()
     }
 

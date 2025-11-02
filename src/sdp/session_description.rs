@@ -40,6 +40,7 @@ pub struct SessionDescriptionProtocol {
 impl FromStr for SessionDescriptionProtocol {
     type Err = Error;
 
+    /// Parse a full SDP session description from a string.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut media_descriptions = Vec::new();
 
@@ -72,6 +73,7 @@ impl FromStr for SessionDescriptionProtocol {
 }
 
 impl Display for SessionDescriptionProtocol {
+    /// Render the full SDP session description as a string.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut content = format!(
             "v={}\no={}\ns={}\nt={}\nc={}",
@@ -87,6 +89,8 @@ impl Display for SessionDescriptionProtocol {
 }
 
 impl SessionDescriptionProtocol {
+    /// Create a new `SessionDescriptionProtocol` with the given media
+    /// descriptions. Other fields are initialized with default values.
     #[must_use]
     pub fn new(media_descriptions: Vec<MediaDescription>) -> Self {
         Self {

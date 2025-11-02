@@ -1,17 +1,41 @@
+/// RTP packet used by the project transport layer.
+///
+/// This struct models a simplified RTP-like packet used on top of the
+/// project's UDP sockets. The packet uses a custom binary layout
+/// that packs a small header followed by payload
+/// bytes.
 #[derive(Debug, Clone)]
-
 pub struct RtpPacket {
+    /// Packet format version.
     version: u8,
+
+    /// Marker/total-chunks field used by the application.
     pub marker: u16,
+
+    /// Payload type.
     pub(crate) payload_type: u8,
+
+    /// Logical frame identifier for the packet's media frame.
     pub frame_id: u64,
+
+    /// Chunk identifier within the frame.
     pub chunk_id: u64,
+
+    /// Timestamp associated with the sample/frame.
     pub timestamp: u32,
+
+    /// SSRC (synchronization source) identifier.
     pub(crate) ssrc: u32,
+
+    /// Payload bytes of the packet.
     pub payload: Vec<u8>,
 }
 
 impl RtpPacket {
+    /// Create a new `RtpPacket` with the supplied fields.
+    ///
+    /// This constructor sets `version` to 2 and stores the provided
+    /// values. No network encoding is performed at this stage.
     pub fn new(
         marker: u16,
         payload_type: u8,
@@ -33,6 +57,12 @@ impl RtpPacket {
         }
     }
 
+    /// Encode the packet into a sequence of bytes suitable for sending
+    /// over the network.
+    ///
+    /// The layout used here is a simple custom header followed by the
+    /// payload. The method allocates a buffer and appends fields in
+    /// network byte order.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(26 + self.payload.len());
 
@@ -48,6 +78,8 @@ impl RtpPacket {
         buf
     }
 
+    /// Decode an `RtpPacket` from a byte slice previously produced by
+    /// `to_bytes`. Returns `None` if the slice is too short or malformed.
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
         if data.len() < 26 {
             return None;
@@ -75,6 +107,7 @@ impl RtpPacket {
     }
 }
 
+/// Helper: copy `N` bytes from the slice into a fixed-size array.
 fn array_from_slice<const N: usize>(slice: &[u8]) -> [u8; N] {
     let mut arr = [0u8; N];
     arr.copy_from_slice(&slice[..N]);

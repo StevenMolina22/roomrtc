@@ -5,6 +5,11 @@ use crate::rtp::rtp_packet::RtpPacket;
 use crate::tools::Socket;
 use std::sync::{Arc, RwLock};
 
+/// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
+///
+/// The sender wraps a socket implementing the project's `Socket` trait
+/// and an RTCP report handler. It offers `send` for sending payloads as
+/// `RtpPacket`s and `terminate` to gracefully close the session.
 pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: RtcpReportHandler<S>,
@@ -13,6 +18,11 @@ pub struct RtpSender<S: Socket + Send + Sync + 'static> {
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
+    /// Construct a new `RtpSender` using the provided RTP and RTCP
+    /// sockets, and the specified `ssrc` identifier.
+    ///
+    /// The RTCP report handler is started; on failure an `RtpError` is
+    /// returned.
     pub fn new(rtp_socket: S, rtcp_socket: S, ssrc: u32) -> Result<Self, RtpError> {
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
 
@@ -29,6 +39,11 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         })
     }
 
+    /// Send an RTP packet created from the provided payload and metadata.
+    ///
+    /// The method checks the connection status first. If the underlying
+    /// socket send fails it attempts to close the RTCP handler and
+    /// returns an appropriate `RtpError`.
     pub fn send(
         &mut self,
         payload: &[u8],
@@ -66,6 +81,9 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         Ok(())
     }
 
+    /// Terminate the sender and close the RTCP handler.
+    ///
+    /// Returns an error if closing the RTCP handler fails.
     pub fn terminate(&mut self) -> Result<(), RtpError> {
         self.report_handler
             .close_connection()

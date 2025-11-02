@@ -6,8 +6,16 @@ use crate::tools::Socket;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+/// Number of milliseconds used as the read timeout on the RTP socket.
 const RTP_READ_TIMEOUT_MILLIS: u64 = 3000;
 
+/// RTP receiver that reads `RtpPacket` instances from a socket and
+/// manages RTCP reporting through a `RtcpReportHandler`.
+///
+/// The `RtpReceiver` owns a UDP socket implementing the project's
+/// `Socket` trait and an RTCP handler. It tracks the connection status
+/// and exposes a blocking `receive` method that returns decoded
+/// `RtpPacket`s.
 pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: RtcpReportHandler<S>,
@@ -15,7 +23,12 @@ pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
-    /// Creates an RTP receptor bound to the local IP at the given port
+    /// Create a new `RtpReceiver` using the provided RTP and RTCP
+    /// sockets.
+    ///
+    /// This configures a read timeout on the RTP socket and starts the
+    /// RTCP report handler in the background. Returns an `RtpError` if
+    /// configuration or RTCP handler start fails.
     pub fn new(rtp_socket: S, rtcp_socket: S) -> Result<Self, RtpError> {
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
         rtp_socket
@@ -34,7 +47,14 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         })
     }
 
-    /// Attempts to receive an RTP packet. Returns Some(RtpPackage) if a packet was received, or None if no data is available.
+    /// Attempt to receive and decode a single `RtpPacket`.
+    ///
+    /// The function blocks until a packet is received or an error
+    /// condition occurs. If the underlying socket times out, the method
+    /// checks the connection status; if the connection was closed, it
+    /// returns `RtpError::ConnectionClosed`, otherwise it keeps waiting.
+    ///
+    /// On success returns the decoded `RtpPacket`.
     pub fn receive(&mut self) -> Result<RtpPacket, RtpError> {
         let mut buf = [0u8; 1500];
         loop {

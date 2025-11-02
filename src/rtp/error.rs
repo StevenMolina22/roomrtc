@@ -28,6 +28,7 @@ pub enum RtpError {
 }
 
 impl Display for RtpError {
+    /// Format the error as a short human-readable message.
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             RtpError::AddrNotAvailable => write!(f, "Error: \"Address not available\""),

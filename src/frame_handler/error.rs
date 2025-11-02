@@ -9,17 +9,29 @@ use std::fmt::Display;
 pub enum FrameError {
     ///Error returned when the encoder failed to initialize.
     EncoderInitializationError,
+    
     ///Error returned when a frame failed to be encoded.
     EncodingError,
+    
     ///Error returned when the decoder failed to initialize.
     DecoderInitializationError,
+    
     ///Error returned when a frame failed to be decoded.
     DecodingError,
+    
     /// Error returned when no frame data is provided to the decoder.
     EmptyFrameError,
+    
+    /// Error returned when unable to create a frame from YUV data.
     UnableToCreateFrameFromYUVError,
+
+    /// Error returned when reshaping a frame fails.
     ReshapingFrameError,
+
+    /// Error returned when converting a frame from YUV to RGB fails.
     TypeConversionError,
+
+    /// Error returned when converting a frame to bytes fails.
     BytesConversionError,
 }
 

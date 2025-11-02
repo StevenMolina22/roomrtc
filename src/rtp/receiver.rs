@@ -5,6 +5,7 @@ use crate::rtp::rtp_packet::RtpPacket;
 use crate::tools::Socket;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use crate::rtp::error::RtpError::ReceiveFailed;
 
 const RTP_READ_TIMEOUT_MILLIS: u64 = 3000;
 
@@ -48,7 +49,8 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     let conn = self.connection_status.read().map_err(|_| RtpError::ConnectionStatusLockFailed)?;
                     if *conn == ConnectionStatus::Closed {
-                        return Err(RtpError::ConnectionClosed);
+                        // return Err(RtpError::ConnectionClosed);
+                        return Err(ReceiveFailed("Received connection closed".into()));
                     } else {
                         continue;
                     }

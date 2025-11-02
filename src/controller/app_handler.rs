@@ -88,6 +88,7 @@ impl Controller {
     }
 
     pub fn start_call(&mut self) -> Result<(), Error> {
+        self.rtp_sender = None;
         {
             let mut conn = self
                 .connection_status
@@ -111,8 +112,6 @@ impl Controller {
             },
             None => return Err(Error::EmptyRTPSenderError),
         };
-
-        self.rtp_sender = None;
 
         Ok(())
     }
@@ -156,7 +155,7 @@ impl Controller {
         let tx_encoded = self.tx_encoded.clone();
         let tx_thread = self.tx_thread.clone();
         let rx_camera = self.camera.lock().map_err(|_| Error::PoisonedLock)?.start();
-        
+
         thread::spawn({
             let mut encoder = Encoder::new().map_err(|e| Error::MapError(e.to_string()))?;
             move || {

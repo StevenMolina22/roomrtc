@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use crate::rtcp::RtcpReportHandler;
 use crate::rtp::ConnectionStatus;
 use crate::rtp::error::RtpError;
+use crate::rtp::error::RtpError::ReceiveFailed;
 use crate::rtp::rtp_packet::RtpPacket;
 use crate::tools::Socket;
 
@@ -47,7 +48,8 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         if let Ok(conn) = self.connection_status.read()
             && *conn == ConnectionStatus::Closed
         {
-            return Err(RtpError::ConnectionClosed);
+            // return Err(RtpError::ConnectionClosed);
+            return Err(ReceiveFailed("Sender connection closed".into()));
         }
 
         let rtp_package = RtpPacket::new(

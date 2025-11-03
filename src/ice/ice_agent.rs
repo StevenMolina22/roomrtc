@@ -2,6 +2,7 @@ use super::candidate::Candidate;
 use super::candidate_pair::CandidatePair;
 use super::connectivity_state::ConnectivityState;
 use super::error::IceError as Error;
+use crate::config::IceConfig;
 use if_addrs;
 
 /// An ICE agent that gathers local candidates, accepts remote candidates
@@ -43,10 +44,10 @@ impl IceAgent {
     /// This implementation performs a minimal gather: it selects a single
     /// non-loopback IPv4 address from the host and creates a host
     /// candidate.
-    pub fn gather_candidates(&mut self, port: u16) -> Result<(), Error> {
+    pub fn gather_candidates(&mut self, port: u16, ice_config: &IceConfig) -> Result<(), Error> {
         // Find my local IP and create a candidate
         let local_ip = get_local_ip()?;
-        let mut candidate = Candidate::new_host(local_ip, 1);
+        let mut candidate = Candidate::new_host(local_ip, ice_config.component_id, ice_config);
         candidate.port = port;
         self.local_candidates.push(candidate);
 
@@ -195,8 +196,16 @@ mod tests {
     #[test]
     fn test_gather_candidates_adds_local_candidate() {
         let mut agent = IceAgent::new();
+        let ice_config = IceConfig {
+            foundation: "1".to_string(),
+            transport: "UDP".to_string(),
+            component_id: 1,
+            host_priority_preference: 126,
+            srflx_priority_preference: 100,
+            host_local_preference: 65535,
+        };
 
-        let result = agent.gather_candidates(3478);
+        let result = agent.gather_candidates(3478, &ice_config);
         assert!(result.is_ok());
 
         assert_eq!(agent.local_candidates.len(), 1);
@@ -210,7 +219,15 @@ mod tests {
     #[test]
     fn test_add_remote_candidate_creates_pairs() -> Result<(), Error> {
         let mut agent = IceAgent::new();
-        agent.gather_candidates(4000)?;
+        let ice_config = IceConfig {
+            foundation: "1".to_string(),
+            transport: "UDP".to_string(),
+            component_id: 1,
+            host_priority_preference: 126,
+            srflx_priority_preference: 100,
+            host_local_preference: 65535,
+        };
+        agent.gather_candidates(4000, &ice_config)?;
 
         let remote = sample_remote_candidate();
 
@@ -229,7 +246,15 @@ mod tests {
     #[test]
     fn test_start_connectivity_checks_selects_pair() -> Result<(), Error> {
         let mut agent = IceAgent::new();
-        agent.gather_candidates(4000)?;
+        let ice_config = IceConfig {
+            foundation: "1".to_string(),
+            transport: "UDP".to_string(),
+            component_id: 1,
+            host_priority_preference: 126,
+            srflx_priority_preference: 100,
+            host_local_preference: 65535,
+        };
+        agent.gather_candidates(5000, &ice_config)?;
 
         let remote = sample_remote_candidate();
         agent.add_remote_candidate(remote)?;

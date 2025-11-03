@@ -64,7 +64,7 @@ impl Controller {
             UdpSocket::bind(&rtcp_addr).map_err(|e| Error::MapError(e.to_string()))?;
 
         Ok(Self {
-            client: Client::new(rtp_port, &config.media)
+            client: Client::new(rtp_port, &config.media, &config.ice, &config.sdp)
                 .map_err(|e| Error::MapError(e.to_string()))?,
             tx_encoded,
             rx_encoded: Arc::new(Mutex::new(rx_encoded)),
@@ -248,6 +248,7 @@ impl Controller {
             rtcp_handler,
             self.config.media.default_ssrc,
             Arc::clone(&self.connection_status),
+            self.config.media.rtp_version,
         )
         .map_err(|e| Error::RtpSenderError(e.to_string()))?;
         let rtp_sender = Arc::new(Mutex::new(rtp_sender));
@@ -340,6 +341,7 @@ impl Controller {
                 rtcp_handler,
                 Arc::clone(&self.connection_status),
                 rtp_timeout,
+                self.config.network.max_udp_packet_size,
             )
             .map_err(|e| Error::RtpReceiverError(e.to_string()))?;
 

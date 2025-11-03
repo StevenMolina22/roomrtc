@@ -16,6 +16,7 @@ pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     connection_status: Arc<RwLock<ConnectionStatus>>,
+    max_udp_packet_size: usize,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
@@ -38,6 +39,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
         connection_status: Arc<RwLock<ConnectionStatus>>,
         rtp_read_timeout_millis: u64,
+        max_udp_packet_size: usize,
     ) -> Result<Self, Error> {
         rtp_socket
             .set_read_timeout(Some(Duration::from_millis(rtp_read_timeout_millis)))
@@ -47,6 +49,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
             rtp_socket,
             report_handler,
             connection_status,
+            max_udp_packet_size,
         })
     }
 
@@ -63,7 +66,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
     /// Returns `Error::ReceiveFailed` for unexpected socket errors and
     /// `Error::ConnectionClosed` if the session is closed while waiting.
     pub fn receive(&mut self) -> Result<RtpPacket, Error> {
-        let mut buf = vec![0u8; 65535];
+        let mut buf = vec![0u8; self.max_udp_packet_size];
         loop {
             match self.rtp_socket.recv_from(&mut buf) {
                 Ok((size, _addr)) => {

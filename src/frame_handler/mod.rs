@@ -33,6 +33,9 @@ mod tests {
             rtp_payload_type: 111,
             codec_name: "H264".to_string(),
             clock_rate: 48000,
+            rtp_version: 2,
+            media_type: "video".to_string(),
+            media_protocol: "RTP/AVP".to_string(),
         };
 
         // Generate a synthetic RGB frame

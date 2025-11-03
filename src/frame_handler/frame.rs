@@ -63,29 +63,29 @@ impl Frame {
     /// - bytes 8..12: `width`
     /// - bytes 12..16: `height`
     /// - bytes 16..: raw pixel bytes
-    #[must_use] 
+    #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < 16 {
             return None;
         }
 
         let id = u64::from_le_bytes(bytes[0..8].try_into().ok()?);
-        let width = usize::from_le_bytes(bytes[8..12].try_into().ok()?);
-        let height = usize::from_le_bytes(bytes[12..16].try_into().ok()?);
+        let width = u32::from_le_bytes(bytes[8..12].try_into().ok()?);
+        let height = u32::from_le_bytes(bytes[12..16].try_into().ok()?);
 
         let data = bytes[16..].to_vec();
 
         Some(Self {
             data,
-            width,
-            height,
+            width: width as usize,
+            height: height as usize,
             id,
         })
     }
 
     /// Serialize the `Frame` into bytes in the same layout consumed by
     /// `from_bytes`.
-    #[must_use] 
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(16 + self.data.len());
         buf.extend_from_slice(&self.id.to_le_bytes());
@@ -93,5 +93,103 @@ impl Frame {
         buf.extend_from_slice(&(self.height as u32).to_le_bytes());
         buf.extend_from_slice(&self.data);
         buf
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_serialization_roundtrip() {
+        let original_frame = Frame {
+            data: vec![10, 20, 30, 40, 50, 60], // 2 RGB pixels
+            width: 2,
+            height: 1,
+            id: 12345,
+        };
+
+        let bytes = original_frame.to_bytes();
+
+        let deserialized_frame_option = Frame::from_bytes(&bytes);
+
+        assert!(
+            deserialized_frame_option.is_some(),
+            "Deserialization failed and returned None"
+        );
+
+        let deserialized_frame = deserialized_frame_option.unwrap();
+
+        assert_eq!(
+            original_frame.id, deserialized_frame.id,
+            "Frame ID mismatch"
+        );
+        assert_eq!(
+            original_frame.width, deserialized_frame.width,
+            "Frame width mismatch"
+        );
+        assert_eq!(
+            original_frame.height, deserialized_frame.height,
+            "Frame height mismatch"
+        );
+        assert_eq!(
+            original_frame.data, deserialized_frame.data,
+            "Frame data mismatch"
+        );
+    }
+
+    #[test]
+    fn test_frame_with_empty_data() {
+        // Test that a frame with no pixel data can also roundtrip
+        let original_frame = Frame {
+            data: vec![],
+            width: 0,
+            height: 0,
+            id: 777,
+        };
+
+        let bytes = original_frame.to_bytes();
+        let deserialized_frame =
+            Frame::from_bytes(&bytes).expect("Deserialization of empty frame failed");
+
+        assert_eq!(original_frame.id, deserialized_frame.id);
+        assert_eq!(original_frame.width, deserialized_frame.width);
+        assert_eq!(original_frame.height, deserialized_frame.height);
+        assert_eq!(original_frame.data, deserialized_frame.data);
+    }
+
+    #[test]
+    fn test_from_bytes_too_short() {
+        // Test that we get None if the byte slice is too small
+        let short_bytes: &[u8] = &[0; 15];
+
+        let result = Frame::from_bytes(short_bytes);
+
+        assert!(
+            result.is_none(),
+            "Expected None when deserializing from 15 bytes"
+        );
+    }
+
+    #[test]
+    fn test_from_bytes_exactly_header_size() {
+        // Test that we get a valid frame (with empty data)
+        // if the slice is exactly the header size (16 bytes).
+
+        // Corresponds to: id=1, width=2, height=3
+        let header_only_bytes: &[u8] = &[1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0];
+
+        let result = Frame::from_bytes(header_only_bytes);
+
+        assert!(
+            result.is_some(),
+            "Expected Some when deserializing exact header size"
+        );
+        let frame = result.unwrap();
+
+        assert_eq!(frame.id, 1);
+        assert_eq!(frame.width, 2);
+        assert_eq!(frame.height, 3);
+        assert_eq!(frame.data.len(), 0, "Data should be empty");
     }
 }

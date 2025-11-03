@@ -7,6 +7,15 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
+pub trait FrameSource: Send {
+    /// Start the capture thread.
+    /// Returns a Receiver to get frames from.
+    fn start(&mut self) -> Result<Receiver<Frame>, ControllerError>;
+
+    /// Signal the capture thread to stop.
+    fn stop(&self) -> Result<(), ControllerError>;
+}
+
 /// A camera that runs a capture thread and produces
 /// `Frame` instances over a channel.
 ///
@@ -37,7 +46,9 @@ impl Camera {
             media_config,
         }
     }
+}
 
+impl FrameSource for Camera {
     /// Start the capture thread and return a channel `Receiver<Frame>`
     /// where captured frames will be sent.
     ///
@@ -46,7 +57,7 @@ impl Camera {
     /// spawns a background thread that captures frames from `OpenCV`'s
     /// `VideoCapture` and converts them to RGB `Frame`s at the
     /// configured frame rate.
-    pub fn start(&mut self) -> Result<Receiver<Frame>, ControllerError> {
+    fn start(&mut self) -> Result<Receiver<Frame>, ControllerError> {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
         *running.write().map_err(|_| ControllerError::PoisonedLock)? = true;
@@ -131,7 +142,6 @@ impl Camera {
                     id
                 };
 
-                #[allow(clippy::cast_sign_loss)]
                 let frame = Frame {
                     data,
                     width: rgb.cols() as usize,
@@ -152,7 +162,7 @@ impl Camera {
 
     /// Stop the capture thread by clearing the running flag. The
     /// capture thread will observe this and exit shortly.
-    pub fn stop(&self) -> Result<(), ControllerError> {
+    fn stop(&self) -> Result<(), ControllerError> {
         let mut run = self
             .running
             .write()

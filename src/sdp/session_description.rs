@@ -7,6 +7,10 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 /// SDP keys used when parsing session description lines.
+///
+/// - `m` indicates the start of a media description line.
+/// - `a` indicates an attribute line that should be attached to the
+///   most-recently-parsed media description.
 const MEDIA_DESCRIPTION_KEY: &str = "m";
 const ATTRIBUTE_KEY: &str = "a";
 
@@ -17,6 +21,13 @@ const ATTRIBUTE_KEY: &str = "a";
 /// descriptions and connection data. Only `media_descriptions` is
 /// publicly exposed; other fields are initialized with defaults when
 /// parsing.
+/// In-memory representation of a SDP session description.
+///
+/// This struct contains the subset of SDP fields required by the
+/// project: version, origin id, session name, timing, a list of media
+/// descriptions and connection data. Only `media_descriptions` is
+/// publicly exposed; other fields are initialized with sensible
+/// defaults when parsing or creating instances.
 pub struct SessionDescriptionProtocol {
     /// SDP version (`v=`). Defaults to 0 in created instances.
     version: u8,
@@ -134,7 +145,14 @@ impl SessionDescriptionProtocol {
     }
 }
 
-// TO DO: Review if all local attributes should be copied into the sdp answer (ice candidates, fingerprints,...)
+/// Given a local media description and an offer media description,
+/// compute the set of formats (payload types) and the list of
+/// attributes that should be included in the answer.
+///
+/// The returned tuple contains:
+/// - a `HashSet<u8>` with the compatible payload type numbers
+/// - a `Vec<Attribute>` with attributes copied from the local media
+///   description when appropriate
 fn compatible_attributes_data(
     local_md: &MediaDescription,
     offer_md: &MediaDescription,
@@ -160,6 +178,9 @@ fn compatible_attributes_data(
     (answer_md_fmts, answer_md_attributes)
 }
 
+/// Build a `MediaDescription` for the answer from the given local
+/// media description, the set of selected formats and the attributes to
+/// include.
 fn create_answer_md(
     local_md: &MediaDescription,
     answer_md_fmts: HashSet<u8>,
@@ -183,6 +204,8 @@ fn create_answer_md(
     Ok(answer_md)
 }
 
+/// Parse a single `m=` media description line and append the
+/// resulting `MediaDescription` to the provided vector.
 fn handle_media_description_line(
     line: &str,
     media_descriptions: &mut Vec<MediaDescription>,
@@ -192,6 +215,9 @@ fn handle_media_description_line(
     Ok(())
 }
 
+/// Parse an `a=` attribute line and attach it to the last media
+/// description in the provided slice. Returns an error if there is no
+/// previous media description to attach to.
 fn handle_attribute_line(
     line: &str,
     media_descriptions: &mut [MediaDescription],

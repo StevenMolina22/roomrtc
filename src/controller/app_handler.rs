@@ -358,6 +358,23 @@ impl Controller {
         });
     }
 
+    pub fn reset(&mut self, tx_local: Sender<Frame>, tx_remote: Sender<Frame>, tx_event: Sender<String>) -> Result<(), Error> {
+        let (tx_encoded, rx_encoded) = channel();
+        let (tx_thread, rx_thread) = channel();
+
+        self.tx_local = tx_local;
+        self.tx_remote = tx_remote;
+        self.tx_event = tx_event;
+        self.tx_encoded = tx_encoded;
+        self.rx_encoded = Arc::new(Mutex::new(rx_encoded));
+        self.tx_thread = tx_thread;
+        self.rx_thread = Arc::new(Mutex::new(rx_thread));
+
+        self.client.ice_agent.clean_remote_candidates();
+
+        Ok(())
+    }
+
     pub fn stop_local_camera(&mut self) -> Result<(), Error> {
         self.camera.lock().map_err(|_| Error::PoisonedLock)?.stop();
         Ok(())

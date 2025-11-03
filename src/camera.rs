@@ -4,6 +4,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
+use opencv::core;
 
 pub struct Camera {
     running: Arc<RwLock<bool>>,
@@ -48,7 +49,7 @@ impl Camera {
                     continue;
                 }
 
-                imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).unwrap();
+                imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT).unwrap();
                 let data = rgb.data_bytes().unwrap().to_vec();
 
                 let id = {

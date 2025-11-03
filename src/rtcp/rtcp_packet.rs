@@ -5,6 +5,7 @@ use std::fmt::Display;
 ///
 /// Each variant corresponds to a small signaling message exchanged
 /// between peers to check connectivity or indicate session closure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RtcpPacket {
     /// Periodic connectivity report.
     ConnectivityReport,

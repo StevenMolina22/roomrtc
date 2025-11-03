@@ -77,8 +77,8 @@ impl Frame {
 
         Some(Self {
             data,
-            width,
-            height,
+            width: width as usize,
+            height: height as usize,
             id,
         })
     }

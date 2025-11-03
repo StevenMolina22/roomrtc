@@ -120,7 +120,7 @@ impl RoomRTCApp {
                 self.our_offer = self.controller.client.get_offer();
                 self.remote_sdp = String::new();
                 self.our_answer = None;
-                self.view = View::Connection;
+                self.view = View::Connection
             }
 
             ui.add_space(10.0);
@@ -143,10 +143,10 @@ impl RoomRTCApp {
     /// `offerer_flow` and `answerer_flow`). A Cancel button returns
     /// to the main menu.
     fn show_connection(&mut self, ui: &mut Ui) {
-        if self.our_offer.is_empty() {
-            self.answerer_flow(ui);
-        } else {
+        if !self.our_offer.is_empty() {
             self.offerer_flow(ui);
+        } else {
+            self.answerer_flow(ui);
         }
 
         if ui.button("Cancel").clicked() {
@@ -180,7 +180,7 @@ impl RoomRTCApp {
             let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
                 if let Err(e) = self.controller.shut_down() {
-                    eprintln!("{e}");
+                    eprintln!("{}", e);
                 }
                 self.reset();
                 self.view = View::Menu;
@@ -211,6 +211,7 @@ impl RoomRTCApp {
                 self.controller.start_call().unwrap();
                 self.view = View::Call;
             }
+        }
     }
 
     /// UI flow for the answerer (call joiner).
@@ -232,6 +233,7 @@ impl RoomRTCApp {
                 Ok(answer_str) => self.our_answer = Some(answer_str),
                 Err(e) => eprintln!("Failed to process offer: {}", e),
             }
+        }
 
         if let Some(answer_str) = &self.our_answer {
             ui.separator();
@@ -242,7 +244,7 @@ impl RoomRTCApp {
             let join_btn = egui::Button::new("Join Call");
             if ui.add(join_btn).clicked() {
                 if let Err(e) = self.controller.start_call() {
-                    eprintln!("Failed to start call: {e}");
+                    eprintln!("Failed to start call: {}", e);
                 }
                 self.view = View::Call;
             }

@@ -16,11 +16,12 @@ mod tests {
     use crate::config::MediaConfig;
 
     #[test]
-    fn test_encoder_decoder_roundtrip() {
+    fn test_frame_handlers_integration() {
         // Set up config and a synthetic frame
         let width = 640;
         let height = 480;
 
+        #[allow(clippy::cast_precision_loss)]
         let media_config = MediaConfig {
             camera_index: 0,
             frame_width: width as f64,

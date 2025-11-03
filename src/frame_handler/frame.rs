@@ -35,7 +35,10 @@ impl Frame {
             Mat::from_slice(&self.data).map_err(|_| Error::UnableToCreateFrameFromYUVError)?;
 
         let yuv_mat = temp_mat
-            .reshape(1, (self.height * 3 / 2) as i32)
+            .reshape(
+                1,
+                i32::try_from(self.height * 3 / 2).expect("Frame dimension is too large for i32"),
+            )
             .map_err(|_| Error::ReshapingFrameError)?;
 
         let mut rgb_mat = Mat::default();
@@ -89,8 +92,16 @@ impl Frame {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(16 + self.data.len());
         buf.extend_from_slice(&self.id.to_le_bytes());
-        buf.extend_from_slice(&(self.width as u32).to_le_bytes());
-        buf.extend_from_slice(&(self.height as u32).to_le_bytes());
+        buf.extend_from_slice(
+            &u32::try_from(self.width)
+                .expect("Frame width is too large for u32")
+                .to_le_bytes(),
+        );
+        buf.extend_from_slice(
+            &u32::try_from(self.height)
+                .expect("Frame height is too large for u32")
+                .to_le_bytes(),
+        );
         buf.extend_from_slice(&self.data);
         buf
     }

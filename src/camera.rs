@@ -54,14 +54,16 @@ impl Camera {
         let config = self.media_config.clone();
 
         thread::spawn(move || {
-            let mut cam =
-                match videoio::VideoCapture::new(config.camera_index as i32, videoio::CAP_ANY) {
-                    Ok(cam) => cam,
-                    Err(e) => {
-                        eprintln!("Failed to open camera: {e}. Stopping camera thread.");
-                        return;
-                    }
-                };
+            let mut cam = match videoio::VideoCapture::new(
+                i32::try_from(config.camera_index).expect("Camera index is too large for i32"),
+                videoio::CAP_ANY,
+            ) {
+                Ok(cam) => cam,
+                Err(e) => {
+                    eprintln!("Failed to open camera: {e}. Stopping camera thread.");
+                    return;
+                }
+            };
 
             if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
                 eprintln!("Camera is not open. Stopping camera thread.");
@@ -92,6 +94,7 @@ impl Camera {
                     id
                 };
 
+                #[allow(clippy::cast_sign_loss)]
                 let frame = Frame {
                     data,
                     width: rgb.cols() as usize,

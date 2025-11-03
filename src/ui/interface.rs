@@ -271,7 +271,7 @@ impl RoomRTCApp {
     ///
     /// If a texture exists, the image is resized preserving aspect
     /// ratio. Otherwise, a placeholder label is displayed.
-    fn show_local_camera(&mut self, ui: &mut Ui) {
+    fn show_local_camera(&self, ui: &mut Ui) {
         if let Some(texture) = &self.local_texture {
             let size = texture.size_vec2();
             let aspect_ratio = size.x / size.y;
@@ -290,7 +290,7 @@ impl RoomRTCApp {
     ///
     /// Behaviour mirrors `show_local_camera` but renders the remote
     /// participant's video.
-    fn show_remote_camera(&mut self, ui: &mut Ui) {
+    fn show_remote_camera(&self, ui: &mut Ui) {
         if let Some(texture) = &self.remote_texture {
             let size = texture.size_vec2();
             let aspect_ratio = size.x / size.y;

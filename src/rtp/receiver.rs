@@ -65,7 +65,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
     /// Returns `Error::ReceiveFailed` for unexpected socket errors and
     /// `Error::ConnectionClosed` if the session is closed while waiting.
     pub fn receive(&mut self) -> Result<RtpPacket, Error> {
-        let mut buf = [0u8; 65535];
+        let mut buf = vec![0u8; 65535];
         loop {
             match self.rtp_socket.recv_from(&mut buf) {
                 Ok((size, _addr)) => {

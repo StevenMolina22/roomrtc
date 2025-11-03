@@ -10,6 +10,7 @@ use openh264::formats::{RgbSliceU8, YUVBuffer};
 /// compress raw YUV frames into H.264-encoded byte chunks.
 /// These chunks can be sent over the network (e.g. via UDP) and later
 /// reassembled and decoded on the receiving side.
+#[allow(clippy::struct_field_names)]
 pub struct Encoder {
     encoder: H264Encoder,
     frame_count: usize,
@@ -61,7 +62,7 @@ impl Encoder {
             .encoder
             .encode(&yuv)
             .map_err(|_| Error::EncodingError)?;
-        let chunks = generate_chunks_from_nalus(nalus, self.max_chunk_size);
+        let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
 
         self.frame_count += 1;
 
@@ -71,7 +72,7 @@ impl Encoder {
 
 /// Splits the encoded NALUs into smaller chunks based on the
 /// `max_chunk_size`.
-fn generate_chunks_from_nalus(nalus: EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
+fn generate_chunks_from_nalus(nalus: &EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
     let nalu_units = nalus.to_vec();
     let mut chunks = Vec::new();
     for chunk in nalu_units.chunks(max_chunk_size) {

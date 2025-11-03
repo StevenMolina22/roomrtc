@@ -14,6 +14,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::thread::JoinHandle;
+use crate::rtcp::RtcpReportHandler;
 
 pub struct Controller {
     pub client: Client,
@@ -32,7 +33,7 @@ pub struct Controller {
 
     //Components
     pub camera: Arc<Mutex<Camera>>,
-    pub rtp_sender: Option<Arc<Mutex<RtpSender<UdpSocket>>>>,
+    pub rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<UdpSocket>>>>,
     
     //Sockets
     rtp_socket: UdpSocket,
@@ -64,7 +65,7 @@ impl Controller {
             rx_thread: Arc::new(Mutex::new(rx_thread)),
             connection_status: Arc::new(RwLock::new(ConnectionStatus::Closed)),
             camera: Arc::new(Mutex::new(Camera::new())),
-            rtp_sender: None,
+            rtcp_handler: None,
             rtp_socket,
             rtcp_socket,
             handlers: Vec::new(),
@@ -89,7 +90,15 @@ impl Controller {
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
         self.rtcp_socket
             .connect(remote_rtcp)
-            .map_err(|e| Error::ConnectionSocketError(e.to_string()))
+            .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
+
+        let rtcp_handler = RtcpReportHandler::new(
+            self.rtcp_socket.try_clone().map_err(|e| Error::CloningSocketError(e.to_string()))?,
+            Arc::clone(&self.connection_status)
+        );
+        rtcp_handler.init_connection().map_err(|e| Error::MapError(e.to_string()))?;
+        self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
+        Ok(())
     }
 
     pub fn start_call(&mut self) -> Result<(), Error> {
@@ -98,7 +107,7 @@ impl Controller {
                 .connection_status
                 .write()
                 .map_err(|_| Error::PoisonedLock)?;
-            *conn = ConnectionStatus::Open;
+            *conn = ConnectionStatus::Waiting;
         }
         self.connect()?;
         self.generate_media_threads()
@@ -109,46 +118,34 @@ impl Controller {
             self.camera.lock().unwrap().stop();
         }
 
-        match &self.rtp_sender {
-            Some(sender_lock) => {
-                let mut sender = sender_lock.lock().map_err(|_| Error::PoisonedLock)?;
-                sender.terminate().map_err(|e| Error::MapError(e.to_string()))?;
-            },
-            None => return Err(Error::EmptyRTPSenderError),
-        };
+        match &self.rtcp_handler {
+            Some(handler_lock) => {
+                handler_lock.lock()
+                .map_err(|_| Error::PoisonedLock)?
+                .close_connection()
+                .map_err(|e| Error::MapError(e.to_string()))?;
+
+            }
+            None => return Err(Error::ConnectionNotStarted),
+        }
 
         Ok(())
     }
 
     fn generate_media_threads(&mut self) -> Result<(), Error> {
-        //Clone sockets
         let rtp_sender_socket = self
             .rtp_socket
-            .try_clone()
-            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
-        let rtcp_sender_socket = self
-            .rtcp_socket
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
 
         let rtp_receiver_socket = rtp_sender_socket
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
-        let rtcp_receiver_socket = rtcp_sender_socket
-            .try_clone()
-            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
 
         self.spawn_camera_thread()?;
-        self.spawn_rtp_sender_thread(
-            rtp_sender_socket,
-            rtcp_sender_socket,
-            Arc::clone(&self.connection_status),
-        )?;
-        self.spawn_rtp_receiver_thread(
-            rtp_receiver_socket,
-            rtcp_receiver_socket,
-            Arc::clone(&self.connection_status),
-        )?;
+
+        self.spawn_rtp_sender_thread(rtp_sender_socket)?;
+        self.spawn_rtp_receiver_thread(rtp_receiver_socket)?;
         self.handle_threads_errors();
 
         Ok(())
@@ -196,24 +193,26 @@ impl Controller {
         Ok(())
     }
 
-    fn spawn_rtp_sender_thread(
-        &mut self,
-        rtp_socket: UdpSocket,
-        rtcp_socket: UdpSocket,
-        connection_status: Arc<RwLock<ConnectionStatus>>,
-    ) -> Result<(), Error> {
+    fn spawn_rtp_sender_thread(&mut self, rtp_socket: UdpSocket) -> Result<(), Error> {
         let rx_encoded = self.rx_encoded.clone();
         let tx_thread = self.tx_thread.clone();
         let status = self.connection_status.clone();
+
+        let rtcp_handler = match &self.rtcp_handler { 
+            Some(handler_lock) => {
+                Arc::clone(handler_lock)
+            }
+            None => return Err(Error::ConnectionNotStarted),
+        };
+        
         let rtp_sender = RtpSender::new(
             rtp_socket,
-            rtcp_socket,
+            rtcp_handler,
             42,
-            connection_status,
+            Arc::clone(&self.connection_status),
         ).map_err(|e| Error::RtpSenderError(e.to_string()))?;
         let rtp_sender = Arc::new(Mutex::new(rtp_sender));
-        self.rtp_sender = Some(rtp_sender.clone());
-        
+
         let handler = thread::spawn({
             move || {
                 loop {
@@ -257,21 +256,28 @@ impl Controller {
         Ok(())
     }
 
-    fn spawn_rtp_receiver_thread(
-        &mut self,
-        rtp_receiver_socket: UdpSocket,
-        rtcp_receiver_socket: UdpSocket,
-        connection_status: Arc<RwLock<ConnectionStatus>>,
-    ) -> Result<(), Error> {
+    fn spawn_rtp_receiver_thread(&mut self, rtp_receiver_socket: UdpSocket) -> Result<(), Error> {
         let tx_remote_cam_receiver = self.tx_remote.clone();
         let tx_thread = self.tx_thread.clone();
         let status = self.connection_status.clone();
 
+        let rtcp_handler = match &self.rtcp_handler {
+            Some(handler_lock) => {
+                Arc::clone(handler_lock)
+            }
+            None => return Err(Error::ConnectionNotStarted),
+        };
+        
         let handler = thread::spawn({
             let mut receiver =
-                RtpReceiver::new(rtp_receiver_socket, rtcp_receiver_socket, connection_status)
-                    .map_err(|e| Error::RtpReceiverError(e.to_string()))?;
+                RtpReceiver::new(
+                    rtp_receiver_socket,
+                    rtcp_handler, 
+                    Arc::clone(&self.connection_status)
+                ).map_err(|e| Error::RtpReceiverError(e.to_string()))?;
+
             let mut decoder = Decoder::new().map_err(|e| Error::MapError(e.to_string()))?;
+
             move || {
                 let mut actual_frame = None;
                 let mut chunks = Vec::new();
@@ -353,7 +359,7 @@ impl Controller {
     }
 
     pub fn stop_local_camera(&mut self) -> Result<(), Error> {
-        self.camera.lock().map_err(|e| Error::PoisonedLock)?.stop();
+        self.camera.lock().map_err(|_| Error::PoisonedLock)?.stop();
         Ok(())
     }
 

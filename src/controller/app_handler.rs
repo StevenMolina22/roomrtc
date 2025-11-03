@@ -14,7 +14,6 @@ use std::net::UdpSocket;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use std::thread::JoinHandle;
 use crate::rtcp::RtcpReportHandler;
 
 pub struct Controller {
@@ -40,9 +39,6 @@ pub struct Controller {
     //Sockets
     rtp_socket: UdpSocket,
     rtcp_socket: UdpSocket,
-
-    //Thread's handlers
-    pub handlers: Vec<JoinHandle<()>>,
 }
 
 impl Controller {
@@ -81,7 +77,6 @@ impl Controller {
             rtp_socket,
             rtcp_socket,
             config,
-            handlers: Vec::new(),
         })
     }
 
@@ -184,7 +179,7 @@ impl Controller {
         let tx_encoded = self.tx_encoded.clone();
         let tx_thread = self.tx_thread.clone();
 
-        let handler = thread::spawn({
+        thread::spawn({
             let camera = Arc::clone(&self.camera);
             let rx_camera = camera.lock().map_err(|_| Error::PoisonedLock)?.start();
             let mut encoder =
@@ -202,7 +197,7 @@ impl Controller {
                         Ok(enc) => enc,
                         Err(e) => {
                             let error = ThreadsError::Fatal(e.to_string());
-                            if let Err(e) = tx_thread.send(error) {
+                            if let Err(_) = tx_thread.send(error) {
                                 eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
                             }
                             break;
@@ -228,7 +223,6 @@ impl Controller {
                 }
             }
         });
-        self.handlers.push(handler);
         Ok(())
     }
 
@@ -251,7 +245,7 @@ impl Controller {
         .map_err(|e| Error::RtpSenderError(e.to_string()))?;
         let rtp_sender = Arc::new(Mutex::new(rtp_sender));
 
-        let handler = thread::spawn({
+        thread::spawn({
             move || {
                 loop {
                     if let Ok(is_closed) = connection_is_closed(&tx_thread, &status) && is_closed {
@@ -303,7 +297,6 @@ impl Controller {
                 }
             }
         });
-        self.handlers.push(handler);
         Ok(())
     }
 
@@ -317,7 +310,7 @@ impl Controller {
             None => return Err(Error::ConnectionNotStarted),
         };
         
-        let handler = thread::spawn({
+        thread::spawn({
             let mut receiver = RtpReceiver::new(
                 rtp_receiver_socket,
                 rtcp_handler,
@@ -376,7 +369,6 @@ impl Controller {
                 }
             }
         });
-        self.handlers.push(handler);
         Ok(())
     }
 

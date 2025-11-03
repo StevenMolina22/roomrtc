@@ -182,15 +182,8 @@ impl RoomRTCApp {
             if ui.add(join_btn).clicked() {
                 if let Err(e) = self.controller.start_call() {
                     eprintln!("Failed to start call: {}", e);
-                    // TODO: Show this error in the GUI
-                } else {
-                    if self.controller.join().is_err() {
-                        self.view = View::Error
-                    } else {
-                        self.controller.start_call().unwrap();
-                        self.view = View::Call;
-                    }
                 }
+                self.view = View::Call;
             }
         }
     }

@@ -389,7 +389,6 @@ impl Controller {
     }
 
     pub fn reset(&mut self, tx_local: Sender<Frame>, tx_remote: Sender<Frame>, tx_event: Sender<String>) -> Result<(), Error> {
-        self.end_threads()?;
 
         let (tx_encoded, rx_encoded) = channel();
         let (tx_thread, rx_thread) = channel();
@@ -411,13 +410,7 @@ impl Controller {
         self.camera.lock().map_err(|_| Error::PoisonedLock)?.stop();
         Ok(())
     }
-
-    pub fn end_threads(&mut self) -> Result<(), Error> {
-        for handler in self.handlers.drain(..) {
-            handler.join().map_err(|_| Error::JoinThreadError)?;
-        }
-        Ok(())
-    }
+    
 }
 fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {
     let fr_id = chunks.first()?.frame_id;

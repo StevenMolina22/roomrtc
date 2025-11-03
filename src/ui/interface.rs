@@ -54,7 +54,6 @@ impl eframe::App for RoomRTCApp {
             ui.add_space(40.0);
             while let Ok(_) = self.rx_event.try_recv() {
                 self.controller.stop_local_camera().unwrap();
-                self.controller.end_threads().unwrap();
                 self.reset();
                 self.view = View::Error;
             }
@@ -130,7 +129,6 @@ impl RoomRTCApp {
             let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
                 self.controller.shut_down().unwrap();
-                self.controller.end_threads().unwrap();
                 self.reset();
                 self.view = View::Menu;
             }
@@ -245,8 +243,6 @@ impl RoomRTCApp {
     }
 
     pub fn reset(&mut self) {
-        self.controller.end_threads().unwrap();
-
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
         let (tx_event, rx_event) = mpsc::channel();

@@ -18,7 +18,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Dependencies
-      run: ./scripts/dependencies.sh 
+      run: bash ./scripts/dependencies.sh
     - name: Build
       run: cargo build --verbose
     - name: Run tests

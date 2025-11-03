@@ -52,8 +52,14 @@ impl Display for RtcpError {
             Self::InvalidConfigDuration => {
                 write!(f, "Error: \"Invalid configuration duration\"")
             }
-            Self::SendFailed(e) => write!(f, "Error: \"Failed to send RTCP packet. Details: {}\"", e),
-            Self::ReceiveFailed(e) => write!(f, "Error: \"Failed to receive RTCP packet. Details: {}\"", e),
+            Self::SendFailed(e) => {
+                write!(f, "Error: \"Failed to send RTCP packet. Details: {}\"", e)
+            }
+            Self::ReceiveFailed(e) => write!(
+                f,
+                "Error: \"Failed to receive RTCP packet. Details: {}\"",
+                e
+            ),
             Self::UnexpectedMessage => write!(f, "Error: Unexpected message"),
         }
     }

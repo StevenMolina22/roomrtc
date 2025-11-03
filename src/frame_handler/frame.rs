@@ -1,5 +1,5 @@
 use super::FrameError as Error;
-use opencv::{imgproc, };
+use opencv::imgproc;
 use opencv::prelude::*;
 
 /// An in-memory video frame used by the frame handler.
@@ -74,7 +74,12 @@ impl Frame {
 
         let data = bytes[16..].to_vec();
 
-        Some(Self { data, width, height, id })
+        Some(Self {
+            data,
+            width,
+            height,
+            id,
+        })
     }
 
     /// Serialize the `Frame` into bytes in the same layout consumed by

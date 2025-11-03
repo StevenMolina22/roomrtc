@@ -15,7 +15,6 @@ pub enum View {
     /// A view that shows connection details or connection status.
     Connection,
 
-
     /// Generic error view to show unrecoverable or displayable errors.
     Error,
 }

@@ -77,10 +77,7 @@ mod tests {
 
     #[test]
     fn test_candidate_type_from_str() -> Result<(), Error> {
-        assert_eq!(
-            CandidateType::from_str("host")?,
-            CandidateType::Host
-        );
+        assert_eq!(CandidateType::from_str("host")?, CandidateType::Host);
         assert_eq!(
             CandidateType::from_str("srflx")?,
             CandidateType::ServerReflexive

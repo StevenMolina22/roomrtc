@@ -20,7 +20,11 @@ fn main() -> Result<(), eframe::Error> {
     let config = match Config::load(config_path) {
         Ok(cfg) => cfg,
         Err(e) => {
-            eprintln!("Failed to load config from {}: {}", config_path.display(), e);
+            eprintln!(
+                "Failed to load config from {}: {}",
+                config_path.display(),
+                e
+            );
             std::process::exit(1);
         }
     };

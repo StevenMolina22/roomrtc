@@ -13,9 +13,12 @@ env:
 
 jobs:
   build:
+     
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Dependencies
+      run: ./scripts/dependencies.sh 
     - name: Build
       run: cargo build --verbose
     - name: Run tests

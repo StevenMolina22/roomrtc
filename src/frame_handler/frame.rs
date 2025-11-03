@@ -177,7 +177,11 @@ mod tests {
         // if the slice is exactly the header size (16 bytes).
 
         // Corresponds to: id=1, width=2, height=3
-        let header_only_bytes: &[u8] = &[1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0];
+        let header_only_bytes: &[u8] = &[
+            1, 0, 0, 0, 0, 1, 0, 0, //
+            2, 0, 0, 0, //
+            3, 0, 0, 0, //
+        ];
 
         let result = Frame::from_bytes(header_only_bytes);
 

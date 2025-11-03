@@ -6,8 +6,7 @@ use std::default::Default;
 /// project's UDP sockets. The packet uses a custom binary layout
 /// that packs a small header followed by payload
 /// bytes.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct RtpPacket {
     /// Packet format version.
     version: u8,
@@ -39,7 +38,7 @@ impl RtpPacket {
     ///
     /// This constructor sets `version` to 2 and stores the provided
     /// values. No network encoding is performed at this stage.
-    #[must_use] 
+    #[must_use]
     pub const fn new(
         marker: u16,
         payload_type: u8,
@@ -67,7 +66,7 @@ impl RtpPacket {
     /// The layout used here is a simple custom header followed by the
     /// payload. The method allocates a buffer and appends fields in
     /// network byte order.
-    #[must_use] 
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(26 + self.payload.len());
 
@@ -85,7 +84,7 @@ impl RtpPacket {
 
     /// Decode an `RtpPacket` from a byte slice previously produced by
     /// `to_bytes`. Returns `None` if the slice is too short or malformed.
-    #[must_use] 
+    #[must_use]
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
         if data.len() < 28 {
             return None;
@@ -118,4 +117,114 @@ fn array_from_slice<const N: usize>(slice: &[u8]) -> [u8; N] {
     let mut arr = [0u8; N];
     arr.copy_from_slice(&slice[..N]);
     arr
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rtp_packet_serialization_roundtrip() {
+        // Create a packet with unique, non-zero values for all fields
+        let original_packet = RtpPacket {
+            version: 2,
+            marker: 5,
+            payload_type: 96,
+            frame_id: 123456789,
+            chunk_id: 42,
+            timestamp: 1122334455,
+            ssrc: 987654321,
+            payload: vec![10, 20, 30, 40, 50],
+        };
+
+        // Serialize and then deserialize the packet
+        let bytes = original_packet.to_bytes();
+        let deserialized_option = RtpPacket::from_bytes(&bytes);
+
+        assert!(deserialized_option.is_some(), "from_bytes returned None");
+
+        let deserialized_packet = deserialized_option.unwrap();
+
+        // Assert every single field is identical
+        assert_eq!(
+            original_packet.version, deserialized_packet.version,
+            "Version mismatch"
+        );
+        assert_eq!(
+            original_packet.marker, deserialized_packet.marker,
+            "Marker mismatch"
+        );
+        assert_eq!(
+            original_packet.payload_type, deserialized_packet.payload_type,
+            "Payload type mismatch"
+        );
+        assert_eq!(
+            original_packet.frame_id, deserialized_packet.frame_id,
+            "Frame ID mismatch"
+        );
+        assert_eq!(
+            original_packet.chunk_id, deserialized_packet.chunk_id,
+            "Chunk ID mismatch"
+        );
+        assert_eq!(
+            original_packet.timestamp, deserialized_packet.timestamp,
+            "Timestamp mismatch"
+        );
+        assert_eq!(
+            original_packet.ssrc, deserialized_packet.ssrc,
+            "SSRC mismatch"
+        );
+        assert_eq!(
+            original_packet.payload, deserialized_packet.payload,
+            "Payload data mismatch"
+        );
+    }
+
+    #[test]
+    fn test_from_bytes_too_short() {
+        // Header is 28 bytes, we send 27
+        let short_bytes: &[u8] = &[0; 27];
+
+        let result = RtpPacket::from_bytes(short_bytes);
+
+        assert!(
+            result.is_none(),
+            "Expected None for a packet shorter than the header"
+        );
+    }
+
+    #[test]
+    fn test_from_bytes_exactly_header_size() {
+        // A packet with 28 bytes should deserialize into a packet with an empty payload
+        let header_only_bytes: &[u8] = &[
+            2,  // version
+            96, // payload_type
+            0, 0, 0, 0, 0, 0, 0, 1, // frame_id = 1
+            0, 0, 0, 0, 0, 0, 0, 0, // chunk_id = 0
+            0, 0, 0, 100, // timestamp = 100
+            0, 1, // marker = 1
+            0, 0, 0, 2, // ssrc = 2
+        ];
+
+        let result = RtpPacket::from_bytes(header_only_bytes);
+
+        assert!(
+            result.is_some(),
+            "Packet with exact header size should deserialize"
+        );
+        let packet = result.unwrap();
+        assert_eq!(packet.frame_id, 1);
+        assert_eq!(packet.timestamp, 100);
+        assert_eq!(packet.ssrc, 2);
+        assert!(packet.payload.is_empty(), "Payload should be empty");
+    }
+
+    #[test]
+    fn test_from_bytes_empty_slice() {
+        let empty_bytes: &[u8] = &[];
+
+        let result = RtpPacket::from_bytes(empty_bytes);
+
+        assert!(result.is_none(), "Expected None for an empty byte slice");
+    }
 }

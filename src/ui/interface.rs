@@ -87,7 +87,7 @@ impl eframe::App for RoomRTCApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
-            while let Ok(_) = self.rx_event.try_recv() {
+            while self.rx_event.try_recv().is_ok() {
                 self.controller.stop_local_camera().unwrap();
                 self.reset();
                 self.view = View::Error;
@@ -164,7 +164,7 @@ impl RoomRTCApp {
             ui.heading("Llamada");
             ui.add_space(20.0);
 
-            self.update_video_textures(&ctx);
+            self.update_video_textures(ctx);
 
             ui.horizontal_centered(|ui| {
                 ui.vertical(|ui| {
@@ -204,14 +204,12 @@ impl RoomRTCApp {
         ui.label("2. Paste the remote user's answer below:");
         ui.add(egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Answer..."));
 
-        if !self.remote_sdp.is_empty() {
-            if ui.button("Connect").clicked() {
-                if let Err(e) = self.controller.client.process_answer(&self.remote_sdp) {
-                    eprintln!("Failed to process answer: {}", e);
-                } else {
-                    self.controller.start_call().unwrap();
-                    self.view = View::Call;
-                }
+        if !self.remote_sdp.is_empty() && ui.button("Connect").clicked() {
+            if let Err(e) = self.controller.client.process_answer(&self.remote_sdp) {
+                eprintln!("Failed to process answer: {}", e);
+            } else {
+                self.controller.start_call().unwrap();
+                self.view = View::Call;
             }
         }
     }
@@ -227,12 +225,13 @@ impl RoomRTCApp {
         ui.label("1. Paste the remote user's offer below:");
         ui.add(egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Offer..."));
 
-        if self.our_answer.is_none() {
-            if !self.remote_sdp.is_empty() && ui.button("Generate Answer").clicked() {
-                match self.controller.client.process_offer(&self.remote_sdp) {
-                    Ok(answer_str) => self.our_answer = Some(answer_str),
-                    Err(e) => eprintln!("Failed to process offer: {}", e),
-                }
+        if self.our_answer.is_none()
+            && !self.remote_sdp.is_empty()
+            && ui.button("Generate Answer").clicked()
+        {
+            match self.controller.client.process_offer(&self.remote_sdp) {
+                Ok(answer_str) => self.our_answer = Some(answer_str),
+                Err(e) => eprintln!("Failed to process offer: {}", e),
             }
         }
 

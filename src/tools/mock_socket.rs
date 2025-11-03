@@ -11,12 +11,7 @@ impl Socket for MockSocket {
     fn send(&self, buf: &[u8]) -> Result<usize, std::io::Error> {
         self.sent_data
             .lock()
-            .map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Failed to acquire lock due to poisoning",
-                )
-            })?
+            .map_err(|_| std::io::Error::other("Failed to acquire lock due to poisoning"))?
             .push(buf.to_vec());
         Ok(buf.len())
     }

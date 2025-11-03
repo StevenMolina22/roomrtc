@@ -134,7 +134,6 @@ impl IceAgent {
     }
 
     /// Return the selected candidate pair or an error if none was selected.
-    #[must_use]
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
     }
@@ -155,10 +154,10 @@ fn get_local_ip() -> Result<String, Error> {
     let interfaces = if_addrs::get_if_addrs().map_err(|_| Error::NetworkInterfaceError)?;
 
     for interface in interfaces {
-        if !interface.is_loopback() {
-            if let std::net::IpAddr::V4(ipv4) = interface.addr.ip() {
-                return Ok(ipv4.to_string());
-            }
+        if !interface.is_loopback()
+            && let std::net::IpAddr::V4(ipv4) = interface.addr.ip()
+        {
+            return Ok(ipv4.to_string());
         }
     }
 

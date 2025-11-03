@@ -406,20 +406,18 @@ impl Controller {
                                 actual_frame = Some(rtp_packet.frame_id);
                             }
 
-                            if rtp_packet.marker == chunks.len() as u16 {
-                                if let Some(frame_data) =
+                            if rtp_packet.marker == chunks.len() as u16
+                                && let Some(frame_data) =
                                     generate_frame_from(&mut chunks, &mut decoder)
-                                {
-                                    if let Err(e) = tx_remote_cam_receiver.send(frame_data) {
-                                        let error = ThreadsError::Fatal(e.to_string());
-                                        if tx_thread.send(error).is_err() {
-                                            eprintln!(
-                                                "[THREAD] Failed to send error to monitor, exiting thread"
-                                            );
-                                        }
-                                        break;
-                                    }
+                                && let Err(e) = tx_remote_cam_receiver.send(frame_data)
+                            {
+                                let error = ThreadsError::Fatal(e.to_string());
+                                if tx_thread.send(error).is_err() {
+                                    eprintln!(
+                                        "[THREAD] Failed to send error to monitor, exiting thread"
+                                    );
                                 }
+                                break;
                             }
                         }
                         None => {

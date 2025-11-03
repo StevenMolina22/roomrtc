@@ -102,11 +102,14 @@ impl Controller {
             .connect(remote_rtcp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
 
+        let rtcp_config = self.config.rtcp.clone();
+
         let rtcp_handler = RtcpReportHandler::new(
             self.rtcp_socket
                 .try_clone()
                 .map_err(|e| Error::CloningSocketError(e.to_string()))?,
             Arc::clone(&self.connection_status),
+            rtcp_config,
         );
         rtcp_handler
             .init_connection()
@@ -233,6 +236,7 @@ impl Controller {
         let rx_encoded = self.rx_encoded.clone();
         let tx_thread = self.tx_thread.clone();
         let status = self.connection_status.clone();
+        let payload_type = self.config.media.rtp_payload_type;
 
         let rtcp_handler = match &self.rtcp_handler {
             Some(handler_lock) => Arc::clone(handler_lock),
@@ -298,7 +302,7 @@ impl Controller {
 
                         if let Err(e) = sender.send(
                             c,
-                            96,
+                            payload_type,
                             Local::now().timestamp_millis() as u32,
                             encoded_frame.id,
                             i as u64,
@@ -323,6 +327,7 @@ impl Controller {
         let tx_remote_cam_receiver = self.tx_remote.clone();
         let tx_thread = self.tx_thread.clone();
         let status = self.connection_status.clone();
+        let rtp_timeout = self.config.rtcp.rtp_read_timeout_millis;
 
         let rtcp_handler = match &self.rtcp_handler {
             Some(handler_lock) => Arc::clone(handler_lock),
@@ -334,6 +339,7 @@ impl Controller {
                 rtp_receiver_socket,
                 rtcp_handler,
                 Arc::clone(&self.connection_status),
+                rtp_timeout,
             )
             .map_err(|e| Error::RtpReceiverError(e.to_string()))?;
 

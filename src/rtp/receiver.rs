@@ -6,9 +6,6 @@ use crate::tools::Socket;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-/// Number of milliseconds used as the read timeout on the RTP socket.
-const RTP_READ_TIMEOUT_MILLIS: u64 = 3000;
-
 /// RTP receiver that reads `RtpPacket` instances from a socket and
 /// manages RTCP reporting through a `RtcpReportHandler`.
 ///
@@ -40,9 +37,10 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         rtp_socket: S,
         report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
         connection_status: Arc<RwLock<ConnectionStatus>>,
+        rtp_read_timeout_millis: u64,
     ) -> Result<Self, Error> {
         rtp_socket
-            .set_read_timeout(Some(Duration::from_millis(RTP_READ_TIMEOUT_MILLIS)))
+            .set_read_timeout(Some(Duration::from_millis(rtp_read_timeout_millis)))
             .map_err(|_| Error::SocketConfigFailed)?;
 
         Ok(Self {

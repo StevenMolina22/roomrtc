@@ -7,11 +7,6 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
-/// How often (in seconds) a connectivity report is sent.
-const REPORT_PERIOD_MILLIS: u64 = 1000;
-const REPORT_RECEIVE_LIMIT: Duration = Duration::from_millis(1000);
-const RETRY_LIMIT: usize = 5;
-
 /// RTCP report handler that periodically sends connectivity reports and
 /// listens for incoming reports (or goodbye messages) from the peer.
 ///
@@ -20,6 +15,7 @@ const RETRY_LIMIT: usize = 5;
 pub struct RtcpReportHandler<S: Socket + Send + Sync + 'static> {
     socket: Arc<S>,
     connection_status: Arc<RwLock<ConnectionStatus>>,
+    config: crate::config::RtcpConfig,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
@@ -39,10 +35,15 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     ///
     /// # Returns
     /// A configured `RtcpReportHandler` that is ready to `start()`.
-    pub fn new(socket: S, connection_status: Arc<RwLock<ConnectionStatus>>) -> Self {
+    pub fn new(
+        socket: S,
+        connection_status: Arc<RwLock<ConnectionStatus>>,
+        config: crate::config::RtcpConfig,
+    ) -> Self {
         Self {
             socket: Arc::new(socket),
             connection_status,
+            config,
         }
     }
 
@@ -110,6 +111,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// connectivity reports until the connection is closed.
     fn start_report_sender(&self, report_socket: Arc<S>) {
         let shared_connection_status = Arc::clone(&self.connection_status);
+        let report_period_millis = self.config.report_period_millis;
         thread::spawn(move || {
             loop {
                 if let Ok(conn) = shared_connection_status.read()
@@ -128,7 +130,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     break;
                 }
 
-                thread::sleep(Duration::from_millis(REPORT_PERIOD_MILLIS));
+                thread::sleep(Duration::from_millis(report_period_millis));
             }
         });
     }
@@ -140,27 +142,32 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// and uses `try_receive_report` to parse and handle incoming data.
     fn start_report_receiver(&self, report_socket: Arc<S>) -> Result<(), Error> {
         report_socket
-            .set_read_timeout(Some(REPORT_RECEIVE_LIMIT))
+            .set_read_timeout(Some(Duration::from_millis(
+                self.config.receive_limit_millis,
+            )))
             .map_err(|_| Error::SocketConfigFailed)?;
 
         let shared_connection_status = Arc::clone(&self.connection_status);
+
+        let retry_limit = self.config.retry_limit;
+        let receive_limit = Duration::from_millis(self.config.receive_limit_millis);
 
         thread::spawn(move || {
             let mut last_report_time = Local::now();
             let mut retries = 0;
 
-            while retries < RETRY_LIMIT {
+            while retries < retry_limit {
                 if let Ok(conn) = shared_connection_status.read()
                     && *conn == ConnectionStatus::Closed
                 {
                     break;
                 }
 
-                match try_receive_report(&*report_socket, &mut last_report_time) {
+                match try_receive_report(&*report_socket, &mut last_report_time, receive_limit) {
                     Ok(()) => retries = 0,
                     Err(Error::GoodbyeReceived) => {
                         println!("Goodbye recibido!");
-                        retries = RETRY_LIMIT;
+                        retries = retry_limit;
                     }
                     Err(_) => retries += 1,
                 }
@@ -197,6 +204,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 fn try_receive_report<S: Socket + Send + Sync + 'static>(
     report_socket: &S,
     last_report_time: &mut DateTime<Local>,
+    receive_limit: Duration,
 ) -> Result<(), Error> {
     let mut buf = [0u8; 1024];
 
@@ -210,7 +218,7 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
             Some(_) => Err(Error::UnexpectedMessage),
             None => {
                 if Local::now() - *last_report_time
-                    > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT)
+                    > chrono::Duration::from_std(receive_limit)
                         .unwrap_or_else(|_| chrono::Duration::seconds(30))
                 {
                     Err(Error::TimedOut)
@@ -221,7 +229,7 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
         },
         Err(_) => {
             if Local::now() - *last_report_time
-                > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT)
+                > chrono::Duration::from_std(receive_limit)
                     .map_err(|_| Error::InvalidConfigDuration)?
             {
                 Err(Error::TimedOut)
@@ -250,7 +258,13 @@ mod tests {
         };
 
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
-        let handler = RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status));
+        let config = crate::config::RtcpConfig {
+            report_period_millis: 1000,
+            receive_limit_millis: 3000,
+            retry_limit: 5,
+            rtp_read_timeout_millis: 3000,
+        };
+        let handler = RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status), config);
 
         handler.start()?;
         thread::sleep(Duration::from_millis(100));
@@ -272,7 +286,13 @@ mod tests {
             sent_data: Arc::new(Mutex::new(Vec::new())),
         };
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
-        let handler = RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status));
+        let config = crate::config::RtcpConfig {
+            report_period_millis: 1000,
+            receive_limit_millis: 3000,
+            retry_limit: 5,
+            rtp_read_timeout_millis: 3000,
+        };
+        let handler = RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status), config);
 
         handler.close_connection()?;
 
@@ -291,12 +311,18 @@ mod tests {
         };
 
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
-        let handler = RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status));
+        let config = crate::config::RtcpConfig {
+            report_period_millis: 1000,
+            receive_limit_millis: 3000,
+            retry_limit: 5,
+            rtp_read_timeout_millis: 3000,
+        };
+        let handler = RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status), config);
 
         handler.start()?;
 
         #[allow(clippy::cast_possible_truncation)]
-        let wait_time = REPORT_RECEIVE_LIMIT * (RETRY_LIMIT as u32 + 1);
+        let wait_time = Duration::from_millis(1000) * (5_u32 + 1);
         thread::sleep(wait_time);
 
         let status = *connection_status

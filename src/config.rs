@@ -75,6 +75,9 @@ pub struct RtcpConfig {
     /// Number of consecutive receive timeouts before closing the
     /// connection.
     pub retry_limit: usize,
+
+    /// RTP socket read timeout in milliseconds.
+    pub rtp_read_timeout_millis: u64,
 }
 
 impl Config {
@@ -161,6 +164,10 @@ impl Config {
                 retry_limit: rtcp_section
                     .get("retry_limit")
                     .ok_or("Missing retry_limit")?
+                    .parse()?,
+                rtp_read_timeout_millis: rtcp_section
+                    .get("rtp_read_timeout_millis")
+                    .ok_or("Missing rtp_read_timeout_millis")?
                     .parse()?,
             },
         })

@@ -5,12 +5,13 @@ use crate::frame_handler::Frame;
 use eframe::egui;
 use eframe::epaint::{Color32, FontId};
 use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::sync::mpsc::Receiver;
 
 pub struct RoomRTCApp {
     view: View,
     controller: Controller,
+    config: Arc<Config>,
 
     //Receivers
     rx_local: Receiver<Frame>,
@@ -32,11 +33,13 @@ impl RoomRTCApp {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
         let (tx_event, rx_event) = mpsc::channel();
-        let controller = Controller::new(tx_local, tx_remote, tx_event, config.clone()).unwrap();
+        let conf = Arc::new(config);
+        let controller = Controller::new(tx_local, tx_remote, tx_event, conf.clone()).unwrap();
 
         Self {
             view: View::default(),
             controller,
+            config: conf,
             rx_local,
             rx_remote,
             rx_event,
@@ -128,7 +131,9 @@ impl RoomRTCApp {
 
             let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
-                self.controller.shut_down().unwrap();
+                if let Err(e) = self.controller.shut_down() {
+                    eprintln!("{}", e);
+                }
                 self.reset();
                 self.view = View::Menu;
             }
@@ -261,9 +266,7 @@ impl RoomRTCApp {
         self.local_texture = None;
         self.remote_texture = None;
 
-        self.controller
-            .reset(tx_local, tx_remote, tx_event)
-            .unwrap();
+        self.controller = Controller::new(tx_local, tx_remote, tx_event, self.config.clone()).unwrap();
     }
 }
 

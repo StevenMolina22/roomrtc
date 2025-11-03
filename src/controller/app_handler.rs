@@ -18,7 +18,7 @@ use crate::rtcp::RtcpReportHandler;
 
 pub struct Controller {
     pub client: Client,
-    pub config: Config,
+    pub config: Arc<Config>,
 
     //Channels
     pub tx_encoded: Sender<EncodedFrame>,
@@ -46,7 +46,7 @@ impl Controller {
         tx_local: Sender<Frame>,
         tx_remote: Sender<Frame>,
         tx_event: Sender<String>,
-        config: Config,
+        config: Arc<Config>,
     ) -> Result<Self, Error> {
         let (tx_encoded, rx_encoded) = channel();
         let (tx_thread, rx_thread) = channel();
@@ -407,7 +407,6 @@ impl Controller {
     }
 
     pub fn reset(&mut self, tx_local: Sender<Frame>, tx_remote: Sender<Frame>, tx_event: Sender<String>) -> Result<(), Error> {
-
         let (tx_encoded, rx_encoded) = channel();
         let (tx_thread, rx_thread) = channel();
 

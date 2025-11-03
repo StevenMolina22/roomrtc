@@ -30,7 +30,7 @@ impl Decoder {
     /// Decodes a single H.264-encoded frame into raw YUV data.
     ///
     /// Takes a slice of encoded H.264 bytes and attempts to decode it
-    /// into a [`RGB`] frame data.
+    /// into a `RGB` frame data.
     /// The decoded frame data can then be displayed.
     ///
     /// # Errors

@@ -1,4 +1,6 @@
-# Taller de Programacion {Los Compiladores Felices}
+# Taller de Programación
+### **Grupo:** *Los Compiladores Felices*
+### **Trabajo Práctico:** **RoomRTC**
 
 ## Integrantes
 - Molina Buitrago, Marlon Stiven (112018)
@@ -10,19 +12,32 @@
 
 A continuacion se detallan los pasos para compilar y ejecutar el programa.
 
-### Compilacion
+### Compilación
+
+```bash
+  cargo build --release
+```
 
 ### Como correr
+
+```bash
+  ./target/release/room-rtc /path/to/file.conf
+```
+
+O, alternativamente con cargo run:
+
+```bash
+  cargo run /path/to/file.conf
+```
 
 ## Como testear
 
 ```bash
-# Terminal 1
-cargo run --bin client 0 > offer.sdp
+  cargo test
+```
 
-# Terminal 2
-cat offer.sdp | cargo run --bin client 1 > answer.sdp
+## Como abrir documentación
 
-# Terminal 3
-cat answer.sdp | cargo run --bin client 0
+```bash
+  cargo doc --open
 ```

@@ -158,7 +158,7 @@ mod tests {
                 assert_eq!(rate, 48000);
                 assert_eq!(params, Some("2".to_string()));
             }
-            _ => panic!("Expected Attribute::RTPMap"),
+            Attribute::Candidate(_) => panic!("Expected Attribute::RTPMap"),
         }
         Ok(())
     }
@@ -175,7 +175,7 @@ mod tests {
                 assert_eq!(rate, 8000);
                 assert!(params.is_none());
             }
-            _ => panic!("Expected Attribute::RTPMap"),
+            Attribute::Candidate(_) => panic!("Expected Attribute::RTPMap"),
         }
         Ok(())
     }
@@ -236,7 +236,7 @@ mod tests {
                 assert_eq!(cand.port, 54400);
                 assert!(matches!(cand.candidate_type, CandidateType::Host));
             }
-            _ => panic!("Expected Attribute::Candidate"),
+            Attribute::RTPMap(..) => panic!("Expected Attribute::Candidate"),
         }
         Ok(())
     }

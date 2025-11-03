@@ -1,6 +1,6 @@
 /// Represents the current state of the RTP connection.
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum ConnectionStatus {
     /// The connection is open and active.
     Open,

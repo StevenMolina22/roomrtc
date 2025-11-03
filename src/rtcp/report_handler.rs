@@ -254,13 +254,13 @@ mod tests {
         handler.start()?;
         thread::sleep(Duration::from_millis(100));
 
-        let status = connection_status
+        let status = *connection_status
             .read()
             .map_err(|_| Error::ConnectionStatusLockFailed)?;
-        assert_eq!(*status, ConnectionStatus::Open);
+        assert_eq!(status, ConnectionStatus::Open);
 
-        let sent = sent_data.lock().map_err(|_| Error::PoisonedLock)?;
-        assert_eq!(sent[0], RtcpPacket::ConnectivityReport.as_bytes());
+        let sent = sent_data.lock().map_err(|_| Error::PoisonedLock)?[0].clone();
+        assert_eq!(sent, RtcpPacket::ConnectivityReport.as_bytes());
         Ok(())
     }
 
@@ -275,10 +275,10 @@ mod tests {
 
         handler.close_connection()?;
 
-        let status = connection_status
+        let status = *connection_status
             .read()
             .map_err(|_| Error::ConnectionStatusLockFailed)?;
-        assert_eq!(*status, ConnectionStatus::Closed);
+        assert_eq!(status, ConnectionStatus::Closed);
         Ok(())
     }
 
@@ -294,13 +294,14 @@ mod tests {
 
         handler.start()?;
 
+        #[allow(clippy::cast_possible_truncation)]
         let wait_time = REPORT_RECEIVE_LIMIT * (RETRY_LIMIT as u32 + 1);
         thread::sleep(wait_time);
 
-        let status = connection_status
+        let status = *connection_status
             .read()
             .map_err(|_| Error::ConnectionStatusLockFailed)?;
-        assert_eq!(*status, ConnectionStatus::Closed);
+        assert_eq!(status, ConnectionStatus::Closed);
         Ok(())
     }
 }

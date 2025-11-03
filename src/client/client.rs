@@ -27,7 +27,27 @@ pub struct Client {
 }
 
 impl Client {
-    #[must_use] 
+    /// Create a new `Client` using the provided media port and codec
+    /// configuration.
+    ///
+    /// Parameters:
+    /// - `media_port`: UDP port where ICE candidate gathering is performed
+    ///   and where the endpoint expects/receives RTP packets.
+    /// - `media_config`: media stream configuration (payload type, codec
+    ///   name and clock rate).
+    ///
+    /// This method performs the following steps:
+    /// 1. Creates an `IceAgent` and calls `gather_candidates` to obtain
+    ///    local candidates.
+    /// 2. Builds a local `MediaDescription` and adds an `rtpmap` attribute
+    ///    (and a `candidate` attribute if a local candidate is available).
+    /// 3. Initializes the local `SessionDescriptionProtocol` and, if a
+    ///    local candidate exists, sets the connection data (`c=`) to the
+    ///    candidate's IP address.
+    ///
+    /// # Returns
+    /// Returns a `Client` containing the local SDP and an `IceAgent`
+    /// already configured with (potentially) gathered candidates.
     pub fn new(media_port: u16, media_config: MediaConfig) -> Self {
         let mut ice_agent = IceAgent::new();
         assert!(ice_agent.gather_candidates(media_port).is_ok(), "Failed to gather ICE candidates");

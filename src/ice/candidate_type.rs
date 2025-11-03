@@ -21,7 +21,6 @@ impl CandidateType {
     /// The returned value is the type preference used when computing a
     /// candidate's overall priority. It is a small integer (u32) that
     /// reflects how desirable the candidate type is (higher is better).
-
     #[must_use]
     pub const fn priority(&self) -> u32 {
         match self {

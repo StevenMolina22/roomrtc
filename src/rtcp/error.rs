@@ -35,7 +35,7 @@ pub enum RtcpError {
 }
 
 impl Display for RtcpError {
-    /// Format the RTCP error as a short human-readable string.
+    /// Format the RTCP error as a short string.
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PoisonedLock => write!(f, "Error: Poisoned lock"),
@@ -53,11 +53,12 @@ impl Display for RtcpError {
                 write!(f, "Error: \"Invalid configuration duration\"")
             }
             Self::SendFailed(e) => {
-                write!(f, "Error: \"Failed to send RTCP packet. Details: {e}\"")
+                write!(f, "Error: \"Failed to send RTCP packet. Details: {}\"", e)
             }
             Self::ReceiveFailed(e) => write!(
                 f,
-                "Error: \"Failed to receive RTCP packet. Details: {e}\""
+                "Error: \"Failed to receive RTCP packet. Details: {}\"",
+                e
             ),
             Self::UnexpectedMessage => write!(f, "Error: Unexpected message"),
         }

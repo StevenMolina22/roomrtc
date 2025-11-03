@@ -1,7 +1,7 @@
+use crate::config::MediaConfig;
+
 use super::{error::FrameError as Error, frame::Frame};
-use openh264::encoder::{
-    EncodedBitStream, Encoder as H264Encoder, EncoderConfig, IntraFramePeriod,
-};
+use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
 
 /// A basic H.264 video encoder using the OpenH264 library.
@@ -28,14 +28,14 @@ impl Encoder {
     ///
     /// Returns [`Error::EncoderIntializationError`] if the encoder cannot
     /// be created by the OpenH264 library.
-    pub fn new() -> Result<Self, Error> {
+    pub fn new(media_config: &MediaConfig) -> Result<Self, Error> {
         let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
 
         Ok(Self {
             encoder,
             frame_count: 0,
-            idr_interval: 15,
-            max_chunk_size: 1200,
+            idr_interval: media_config.h264_idr_interval,
+            max_chunk_size: media_config.rtp_max_chunk_size,
         })
     }
 
@@ -57,7 +57,10 @@ impl Encoder {
             self.encoder.force_intra_frame();
         }
 
-        let nalus = self.encoder.encode(&yuv).map_err(|_| Error::EncodingError)?;
+        let nalus = self
+            .encoder
+            .encode(&yuv)
+            .map_err(|_| Error::EncodingError)?;
         let chunks = generate_chunks_from_nalus(nalus, self.max_chunk_size);
 
         self.frame_count += 1;

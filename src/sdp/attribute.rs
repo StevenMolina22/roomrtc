@@ -10,6 +10,7 @@ const RTPMAP_ATTR_KEY: &str = "rtpmap";
 #[derive(Clone)]
 pub enum Attribute {
     Candidate(Candidate),
+    // (rtp_payload_type, rtp_codec_name, rtp_clock_rate, rtp_encoding_params)
     RTPMap(u8, String, u32, Option<String>),
 }
 
@@ -263,7 +264,7 @@ mod tests {
     fn test_candidate_from_str_invalid_port() {
         let candidate = "candidate:1 1 udp 2122252543 192.168.1.5 port typ host";
         let attr = Attribute::from_str(candidate);
-        
+
         assert!(matches!(attr, Err(Error::InvalidPortError)));
     }
 

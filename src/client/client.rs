@@ -1,5 +1,6 @@
 use super::error::ClientError as Error;
 use crate::{
+    config::MediaConfig,
     ice::IceAgent,
     sdp::{Attribute, MediaDescription, SessionDescriptionProtocol},
 };
@@ -8,7 +9,7 @@ use std::str::FromStr;
 
 const MEDIA_TYPE: &str = "video";
 const MEDIA_PROTOCOL: &str = "RTP/AVP";
-const MEDIA_FMT: u8 = 111;
+// const MEDIA_FMT: u8 = 111;
 
 pub struct Client {
     pub sdp: SessionDescriptionProtocol,
@@ -16,7 +17,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(media_port: u16) -> Self {
+    pub fn new(media_port: u16, media_config: MediaConfig) -> Self {
         let mut ice_agent = IceAgent::new();
         if ice_agent.gather_candidates(media_port).is_err() {
             panic!("Failed to gather ICE candidates");
@@ -26,10 +27,15 @@ impl Client {
             MEDIA_TYPE.into(),
             media_port,
             MEDIA_PROTOCOL.into(),
-            HashSet::from([MEDIA_FMT]),
+            HashSet::from([media_config.rtp_payload_type]),
         );
         media_description
-            .add_attribute(Attribute::RTPMap(111, "H264".into(), 48000, None))
+            .add_attribute(Attribute::RTPMap(
+                media_config.rtp_payload_type,
+                media_config.codec_name.clone(),
+                media_config.clock_rate,
+                None,
+            ))
             .unwrap();
 
         if let Some(candidate) = ice_agent.get_local_candidate() {

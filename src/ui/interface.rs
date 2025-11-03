@@ -1,11 +1,12 @@
-use std::sync::{mpsc};
-use std::sync::mpsc::Receiver;
+use super::views::View;
+use crate::config::Config;
+use crate::controller::Controller;
+use crate::frame_handler::Frame;
 use eframe::egui;
 use eframe::epaint::{Color32, FontId};
 use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
-use super::views::View;
-use crate::{controller::Controller};
-use crate::frame_handler::Frame;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
 
 pub struct RoomRTCApp {
     view: View,
@@ -27,11 +28,11 @@ pub struct RoomRTCApp {
 }
 
 impl RoomRTCApp {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
         let (tx_event, rx_event) = mpsc::channel();
-        let controller = Controller::new(tx_local, tx_remote, tx_event).unwrap();
+        let controller = Controller::new(tx_local, tx_remote, tx_event, config.clone()).unwrap();
 
         Self {
             view: View::default(),
@@ -62,8 +63,7 @@ impl eframe::App for RoomRTCApp {
                 View::Menu => self.show_menu(ui),
                 View::Connection => self.show_connection(ui),
                 View::Call => self.show_call(ctx, ui),
-                View::Error => {
-                    self.show_error(ui)},
+                View::Error => self.show_error(ui),
             }
 
             ctx.request_repaint();
@@ -108,7 +108,7 @@ impl RoomRTCApp {
         }
     }
 
-    fn show_call(&mut self, ctx: & Context, ui: &mut Ui) {
+    fn show_call(&mut self, ctx: &Context, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
             ui.heading("Llamada");
             ui.add_space(20.0);
@@ -180,15 +180,29 @@ impl RoomRTCApp {
 
             let join_btn = egui::Button::new("Join Call");
             if ui.add(join_btn).clicked() {
-                self.controller.start_call().unwrap();
-                self.view = View::Call;
+                if let Err(e) = self.controller.start_call() {
+                    eprintln!("Failed to start call: {}", e);
+                    // TODO: Show this error in the GUI
+                } else {
+                    if self.controller.join().is_err() {
+                        self.view = View::Error
+                    } else {
+                        self.controller.start_call().unwrap();
+                        self.view = View::Call;
+                    }
+                }
             }
         }
     }
 
     fn update_video_textures(&mut self, ctx: &Context) {
         update_camera_view(ctx, &self.rx_local, &mut self.local_texture, "local_camera");
-        update_camera_view(ctx, &self.rx_remote, &mut self.remote_texture, "remote_camera");
+        update_camera_view(
+            ctx,
+            &self.rx_remote,
+            &mut self.remote_texture,
+            "remote_camera",
+        );
     }
 
     fn show_local_camera(&mut self, ui: &mut Ui) {
@@ -254,7 +268,9 @@ impl RoomRTCApp {
         self.local_texture = None;
         self.remote_texture = None;
 
-        self.controller.reset(tx_local, tx_remote, tx_event).unwrap();
+        self.controller
+            .reset(tx_local, tx_remote, tx_event)
+            .unwrap();
     }
 }
 

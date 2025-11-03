@@ -138,6 +138,12 @@ impl IceAgent {
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
     }
+    
+    pub fn clean_remote_candidates(&mut self)  {
+        self.remote_candidates.clear();
+        self.candidate_pairs.clear();
+        self.selected_pair = None;
+    }
 }
 
 /// Get a non-loopback IPv4 address from the host using `if_addrs`.

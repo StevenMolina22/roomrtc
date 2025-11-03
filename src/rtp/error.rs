@@ -12,7 +12,7 @@ pub enum RtpError {
     /// Failed to send through the socket.
     SendFailed,
     /// Failed to receive from the socket.
-    ReceiveFailed,
+    ReceiveFailed(String),
     /// The received RTP packet was invalid, malformed, or corrupted.
     InvalidRtpPacket,
     /// Failed to terminate an active RTP connection or related thread.
@@ -23,22 +23,25 @@ pub enum RtpError {
     ConnectionStatusLockFailed,
     /// RTCP Error
     RTCPError(String),
+    /// Poisoned lock
+    PoisonedLock,
 }
 
 impl Display for RtpError {
     /// Format the error as a short human-readable message.
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            RtpError::AddrNotAvailable => write!(f, "Error: \"Address not available\""),
-            RtpError::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
-            RtpError::SendFailed => write!(f, "Error: \"Failed to send RTP packet\""),
-            RtpError::ReceiveFailed => write!(f, "Error: \"Failed to receive RTP packet\""),
-            RtpError::InvalidRtpPacket => write!(f, "Error: \"Invalid or corrupted RTP packet\""),
-            RtpError::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
-            RtpError::TerminateFailed => write!(f, "Error: \"Failed to terminate\""),
-            RtpError::ConnectionClosed => write!(f, "Error: \"Connection closed\""),
-            RtpError::RTCPError(e) => write!(f, "{}", e),
-            RtpError::ConnectionStatusLockFailed => write!(f, "Error: \"Failed to acquire connection status lock\""),
+            Self::AddrNotAvailable => write!(f, "Error: \"Address not available\""),
+            Self::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
+            Self::SendFailed => write!(f, "Error: \"Failed to send RTP packet\""),
+            Self::ReceiveFailed(e) => write!(f, "Error: \"Failed to receive RTP packet. Details: {}\"", e),
+            Self::InvalidRtpPacket => write!(f, "Error: \"Invalid or corrupted RTP packet\""),
+            Self::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
+            Self::TerminateFailed => write!(f, "Error: \"Failed to terminate\""),
+            Self::ConnectionClosed => write!(f, "Error: \"Connection closed\""),
+            Self::RTCPError(e) => write!(f, "{}", e),
+            Self::ConnectionStatusLockFailed => write!(f, "Error: \"Failed to acquire connection status lock\""),
+            Self::PoisonedLock => write!(f, "Error: \"The mutex was poisoned\""),
         }
     }
 }

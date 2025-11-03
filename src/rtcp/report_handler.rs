@@ -2,21 +2,14 @@ use chrono::{DateTime, Local};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-
-use crate::rtcp::RtcpError;
+use crate::rtcp::RtcpError as Error;
 use crate::rtcp::RtcpPacket;
 use crate::rtp::ConnectionStatus;
 use crate::tools::Socket;
 
 /// How often (in seconds) a connectivity report is sent.
 const REPORT_PERIOD_MILLIS: u64 = 1000;
-
-/// How long the receiver waits for a report before considering it a
-/// receive timeout.
-const REPORT_RECEIVE_LIMIT: Duration = Duration::from_millis(3000);
-
-/// How many consecutive receive failures to tolerate before closing the
-/// connection.
+const REPORT_RECEIVE_LIMIT: Duration = Duration::from_millis(1000);
 const RETRY_LIMIT: usize = 5;
 
 /// RTCP report handler that periodically sends connectivity reports and
@@ -39,12 +32,43 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         }
     }
 
-    /// Start the report sender and receiver threads.
-    ///
-    /// The receiver thread is started first (it configures the socket
-    /// timeout), then the sender thread is spawned. Returns an error if
-    /// the receiver setup fails.
-    pub fn start(&self) -> Result<(), RtcpError> {
+    pub fn init_connection(&self) -> Result<(), Error> {
+        if let Err(e) = self.socket.send(RtcpPacket::Hello.as_bytes()) {
+            eprintln!("{}", e);
+        }
+
+        let mut ready = false;
+
+        loop {
+            let mut buff = [0u8; 1024];
+            match self.socket.recv_from(&mut buff) {
+                Ok((size, _addr)) => {
+                    match RtcpPacket::from_bytes(&buff[..size]) {
+                        Some(RtcpPacket::Hello) => {
+                            self.socket.send(RtcpPacket::Ready.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
+                        },
+                        Some(RtcpPacket::Ready) => {
+                            if ready {
+                                break;
+                            } else {
+                                ready = true;
+                                self.socket.send(RtcpPacket::Ready.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
+                                let mut conn = self.connection_status.write()
+                                    .map_err(|_| Error::ConnectionStatusLockFailed)?;
+                                *conn = ConnectionStatus::Open;
+                            }
+                        },
+                        Some(_) => return Err(Error::UnexpectedMessage),
+                        None => continue,
+                    }
+                }
+                Err(e) => return Err(Error::ReceiveFailed(e.to_string())),
+            }
+        }
+        Ok(())
+    }
+    
+    pub fn start(&self) -> Result<(), Error> {
         let sender_socket = Arc::clone(&self.socket);
         let receiver_socket = Arc::clone(&self.socket);
 
@@ -79,12 +103,10 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         });
     }
 
-    /// Configure the socket and spawn the receiver thread responsible for
-    /// reading incoming RTCP reports.
-    fn start_report_receiver(&self, report_socket: Arc<S>) -> Result<(), RtcpError> {
+    fn start_report_receiver(&self, report_socket: Arc<S>) -> Result<(), Error> {
         report_socket
             .set_read_timeout(Some(REPORT_RECEIVE_LIMIT))
-            .map_err(|_| RtcpError::SocketConfigFailed)?;
+            .map_err(|_| Error::SocketConfigFailed)?;
 
         let shared_connection_status = Arc::clone(&self.connection_status);
 
@@ -101,7 +123,10 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
                 match try_receive_report(&*report_socket, &mut last_report_time) {
                     Ok(_) => retries = 0,
-                    Err(RtcpError::GoodbyeReceived) => retries = RETRY_LIMIT,
+                    Err(Error::GoodbyeReceived) => {
+                        println!("Goodbye recibido!");
+                        retries = RETRY_LIMIT
+                    },
                     Err(_) => retries += 1,
                 };
             }
@@ -114,13 +139,12 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         Ok(())
     }
 
-    /// Close the connection by setting the connection status and sending
-    /// a Goodbye RTCP packet.
-    pub fn close_connection(&self) -> Result<(), RtcpError> {
+    pub fn close_connection(&self) -> Result<(), Error> {
         if let Ok(mut conn) = self.connection_status.write() {
             *conn = ConnectionStatus::Closed;
         }
 
+        println!("envio goodbye");
         let _ = self.socket.send(RtcpPacket::Goodbye.as_bytes());
         Ok(())
     }
@@ -133,7 +157,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 fn try_receive_report<S: Socket + Send + Sync + 'static>(
     report_socket: &S,
     last_report_time: &mut DateTime<Local>,
-) -> Result<(), RtcpError> {
+) -> Result<(), Error> {
     let mut buf = [0u8; 1024];
 
     match report_socket.recv_from(&mut buf) {
@@ -142,12 +166,13 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
                 *last_report_time = Local::now();
                 Ok(())
             }
-            Some(RtcpPacket::Goodbye) => Err(RtcpError::GoodbyeReceived),
+            Some(RtcpPacket::Goodbye) => Err(Error::GoodbyeReceived),
+            Some(_) => Err(Error::UnexpectedMessage),
             None => {
                 if Local::now() - *last_report_time
                     > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT).unwrap()
                 {
-                    Err(RtcpError::TimedOut)
+                    Err(Error::TimedOut)
                 } else {
                     Ok(())
                 }
@@ -156,9 +181,9 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
         Err(_) => {
             if Local::now() - *last_report_time
                 > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT)
-                    .map_err(|_| RtcpError::InvalidConfigDuration)?
+                    .map_err(|_| Error::InvalidConfigDuration)?
             {
-                Err(RtcpError::TimedOut)
+                Err(Error::TimedOut)
             } else {
                 Ok(())
             }
@@ -175,7 +200,7 @@ mod tests {
     use std::sync::{Arc, Mutex, RwLock};
 
     #[test]
-    fn test_report_handler_receives_connectivity_report() -> Result<(), RtcpError> {
+    fn test_report_handler_receives_connectivity_report() -> Result<(), Error> {
         let data_to_receive = vec![RtcpPacket::ConnectivityReport.as_bytes().to_vec()];
         let sent_data = Arc::new(Mutex::new(Vec::new()));
         let mock_socket = MockSocket {
@@ -191,16 +216,16 @@ mod tests {
 
         let status = connection_status
             .read()
-            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
+            .map_err(|_| Error::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Open);
 
-        let sent = sent_data.lock().map_err(|_| RtcpError::PoisonedLock)?;
+        let sent = sent_data.lock().map_err(|_| Error::PoisonedLock)?;
         assert_eq!(sent[0], RtcpPacket::ConnectivityReport.as_bytes());
         Ok(())
     }
 
     #[test]
-    fn test_close_connection_sets_status_closed() -> Result<(), RtcpError> {
+    fn test_close_connection_sets_status_closed() -> Result<(), Error> {
         let mock_socket = MockSocket {
             data_to_receive: vec![],
             sent_data: Arc::new(Mutex::new(Vec::new())),
@@ -212,13 +237,13 @@ mod tests {
 
         let status = connection_status
             .read()
-            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
+            .map_err(|_| Error::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Closed);
         Ok(())
     }
 
     #[test]
-    fn test_connection_closes_after_inactivity() -> Result<(), RtcpError> {
+    fn test_connection_closes_after_inactivity() -> Result<(), Error> {
         let mock_socket = MockSocket {
             data_to_receive: vec![],
             sent_data: Arc::new(Mutex::new(Vec::new())),
@@ -234,7 +259,7 @@ mod tests {
 
         let status = connection_status
             .read()
-            .map_err(|_| RtcpError::ConnectionStatusLockFailed)?;
+            .map_err(|_| Error::ConnectionStatusLockFailed)?;
         assert_eq!(*status, ConnectionStatus::Closed);
         Ok(())
     }

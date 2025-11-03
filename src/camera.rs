@@ -1,3 +1,4 @@
+use crate::config::MediaConfig;
 use crate::frame_handler::Frame;
 use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
@@ -18,16 +19,15 @@ pub struct Camera {
 
     /// Monotonic counter used to assign `Frame.id` values.
     frame_id: Arc<RwLock<usize>>,
+    media_config: MediaConfig,
 }
 
 impl Camera {
-    /// Create a new `Camera`. The capture thread is not
-    /// started automatically; call `start()` to begin producing
-    /// frames.
-    pub fn new() -> Self {
+    pub fn new(media_config: MediaConfig) -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
             frame_id: Arc::new(RwLock::new(0)),
+            media_config,
         }
     }
 
@@ -37,24 +37,31 @@ impl Camera {
         *running.write().unwrap() = true;
         let frame_id = self.frame_id.clone();
 
+        let config = self.media_config.clone();
+
         thread::spawn(move || {
-            let mut cam = match videoio::VideoCapture::new(0, videoio::CAP_ANY) {
-                Ok(cam) => cam,
-                Err(e) => {
-                    eprintln!("Failed to open camera: {}. Stopping camera thread.", e);
-                    return; // Exit thread
-                }
-            };
+            let mut cam =
+                match videoio::VideoCapture::new(config.camera_index as i32, videoio::CAP_ANY) {
+                    Ok(cam) => cam,
+                    Err(e) => {
+                        eprintln!("Failed to open camera: {}. Stopping camera thread.", e);
+                        return;
+                    }
+                };
 
             if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
                 eprintln!("Camera is not open. Stopping camera thread.");
-                return; // Exit thread
+                return;
             }
-            cam.set(videoio::CAP_PROP_FRAME_WIDTH, 640.0).unwrap();
-            cam.set(videoio::CAP_PROP_FRAME_HEIGHT, 480.0).unwrap();
+            cam.set(videoio::CAP_PROP_FRAME_WIDTH, config.frame_width)
+                .unwrap();
+            cam.set(videoio::CAP_PROP_FRAME_HEIGHT, config.frame_height)
+                .unwrap();
 
             let mut mat = Mat::default();
             let mut rgb = Mat::default();
+
+            let frame_duration = Duration::from_millis(1000 / config.frame_rate as u64);
 
             while *running.read().unwrap() {
                 if !cam.read(&mut mat).unwrap() || mat.empty() {
@@ -82,7 +89,7 @@ impl Camera {
                     break;
                 }
 
-                thread::sleep(Duration::from_millis(33));
+                thread::sleep(frame_duration);
             }
         });
 

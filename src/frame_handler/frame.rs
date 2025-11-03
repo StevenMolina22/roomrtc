@@ -1,5 +1,5 @@
 use super::FrameError as Error;
-use opencv::imgproc;
+use opencv::{imgproc, };
 use opencv::prelude::*;
 
 /// An in-memory video frame used by the frame handler.

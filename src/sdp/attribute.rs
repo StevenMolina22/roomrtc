@@ -18,9 +18,7 @@ const RTPMAP_ATTR_KEY: &str = "rtpmap";
 pub enum Attribute {
     /// An ICE candidate attribute containing a full `Candidate`.
     Candidate(Candidate),
-
-    /// An `rtpmap` attribute with payload type, encoding name, clock
-    /// rate and optional encoding parameters.
+    // (rtp_payload_type, rtp_codec_name, rtp_clock_rate, rtp_encoding_params)
     RTPMap(u8, String, u32, Option<String>),
 }
 
@@ -87,9 +85,10 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
         .map_err(|_| Error::InvalidRtpMapFormatError)?;
 
     let mut parts = parts[1].split('/');
-    let encoding_name = parts.next()
-        .filter(|s| !s.is_empty())
-        .ok_or(Error::MissingEncodingNameError)?;
+    let encoding_name = parts.next().ok_or(Error::MissingEncodingNameError)?;
+    if encoding_name.is_empty() {
+        return Err(Error::MissingEncodingNameError);
+    }
     let clock_rate = parts
         .next()
         .ok_or(Error::MissingClockRateError)?
@@ -292,7 +291,7 @@ mod tests {
     fn test_candidate_from_str_invalid_port() {
         let candidate = "candidate:1 1 udp 2122252543 192.168.1.5 port typ host";
         let attr = Attribute::from_str(candidate);
-        
+
         assert!(matches!(attr, Err(Error::InvalidPortError)));
     }
 

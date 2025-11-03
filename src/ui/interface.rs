@@ -1,15 +1,17 @@
-use std::sync::{mpsc};
-use std::sync::mpsc::Receiver;
+use super::views::View;
+use crate::config::Config;
+use crate::controller::Controller;
+use crate::frame_handler::Frame;
 use eframe::egui;
 use eframe::epaint::{Color32, FontId};
 use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
-use super::views::View;
-use crate::{controller::Controller};
-use crate::frame_handler::Frame;
+use std::sync::{mpsc, Arc};
+use std::sync::mpsc::Receiver;
 
 pub struct RoomRTCApp {
     view: View,
     controller: Controller,
+    config: Arc<Config>,
 
     //Receivers
     rx_local: Receiver<Frame>,
@@ -27,15 +29,17 @@ pub struct RoomRTCApp {
 }
 
 impl RoomRTCApp {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
         let (tx_event, rx_event) = mpsc::channel();
-        let controller = Controller::new(tx_local, tx_remote, tx_event).unwrap();
+        let conf = Arc::new(config);
+        let controller = Controller::new(tx_local, tx_remote, tx_event, conf.clone()).unwrap();
 
         Self {
             view: View::default(),
             controller,
+            config: conf,
             rx_local,
             rx_remote,
             rx_event,
@@ -53,6 +57,8 @@ impl eframe::App for RoomRTCApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
             while let Ok(_) = self.rx_event.try_recv() {
+                self.controller.stop_local_camera().unwrap();
+                self.reset();
                 self.view = View::Error;
             }
 
@@ -60,9 +66,7 @@ impl eframe::App for RoomRTCApp {
                 View::Menu => self.show_menu(ui),
                 View::Connection => self.show_connection(ui),
                 View::Call => self.show_call(ctx, ui),
-                View::WaitingForPeer => self.show_waiting(ui),
-                View::Error => {
-                    self.show_error(ui)},
+                View::Error => self.show_error(ui),
             }
 
             ctx.request_repaint();
@@ -107,7 +111,7 @@ impl RoomRTCApp {
         }
     }
 
-    fn show_call(&mut self, ctx: & Context, ui: &mut Ui) {
+    fn show_call(&mut self, ctx: &Context, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
             ui.heading("Llamada");
             ui.add_space(20.0);
@@ -117,15 +121,20 @@ impl RoomRTCApp {
             ui.horizontal_centered(|ui| {
                 ui.vertical(|ui| {
                     self.show_local_camera(ui);
+                    ctx.request_repaint();
                 });
                 ui.vertical(|ui| {
                     self.show_remote_camera(ui);
+                    ctx.request_repaint();
                 });
             });
 
             let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
-                self.controller.shut_down().unwrap();
+                if let Err(e) = self.controller.shut_down() {
+                    eprintln!("{}", e);
+                }
+                self.reset();
                 self.view = View::Menu;
             }
         });
@@ -145,10 +154,9 @@ impl RoomRTCApp {
             if ui.button("Connect").clicked() {
                 if let Err(e) = self.controller.client.process_answer(&self.remote_sdp) {
                     eprintln!("Failed to process answer: {}", e);
-                    // TODO: Show this error in the GUI
                 } else {
                     self.controller.start_call().unwrap();
-                    self.view = View::WaitingForPeer;
+                    self.view = View::Call;
                 }
             }
         }
@@ -179,23 +187,20 @@ impl RoomRTCApp {
             if ui.add(join_btn).clicked() {
                 if let Err(e) = self.controller.start_call() {
                     eprintln!("Failed to start call: {}", e);
-                    // TODO: Show this error in the GUI
-                } else {
-                    if self.controller.join().is_err() {
-                       self.view = View::Error 
-                    } else {
-                        self.controller.start_call().unwrap();
-                        self.view = View::Call;
-                    }
                 }
+                self.view = View::Call;
             }
         }
     }
 
-
     fn update_video_textures(&mut self, ctx: &Context) {
         update_camera_view(ctx, &self.rx_local, &mut self.local_texture, "local_camera");
-        update_camera_view(ctx, &self.rx_remote, &mut self.remote_texture, "remote_camera");
+        update_camera_view(
+            ctx,
+            &self.rx_remote,
+            &mut self.remote_texture,
+            "remote_camera",
+        );
     }
 
     fn show_local_camera(&mut self, ui: &mut Ui) {
@@ -249,20 +254,19 @@ impl RoomRTCApp {
         });
     }
 
-    fn show_waiting(&mut self, ui: &mut Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(50.0);
+    pub fn reset(&mut self) {
+        let (tx_local, rx_local) = mpsc::channel();
+        let (tx_remote, rx_remote) = mpsc::channel();
+        let (tx_event, rx_event) = mpsc::channel();
 
-            ui.label(
-                RichText::new("Waiting for other peer...")
-                    .color(Color32::WHITE)
-                    .font(FontId::proportional(28.0)),
-            );
+        self.rx_local = rx_local;
+        self.rx_remote = rx_remote;
+        self.rx_event = rx_event;
 
-            self.controller.wait_for_peer_connection().unwrap();
-            self.controller.start_call().unwrap();
-            self.view = View::Call;
-        });
+        self.local_texture = None;
+        self.remote_texture = None;
+
+        self.controller = Controller::new(tx_local, tx_remote, tx_event, self.config.clone()).unwrap();
     }
 }
 

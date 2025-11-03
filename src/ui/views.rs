@@ -15,8 +15,6 @@ pub enum View {
     /// A view that shows connection details or connection status.
     Connection,
 
-    /// Shown while waiting for the remote peer to join/answer.
-    WaitingForPeer,
 
     /// Generic error view to show unrecoverable or displayable errors.
     Error,

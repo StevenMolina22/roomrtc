@@ -106,7 +106,7 @@ impl Controller {
 
     pub fn shut_down(&mut self) -> Result<(), Error> {
         {
-            self.camera.lock().unwrap().stop();
+            self.camera.lock().map_err(|_| Error::PoisonedLock)?.stop();
         }
 
         match &self.rtp_sender {
@@ -167,14 +167,19 @@ impl Controller {
                 for frame in rx_camera {
                     if let Err(e) = tx_local_cam.send(frame.clone()) {
                         let error = ThreadsError::Fatal(e.to_string());
-                        tx_thread.send(error).unwrap();
+                        if let Err(e) = tx_thread.send(error) {
+                            eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                        };
+                        break;
                     }
                     let encoded = match encoder.encode_frame(&frame) {
                         Ok(enc) => enc,
                         Err(e) => {
                             let error = ThreadsError::Fatal(e.to_string());
-                            tx_thread.send(error).unwrap();
-                            return;
+                            if let Err(e) = tx_thread.send(error) {
+                                eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                            }
+                            break;
                         }
                     };
 
@@ -185,8 +190,13 @@ impl Controller {
                         height: frame.height,
                     };
 
-                    if tx_encoded.send(encoded_frame).is_err() {
-                        camera.lock().unwrap().stop();
+                    if let Err(_) = tx_encoded.send(encoded_frame) {
+                        match camera.lock() {
+                            Ok(cam) => cam.stop(),
+                            Err(_) => {
+                                eprintln!("[THREAD] Failed to get camera lock, exiting thread");
+                            },
+                        }
                         break
                     }
                 }
@@ -220,12 +230,20 @@ impl Controller {
                     if *status.read().unwrap() == ConnectionStatus::Closed {
                         break;
                     }
-                    let frame_lock = rx_encoded.lock().unwrap();
+                    let frame_lock = match rx_encoded.lock() {
+                        Ok(lock) => lock,
+                        Err(_) => {
+                            eprintln!("[THREAD] Failed to get receiver lock. Exiting thread");
+                            break;
+                        }
+                    };
                     let encoded_frame = match frame_lock.recv() {
                         Ok(f) => f,
                         Err(e) => {
                             let error = ThreadsError::Fatal(e.to_string());
-                            tx_thread.send(error).unwrap();
+                            if let Err(_) = tx_thread.send(error) {
+                                eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                            }
                             return;
                         }
                     };
@@ -234,7 +252,9 @@ impl Controller {
                             Ok(sender) => sender,
                             Err(_) => {
                                 let error = ThreadsError::Fatal(Error::PoisonedLock.to_string());
-                                tx_thread.send(error).unwrap();
+                                if let Err(_) = tx_thread.send(error) {
+                                    eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                                }
                                 return;
                             }
                         };
@@ -247,7 +267,10 @@ impl Controller {
                             encoded_frame.chunks.len() as u16,
                         ) {
                             let error = ThreadsError::Fatal(e.to_string());
-                            tx_thread.send(error).unwrap();
+                            if let Err(_) = tx_thread.send(error) {
+                                eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                            }
+                            break
                         }
                     }
                 }
@@ -284,8 +307,10 @@ impl Controller {
                         Ok(packet) => packet,
                         Err(e) => {
                             let error = ThreadsError::Fatal(e.to_string());
-                            tx_thread.send(error).unwrap();
-                            return;
+                            if let Err(_) = tx_thread.send(error) {
+                                eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                            }
+                            break;
                         }
                     };
                     match actual_frame {
@@ -303,7 +328,10 @@ impl Controller {
                                 {
                                     if let Err(e) = tx_remote_cam_receiver.send(frame_data) {
                                         let error = ThreadsError::Fatal(e.to_string());
-                                        tx_thread.send(error).unwrap();
+                                        if let Err(_) = tx_thread.send(error) {
+                                            eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                                        }
+                                        break
                                     }
                                 }
                             }
@@ -337,7 +365,9 @@ impl Controller {
                             if let Ok(mut conn) = connection_status.write() {
                                 *conn = ConnectionStatus::Closed;
                             }
-                            tx_event.send(msg).unwrap();
+                            if let Err(_) = tx_event.send(msg) {
+                                eprintln!("[THREAD] Failed to send error to interface, exiting thread");
+                            }
                             break;
                         }
                     },
@@ -353,6 +383,8 @@ impl Controller {
     }
 
     pub fn reset(&mut self, tx_local: Sender<Frame>, tx_remote: Sender<Frame>, tx_event: Sender<String>) -> Result<(), Error> {
+        self.end_threads()?;
+
         let (tx_encoded, rx_encoded) = channel();
         let (tx_thread, rx_thread) = channel();
 

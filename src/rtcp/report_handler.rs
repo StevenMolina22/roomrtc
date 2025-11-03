@@ -8,7 +8,7 @@ use crate::rtp::ConnectionStatus;
 use crate::tools::Socket;
 
 const REPORT_PERIOD_MILLIS: u64 = 1000;
-const REPORT_RECEIVE_LIMIT: Duration = Duration::from_millis(3000);
+const REPORT_RECEIVE_LIMIT: Duration = Duration::from_millis(1000);
 const RETRY_LIMIT: usize = 5;
 
 pub struct RtcpReportHandler<S: Socket + Send + Sync + 'static> {

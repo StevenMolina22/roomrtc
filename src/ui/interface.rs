@@ -55,7 +55,7 @@ impl eframe::App for RoomRTCApp {
             while let Ok(_) = self.rx_event.try_recv() {
                 self.controller.stop_local_camera().unwrap();
                 self.controller.end_threads().unwrap();
-                self.reset_controller();
+                self.reset();
                 self.view = View::Error;
             }
 
@@ -131,7 +131,7 @@ impl RoomRTCApp {
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
                 self.controller.shut_down().unwrap();
                 self.controller.end_threads().unwrap();
-                self.reset_controller();
+                self.reset();
                 self.view = View::Menu;
             }
         });
@@ -244,7 +244,7 @@ impl RoomRTCApp {
         });
     }
 
-    pub fn reset_controller(&mut self) {
+    pub fn reset(&mut self) {
         self.controller.end_threads().unwrap();
 
         let (tx_local, rx_local) = mpsc::channel();
@@ -254,6 +254,9 @@ impl RoomRTCApp {
         self.rx_local = rx_local;
         self.rx_remote = rx_remote;
         self.rx_event = rx_event;
+
+        self.local_texture = None;
+        self.remote_texture = None;
 
         self.controller.reset(tx_local, tx_remote, tx_event).unwrap();
     }

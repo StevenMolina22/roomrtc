@@ -134,7 +134,6 @@ impl IceAgent {
     }
 
     /// Return the selected candidate pair or an error if none was selected.
-    #[must_use]
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
     }

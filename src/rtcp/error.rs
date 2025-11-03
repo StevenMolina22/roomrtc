@@ -35,7 +35,7 @@ pub enum RtcpError {
 }
 
 impl Display for RtcpError {
-    /// Format the RTCP error as a short human-readable string.
+    /// Format the RTCP error as a short string.
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PoisonedLock => write!(f, "Error: Poisoned lock"),

@@ -36,6 +36,7 @@ pub enum FrameError {
 }
 
 impl Display for FrameError {
+    /// Formats the error as a string.
     fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
         match self {
             Self::EncoderInitializationError => {

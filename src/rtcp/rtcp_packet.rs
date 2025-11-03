@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
-/// Small RTCP packet enum used by the project's reporting mechanism.
+/// Compact representation of the RTCP packet types used by the
+/// report handler in this project.
 ///
 /// This is a representation with two packet kinds
 /// used for connectivity signaling: periodic
@@ -17,6 +18,8 @@ pub enum RtcpPacket {
 }
 
 impl Display for RtcpPacket {
+    /// Format the packet as a short, human-readable string (e.g.
+    /// "CR", "BYE").
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             Self::ConnectivityReport => write!(f, "CR"),

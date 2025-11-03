@@ -16,6 +16,15 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
+/// Controller that coordinates the client, camera, RTP/RTCP and worker
+/// threads for a single call session.
+///
+/// The `Controller` owns sockets, the `Client` instance, the camera
+/// device and channels used to transmit frames and thread status
+/// updates back to the UI. It provides lifecycle operations such as
+/// `new`, `start_call`, `shut_down` and `reset` and also spawns the
+/// threads responsible for capturing, encoding, sending and
+/// receiving media.
 pub struct Controller {
     pub client: Client,
     pub config: Arc<Config>,
@@ -80,6 +89,12 @@ impl Controller {
         })
     }
 
+    /// Establish the UDP connection to the selected ICE candidate pair.
+    ///
+    /// This resolves the ICE-selected candidate pair from the client's
+    /// ICE agent and connects both RTP and RTCP sockets to the remote
+    /// endpoints. It also initialises the RTCP handler used to send
+    //// receive reports.
     pub fn connect(&mut self) -> Result<(), Error> {
         let pair = match self.client.ice_agent.get_selected_pair().cloned() {
             Ok(pair) => pair,
@@ -113,6 +128,11 @@ impl Controller {
         Ok(())
     }
 
+    /// Start the media call.
+    ///
+    /// This method updates the connection status, establishes the
+    /// underlying socket connections via `connect`, starts the RTCP
+    /// handler and spawns the encoding/sending/receiving threads.
     pub fn start_call(&mut self) -> Result<(), Error> {
         {
             let mut conn = self
@@ -138,6 +158,10 @@ impl Controller {
         self.generate_media_threads()
     }
 
+    /// Shut down the active call and related components.
+    ///
+    /// This stops the camera, closes the RTCP handler's connection
+    /// and ensures the controller transitions to a clean idle state.
     pub fn shut_down(&mut self) -> Result<(), Error> {
         {
             self.camera.lock().map_err(|_| Error::PoisonedLock)?.stop();
@@ -157,6 +181,11 @@ impl Controller {
         Ok(())
     }
 
+    /// Spawn media related threads: camera capture, RTP sender and
+    /// RTP receiver.
+    ///
+    /// Returns `Ok(())` when all threads have been spawned and the
+    /// initial setup completed successfully.
     fn generate_media_threads(&mut self) -> Result<(), Error> {
         let rtp_sender_socket = self
             .rtp_socket
@@ -176,6 +205,12 @@ impl Controller {
         Ok(())
     }
 
+    /// Spawn a thread that captures frames from the camera, sends
+    /// local preview frames over `tx_local` and encodes frames to
+    /// `tx_encoded` for transmission.
+    ///
+    /// On unrecoverable errors the thread reports via the
+    /// `tx_thread` channel.
     pub fn spawn_camera_thread(&mut self) -> Result<(), Error> {
         let tx_local_cam = self.tx_local.clone();
         let tx_encoded = self.tx_encoded.clone();
@@ -230,6 +265,11 @@ impl Controller {
         Ok(())
     }
 
+    /// Spawn the RTP sender thread which reads encoded frames from
+    /// `rx_encoded` and transmits them over the provided `rtp_socket`.
+    ///
+    /// It uses the RTCP handler to update sender state and will report
+    /// fatal thread errors via `tx_thread`.
     fn spawn_rtp_sender_thread(&mut self, rtp_socket: UdpSocket) -> Result<(), Error> {
         let rx_encoded = self.rx_encoded.clone();
         let tx_thread = self.tx_thread.clone();
@@ -306,6 +346,9 @@ impl Controller {
         Ok(())
     }
 
+    /// Spawn the RTP receiver thread which listens for incoming RTP
+    /// packets, reassembles frames and sends decoded frames to
+    /// `tx_remote` for rendering in the UI.
     fn spawn_rtp_receiver_thread(&mut self, rtp_receiver_socket: UdpSocket) -> Result<(), Error> {
         let tx_remote_cam_receiver = self.tx_remote.clone();
         let tx_thread = self.tx_thread.clone();
@@ -378,6 +421,12 @@ impl Controller {
         Ok(())
     }
 
+    /// Monitor spawned threads for errors.
+    ///
+    /// This helper spawns a monitor thread that blocks on the
+    /// `rx_thread` channel and reacts to `ThreadsError` messages by
+    /// logging, updating connection state and notifying the UI via
+    /// `tx_event`.
     fn handle_threads_errors(&mut self) {
         let rx_thread = Arc::clone(&self.rx_thread);
         let connection_status = Arc::clone(&self.connection_status);
@@ -433,12 +482,21 @@ impl Controller {
         Ok(())
     }
 
+    /// Stop the local camera capture.
+    ///
+    /// This simply acquires the camera lock and stops capture. Errors
+    /// acquiring the lock are reported as `PoisonedLock`.
     pub fn stop_local_camera(&mut self) -> Result<(), Error> {
         self.camera.lock().map_err(|_| Error::PoisonedLock)?.stop();
         Ok(())
     }
 }
-fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {
+/// Reconstruct a full frame from a list of RTP packets and decode it.
+///
+/// This helper sorts the received chunks by their chunk id, concatenates
+/// payloads and uses the provided `decoder` to produce the final
+/// `Frame` to be displayed.
+fn generate_frame_from(chunks: &mut [RtpPacket], decoder: &mut Decoder) -> Option<Frame> {
     let fr_id = chunks.first()?.frame_id;
 
     chunks.sort_by_key(|c| c.chunk_id);

@@ -12,10 +12,9 @@ const RTP_READ_TIMEOUT_MILLIS: u64 = 3000;
 /// RTP receiver that reads `RtpPacket` instances from a socket and
 /// manages RTCP reporting through a `RtcpReportHandler`.
 ///
-/// The `RtpReceiver` owns a UDP socket implementing the project's
-/// `Socket` trait and an RTCP handler. It tracks the connection status
-/// and exposes a blocking `receive` method that returns decoded
-/// `RtpPacket`s.
+/// This type owns a socket implementing the project's `Socket` trait,
+/// a locked `RtcpReportHandler` used to drive RTCP-style reporting and
+/// a shared `connection_status` used to observe/drive session state.
 pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
@@ -23,7 +22,20 @@ pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
-    /// Creates an RTP receptor bound to the local IP at the given port
+    /// Create a new `RtpReceiver`.
+    ///
+    /// # Parameters
+    /// - `rtp_socket`: socket bound to the local RTP port implementing
+    ///   the `Socket` trait.
+    /// - `report_handler`: an `Arc<Mutex<RtcpReportHandler<S>>>` used to
+    ///   control and close RTCP reporting when needed.
+    /// - `connection_status`: shared `Arc<RwLock<ConnectionStatus>>`
+    ///   representing the current session state. The receiver uses this
+    ///   value to detect when the session has been closed.
+    ///
+    /// # Errors
+    /// Returns `Error::SocketConfigFailed` if configuring the socket
+    /// read timeout fails.
     pub fn new(
         rtp_socket: S,
         report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
@@ -40,7 +52,18 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         })
     }
 
-    /// Attempts to receive an RTP packet. Returns Some(RtpPackage) if a packet was received, or None if no data is available.
+    /// Wait for and return the next decoded `RtpPacket`.
+    ///
+    /// This method loops until a valid `RtpPacket` is decoded from the
+    /// underlying socket. If the shared `connection_status` transitions
+    /// to `Closed` while waiting, the method returns
+    /// `Error::ConnectionClosed`. On other socket errors it will attempt
+    /// to close the RTCP reporting handler and propagate a
+    /// `ReceiveFailed` error.
+    ///
+    /// # Errors
+    /// Returns `Error::ReceiveFailed` for unexpected socket errors and
+    /// `Error::ConnectionClosed` if the session is closed while waiting.
     pub fn receive(&mut self) -> Result<RtpPacket, Error> {
         let mut buf = [0u8; 65535];
         loop {

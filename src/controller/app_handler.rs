@@ -42,7 +42,6 @@ pub struct Controller {
 }
 
 impl Controller {
-    #[allow(clippy::similar_names)]
     pub fn new(
         tx_local: Sender<Frame>,
         tx_remote: Sender<Frame>,
@@ -64,7 +63,8 @@ impl Controller {
             UdpSocket::bind(&rtcp_addr).map_err(|e| Error::MapError(e.to_string()))?;
 
         Ok(Self {
-            client: Client::new(rtp_port, &config.media),
+            client: Client::new(rtp_port, &config.media)
+                .map_err(|e| Error::MapError(e.to_string()))?,
             tx_encoded,
             rx_encoded: Arc::new(Mutex::new(rx_encoded)),
             tx_local,
@@ -81,7 +81,6 @@ impl Controller {
         })
     }
 
-    #[allow(clippy::similar_names)]
     pub fn connect(&mut self) -> Result<(), Error> {
         let pair = match self.client.ice_agent.get_selected_pair().cloned() {
             Ok(pair) => pair,
@@ -142,7 +141,10 @@ impl Controller {
 
     pub fn shut_down(&mut self) -> Result<(), Error> {
         {
-            self.camera.lock().map_err(|_| Error::PoisonedLock)?.stop();
+            self.camera
+                .lock()
+                .map_err(|_| Error::PoisonedLock)?
+                .stop()?;
         }
 
         match &self.rtcp_handler {
@@ -178,7 +180,6 @@ impl Controller {
         Ok(())
     }
 
-    #[allow(clippy::similar_names)]
     pub fn spawn_camera_thread(&mut self) -> Result<(), Error> {
         let tx_local_cam = self.tx_local.clone();
         let tx_encoded = self.tx_encoded.clone();
@@ -186,7 +187,7 @@ impl Controller {
 
         thread::spawn({
             let camera = Arc::clone(&self.camera);
-            let rx_camera = camera.lock().map_err(|_| Error::PoisonedLock)?.start();
+            let rx_camera = camera.lock().map_err(|_| Error::PoisonedLock)?.start()?;
             let mut encoder =
                 Encoder::new(&self.config.media).map_err(|e| Error::MapError(e.to_string()))?;
             move || {
@@ -220,7 +221,11 @@ impl Controller {
 
                     if tx_encoded.send(encoded_frame).is_err() {
                         match camera.lock() {
-                            Ok(cam) => cam.stop(),
+                            Ok(cam) => {
+                                if let Err(e) = cam.stop() {
+                                    eprintln!("[THREAD] Failed to stop camera: {e}");
+                                }
+                            }
                             Err(_) => {
                                 eprintln!("[THREAD] Failed to get camera lock, exiting thread");
                             }
@@ -287,14 +292,26 @@ impl Controller {
                             return;
                         };
                         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let marker = if let Ok(marker) = u16::try_from(encoded_frame.chunks.len()) {
+                            marker
+                        } else {
+                            let error =
+                                ThreadsError::Fatal("Too many chunks for RTP marker".to_string());
+                            if tx_thread.send(error).is_err() {
+                                eprintln!(
+                                    "[THREAD] Failed to send error to monitor, exiting thread"
+                                );
+                            }
+                            return;
+                        };
+
                         if let Err(e) = sender.send(
                             c,
                             96,
                             Local::now().timestamp_millis() as u32,
                             encoded_frame.id,
                             i as u64,
-                            u16::try_from(encoded_frame.chunks.len())
-                                .expect("Too many chunks for RTP marker"),
+                            marker,
                         ) {
                             let error = ThreadsError::Fatal(e.to_string());
                             if tx_thread.send(error).is_err() {
@@ -361,8 +378,20 @@ impl Controller {
                             actual_frame = Some(rtp_packet.frame_id);
                         }
 
-                        if rtp_packet.marker
-                            == u16::try_from(chunks.len()).expect("Too many chunks for RTP marker")
+                        let expected_marker = if let Ok(marker) = u16::try_from(chunks.len()) {
+                            marker
+                        } else {
+                            let error =
+                                ThreadsError::Fatal("Too many chunks for RTP marker".to_string());
+                            if tx_thread.send(error).is_err() {
+                                eprintln!(
+                                    "[THREAD] Failed to send error to monitor, exiting thread"
+                                );
+                            }
+                            return;
+                        };
+
+                        if rtp_packet.marker == expected_marker
                             && let Some(frame_data) = generate_frame_from(&mut chunks, &mut decoder)
                             && let Err(e) = tx_remote_cam_receiver.send(frame_data)
                         {
@@ -391,7 +420,12 @@ impl Controller {
 
         thread::spawn(move || {
             loop {
-                let value = rx_thread.lock().unwrap().recv();
+                let value = if let Ok(rx) = rx_thread.lock() {
+                    rx.recv()
+                } else {
+                    eprintln!("[ERROR] Monitor thread receiver lock poisoned, exiting");
+                    break;
+                };
                 if let Ok(err) = value {
                     match err {
                         ThreadsError::Recoverable(msg) => {
@@ -443,7 +477,10 @@ impl Controller {
     }
 
     pub fn stop_local_camera(&mut self) -> Result<(), Error> {
-        self.camera.lock().map_err(|_| Error::PoisonedLock)?.stop();
+        self.camera
+            .lock()
+            .map_err(|_| Error::PoisonedLock)?
+            .stop()?;
         Ok(())
     }
 }

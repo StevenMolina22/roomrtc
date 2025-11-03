@@ -37,7 +37,7 @@ impl Frame {
         let yuv_mat = temp_mat
             .reshape(
                 1,
-                i32::try_from(self.height * 3 / 2).expect("Frame dimension is too large for i32"),
+                i32::try_from(self.height * 3 / 2).map_err(|_| Error::DimensionConversionError)?,
             )
             .map_err(|_| Error::ReshapingFrameError)?;
 
@@ -88,22 +88,21 @@ impl Frame {
 
     /// Serialize the `Frame` into bytes in the same layout consumed by
     /// `from_bytes`.
-    #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::with_capacity(16 + self.data.len());
         buf.extend_from_slice(&self.id.to_le_bytes());
         buf.extend_from_slice(
             &u32::try_from(self.width)
-                .expect("Frame width is too large for u32")
+                .map_err(|_| Error::DimensionConversionError)?
                 .to_le_bytes(),
         );
         buf.extend_from_slice(
             &u32::try_from(self.height)
-                .expect("Frame height is too large for u32")
+                .map_err(|_| Error::DimensionConversionError)?
                 .to_le_bytes(),
         );
         buf.extend_from_slice(&self.data);
-        buf
+        Ok(buf)
     }
 }
 
@@ -120,7 +119,9 @@ mod tests {
             id: 12345,
         };
 
-        let bytes = original_frame.to_bytes();
+        let bytes = original_frame
+            .to_bytes()
+            .expect("Failed to serialize frame");
 
         let deserialized_frame_option = Frame::from_bytes(&bytes);
 
@@ -159,7 +160,9 @@ mod tests {
             id: 777,
         };
 
-        let bytes = original_frame.to_bytes();
+        let bytes = original_frame
+            .to_bytes()
+            .expect("Failed to serialize frame");
         let deserialized_frame =
             Frame::from_bytes(&bytes).expect("Deserialization of empty frame failed");
 

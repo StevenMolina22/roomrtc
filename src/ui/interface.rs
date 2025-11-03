@@ -37,6 +37,9 @@ pub struct RoomRTCApp {
     // Textures
     local_texture: Option<TextureHandle>,
     remote_texture: Option<TextureHandle>,
+
+    // Error handling
+    error_message: Option<String>,
 }
 
 impl RoomRTCApp {
@@ -56,7 +59,12 @@ impl RoomRTCApp {
         let (tx_remote, rx_remote) = mpsc::channel();
         let (tx_event, rx_event) = mpsc::channel();
         let conf = Arc::new(config);
-        let controller = Controller::new(tx_local, tx_remote, tx_event, conf.clone()).unwrap();
+        let controller = match Controller::new(tx_local, tx_remote, tx_event, conf.clone()) {
+            Ok(controller) => controller,
+            Err(e) => {
+                panic!("Failed to create controller: {e}");
+            }
+        };
 
         Self {
             view: View::default(),
@@ -70,6 +78,7 @@ impl RoomRTCApp {
             our_answer: None,
             local_texture: None,
             remote_texture: None,
+            error_message: None,
         }
     }
 }
@@ -89,7 +98,11 @@ impl eframe::App for RoomRTCApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
             while self.rx_event.try_recv().is_ok() {
-                self.controller.stop_local_camera().unwrap();
+                if let Err(e) = self.controller.stop_local_camera() {
+                    self.error_message = Some(format!("Failed to stop camera: {e}"));
+                } else {
+                    self.error_message = Some("Call ended by remote peer".to_string());
+                }
                 self.reset();
                 self.view = View::Error;
             }
@@ -206,11 +219,19 @@ impl RoomRTCApp {
         ui.add(egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Answer..."));
 
         if !self.remote_sdp.is_empty() && ui.button("Connect").clicked() {
-            if let Err(e) = self.controller.client.process_answer(&self.remote_sdp) {
-                eprintln!("Failed to process answer: {e}");
-            } else {
-                self.controller.start_call().unwrap();
-                self.view = View::Call;
+            match self.controller.client.process_answer(&self.remote_sdp) {
+                Ok(()) => {
+                    if let Err(e) = self.controller.start_call() {
+                        self.error_message = Some(format!("Failed to start call: {e}"));
+                        self.view = View::Error;
+                    } else {
+                        self.view = View::Call;
+                    }
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to process answer: {e}"));
+                    self.view = View::Error;
+                }
             }
         }
     }
@@ -232,7 +253,10 @@ impl RoomRTCApp {
         {
             match self.controller.client.process_offer(&self.remote_sdp) {
                 Ok(answer_str) => self.our_answer = Some(answer_str),
-                Err(e) => eprintln!("Failed to process offer: {e}"),
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to process offer: {e}"));
+                    self.view = View::Error;
+                }
             }
         }
 
@@ -245,9 +269,11 @@ impl RoomRTCApp {
             let join_btn = egui::Button::new("Join Call");
             if ui.add(join_btn).clicked() {
                 if let Err(e) = self.controller.start_call() {
-                    eprintln!("Failed to start call: {e}");
+                    self.error_message = Some(format!("Failed to start call: {e}"));
+                    self.view = View::Error;
+                } else {
+                    self.view = View::Call;
                 }
-                self.view = View::Call;
             }
         }
     }
@@ -312,10 +338,14 @@ impl RoomRTCApp {
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
 
+            let error_text = self
+                .error_message
+                .as_deref()
+                .unwrap_or("An unknown error occurred");
             ui.label(
-                RichText::new("Call is off. The other client hung up")
-                    .color(Color32::WHITE)
-                    .font(FontId::proportional(28.0)),
+                RichText::new(error_text)
+                    .color(Color32::RED)
+                    .font(FontId::proportional(24.0)),
             );
 
             ui.add_space(20.0);
@@ -324,6 +354,7 @@ impl RoomRTCApp {
                 .add_sized([200.0, 40.0], egui::Button::new("Back to menu"))
                 .clicked()
             {
+                self.error_message = None;
                 self.view = View::Menu;
             }
         });
@@ -346,8 +377,15 @@ impl RoomRTCApp {
         self.local_texture = None;
         self.remote_texture = None;
 
-        self.controller =
-            Controller::new(tx_local, tx_remote, tx_event, self.config.clone()).unwrap();
+        self.controller = match Controller::new(tx_local, tx_remote, tx_event, self.config.clone())
+        {
+            Ok(controller) => controller,
+            Err(e) => {
+                self.error_message = Some(format!("Failed to create controller: {e}"));
+                self.view = View::Error;
+                return;
+            }
+        };
     }
 }
 

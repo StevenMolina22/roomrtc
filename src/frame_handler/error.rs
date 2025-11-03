@@ -33,6 +33,9 @@ pub enum FrameError {
 
     /// Error returned when converting a frame to bytes fails.
     BytesConversionError,
+
+    /// Error returned when frame dimensions are too large for type conversion.
+    DimensionConversionError,
 }
 
 impl Display for FrameError {
@@ -57,6 +60,9 @@ impl Display for FrameError {
             }
             Self::BytesConversionError => {
                 write!(fmt, "Error: failed to convert frame to bytes")
+            }
+            Self::DimensionConversionError => {
+                write!(fmt, "Error: frame dimensions too large for conversion")
             }
         }
     }

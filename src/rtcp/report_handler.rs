@@ -210,7 +210,8 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
             Some(_) => Err(Error::UnexpectedMessage),
             None => {
                 if Local::now() - *last_report_time
-                    > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT).unwrap()
+                    > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT)
+                        .unwrap_or_else(|_| chrono::Duration::seconds(30))
                 {
                     Err(Error::TimedOut)
                 } else {

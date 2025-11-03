@@ -122,7 +122,8 @@ fn try_receive_report(
         },
         Err(_) => {
             if Local::now() - *last_report_time
-                > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT).unwrap()
+                > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT)
+                    .unwrap_or_else(|_| chrono::Duration::seconds(30))
             {
                 Err(RTCPError::TimedOut)
             } else {

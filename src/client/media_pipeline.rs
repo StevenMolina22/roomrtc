@@ -104,7 +104,13 @@ impl Client {
             // Packetize & Send (Simple Approach)
             let timestamp = start_time.elapsed().as_millis() as u32;
 
-            let mut sender = rtp_sender.lock().unwrap();
+            let mut sender = match rtp_sender.lock() {
+                Ok(sender) => sender,
+                Err(_) => {
+                    eprintln!("Failed to acquire RTP sender lock");
+                    break;
+                }
+            };
             sender.send(&h264_nal, 96, timestamp, true)?;
 
             // Sleep to maintain framerate
@@ -124,7 +130,13 @@ impl Client {
 
         loop {
             // Receive Packet
-            let mut receiver = rtp_receiver.lock().unwrap();
+            let mut receiver = match rtp_receiver.lock() {
+                Ok(receiver) => receiver,
+                Err(_) => {
+                    eprintln!("Failed to acquire RTP receiver lock");
+                    break;
+                }
+            };
             match receiver.try_receive()? {
                 Some(rtp_package) => {
                     // De-packetize (Simple Approach)

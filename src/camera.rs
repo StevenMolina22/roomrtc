@@ -1,4 +1,5 @@
 use crate::config::MediaConfig;
+use crate::controller::ControllerError;
 use crate::frame_handler::Frame;
 use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
@@ -45,19 +46,23 @@ impl Camera {
     /// spawns a background thread that captures frames from `OpenCV`'s
     /// `VideoCapture` and converts them to RGB `Frame`s at the
     /// configured frame rate.
-    pub fn start(&mut self) -> Receiver<Frame> {
+    pub fn start(&mut self) -> Result<Receiver<Frame>, ControllerError> {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
-        *running.write().unwrap() = true;
+        *running.write().map_err(|_| ControllerError::PoisonedLock)? = true;
         let frame_id = self.frame_id.clone();
 
         let config = self.media_config.clone();
 
         thread::spawn(move || {
-            let mut cam = match videoio::VideoCapture::new(
-                i32::try_from(config.camera_index).expect("Camera index is too large for i32"),
-                videoio::CAP_ANY,
-            ) {
+            let camera_index = if let Ok(index) = i32::try_from(config.camera_index) {
+                index
+            } else {
+                eprintln!("Camera index is too large for i32. Stopping camera thread.");
+                return;
+            };
+
+            let mut cam = match videoio::VideoCapture::new(camera_index, videoio::CAP_ANY) {
                 Ok(cam) => cam,
                 Err(e) => {
                     eprintln!("Failed to open camera: {e}. Stopping camera thread.");
@@ -69,26 +74,58 @@ impl Camera {
                 eprintln!("Camera is not open. Stopping camera thread.");
                 return;
             }
-            cam.set(videoio::CAP_PROP_FRAME_WIDTH, config.frame_width)
-                .unwrap();
-            cam.set(videoio::CAP_PROP_FRAME_HEIGHT, config.frame_height)
-                .unwrap();
+            if cam
+                .set(videoio::CAP_PROP_FRAME_WIDTH, config.frame_width)
+                .is_err()
+            {
+                eprintln!("Failed to set camera width. Stopping camera thread.");
+                return;
+            }
+            if cam
+                .set(videoio::CAP_PROP_FRAME_HEIGHT, config.frame_height)
+                .is_err()
+            {
+                eprintln!("Failed to set camera height. Stopping camera thread.");
+                return;
+            }
 
             let mut mat = Mat::default();
             let mut rgb = Mat::default();
 
             let frame_duration = Duration::from_millis(1000 / u64::from(config.frame_rate));
 
-            while *running.read().unwrap() {
-                if !cam.read(&mut mat).unwrap() || mat.empty() {
+            while {
+                match running.read() {
+                    Ok(guard) => *guard,
+                    Err(e) => {
+                        eprintln!("Failed to read running flag: {e}");
+                        false
+                    }
+                }
+            } {
+                if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
+                    eprintln!("Failed to read camera frame.");
                     continue;
                 }
 
-                imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).unwrap();
-                let data = rgb.data_bytes().unwrap().to_vec();
+                if imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).is_err() {
+                    eprintln!("Failed to convert frame color.");
+                    continue;
+                }
+                let data = if let Ok(bytes) = rgb.data_bytes() {
+                    bytes.to_vec()
+                } else {
+                    eprintln!("Failed to extract frame data.");
+                    continue;
+                };
 
                 let id = {
-                    let mut id_lock = frame_id.write().unwrap();
+                    let mut id_lock = if let Ok(lock) = frame_id.write() {
+                        lock
+                    } else {
+                        eprintln!("Failed to acquire frame ID lock.");
+                        continue;
+                    };
                     let id = *id_lock;
                     *id_lock = id + 1;
                     id
@@ -110,13 +147,17 @@ impl Camera {
             }
         });
 
-        rx
+        Ok(rx)
     }
 
     /// Stop the capture thread by clearing the running flag. The
     /// capture thread will observe this and exit shortly.
-    pub fn stop(&self) {
-        let mut run = self.running.write().unwrap();
+    pub fn stop(&self) -> Result<(), ControllerError> {
+        let mut run = self
+            .running
+            .write()
+            .map_err(|_| ControllerError::PoisonedLock)?;
         *run = false;
+        Ok(())
     }
 }

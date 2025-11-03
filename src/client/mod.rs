@@ -53,13 +53,11 @@ impl Client {
     /// # Returns
     /// Returns a `Client` containing the local SDP and an `IceAgent`
     /// already configured with (potentially) gathered candidates.
-    #[must_use]
-    pub fn new(media_port: u16, media_config: &MediaConfig) -> Self {
+    pub fn new(media_port: u16, media_config: &MediaConfig) -> Result<Self, ClientError> {
         let mut ice_agent = IceAgent::new();
-        assert!(
-            ice_agent.gather_candidates(media_port).is_ok(),
-            "Failed to gather ICE candidates"
-        );
+        ice_agent.gather_candidates(media_port).map_err(|e| {
+            ClientError::IceConnectionError(format!("Failed to gather ICE candidates: {e}"))
+        })?;
 
         let mut media_description = MediaDescription::new(
             MEDIA_TYPE.into(),
@@ -74,12 +72,16 @@ impl Client {
                 media_config.clock_rate,
                 None,
             ))
-            .unwrap();
+            .map_err(|e| {
+                ClientError::SdpCreationError(format!("Failed to add RTPMap attribute: {e}"))
+            })?;
 
         if let Some(candidate) = ice_agent.get_local_candidate() {
             media_description
                 .add_attribute(Attribute::Candidate(candidate.clone()))
-                .unwrap();
+                .map_err(|e| {
+                    ClientError::SdpCreationError(format!("Failed to add Candidate attribute: {e}"))
+                })?;
         }
 
         let mut sdp = SessionDescriptionProtocol::new(vec![media_description]);
@@ -88,7 +90,7 @@ impl Client {
             sdp.set_connection_data("IN", "IP4", local_candidate.address.clone().as_str());
         }
 
-        Self { sdp, ice_agent }
+        Ok(Self { sdp, ice_agent })
     }
 
     /// Process an SDP offer string and return the generated SDP answer

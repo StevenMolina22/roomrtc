@@ -121,6 +121,7 @@ impl Controller {
                 .map_err(|_| Error::PoisonedLock)?;
             *conn = ConnectionStatus::Waiting;
         }
+
         self.connect()?;
 
         match &self.rtcp_handler {

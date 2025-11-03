@@ -4,7 +4,7 @@ pub enum RtcpPacket {
     ConnectivityReport,
     Goodbye,
     Hello,
-    Ready
+    Ready,
 }
 
 impl Display for RtcpPacket {
@@ -34,7 +34,7 @@ impl RtcpPacket {
             b"BY" => Some(RtcpPacket::Goodbye),
             b"HELLO" => Some(RtcpPacket::Hello),
             b"READY" => Some(RtcpPacket::Ready),
-            _ => None
+            _ => None,
         }
     }
 }

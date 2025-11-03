@@ -16,7 +16,6 @@ pub struct RtcpReportHandler<S: Socket + Send + Sync + 'static> {
     connection_status: Arc<RwLock<ConnectionStatus>>,
 }
 
-
 impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     pub fn new(socket: S, connection_status: Arc<RwLock<ConnectionStatus>>) -> Self {
         Self {
@@ -36,7 +35,6 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
             let mut buff = [0u8; 1024];
             match self.socket.recv_from(&mut buff) {
                 Ok((size, _addr)) => {
-                    println!("Lei algo");
                     match RtcpPacket::from_bytes(&buff[..size]) {
                         Some(RtcpPacket::Hello) => {
                             self.socket.send(RtcpPacket::Ready.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
@@ -58,7 +56,6 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                 }
                 Err(e) => return Err(Error::ReceiveFailed(e.to_string())),
             }
-            println!("no lei nada");
         }
         Ok(())
     }
@@ -126,7 +123,6 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
             if let Ok(mut conn) = shared_connection_status.write() {
                 *conn = ConnectionStatus::Closed;
-                println!("cambio estado a closed");
             }
         });
 

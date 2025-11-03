@@ -1,6 +1,6 @@
 use crate::config::MediaConfig;
 use crate::frame_handler::Frame;
-use opencv::{imgproc, prelude::*, videoio, core};
+use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -35,13 +35,13 @@ impl Camera {
                     Ok(cam) => cam,
                     Err(e) => {
                         eprintln!("Failed to open camera: {}. Stopping camera thread.", e);
-                        return; // Exit thread
+                        return;
                     }
                 };
 
             if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
                 eprintln!("Camera is not open. Stopping camera thread.");
-                return; // Exit thread
+                return;
             }
             cam.set(videoio::CAP_PROP_FRAME_WIDTH, config.frame_width)
                 .unwrap();
@@ -58,7 +58,7 @@ impl Camera {
                     continue;
                 }
 
-                imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT).unwrap();
+                imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).unwrap();
                 let data = rgb.data_bytes().unwrap().to_vec();
 
                 let id = {

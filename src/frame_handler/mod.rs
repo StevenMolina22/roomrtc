@@ -4,6 +4,10 @@ mod encoder;
 mod error;
 mod frame;
 
+pub use frame::Frame;
+
+pub use encoder::Encoder;
+
 pub use decoder::Decoder;
 pub use encoded_frame::EncodedFrame;
 pub use encoder::Encoder;

@@ -155,9 +155,10 @@ fn get_local_ip() -> Result<String, Error> {
 
     for interface in interfaces {
         if !interface.is_loopback()
-            && let std::net::IpAddr::V4(ipv4) = interface.addr.ip() {
-                return Ok(ipv4.to_string());
-            }
+            && let std::net::IpAddr::V4(ipv4) = interface.addr.ip()
+        {
+            return Ok(ipv4.to_string());
+        }
     }
 
     Err(Error::NoNetworkInterfaceFound)

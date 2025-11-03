@@ -35,13 +35,13 @@ impl Display for RtpError {
             Self::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
             Self::SendFailed => write!(f, "Error: \"Failed to send RTP packet\""),
             Self::ReceiveFailed(e) => {
-                write!(f, "Error: \"Failed to receive RTP packet. Details: {e}\"")
+                write!(f, "Error: \"Failed to receive RTP packet. Details: {}\"", e)
             }
             Self::InvalidRtpPacket => write!(f, "Error: \"Invalid or corrupted RTP packet\""),
             Self::SocketCloneFailed => write!(f, "Error: \"Failed to clone socket\""),
             Self::TerminateFailed => write!(f, "Error: \"Failed to terminate\""),
             Self::ConnectionClosed => write!(f, "Error: \"Connection closed\""),
-            Self::RTCPError(e) => write!(f, "{e}"),
+            Self::RTCPError(e) => write!(f, "{}", e),
             Self::ConnectionStatusLockFailed => {
                 write!(f, "Error: \"Failed to acquire connection status lock\"")
             }

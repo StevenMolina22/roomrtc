@@ -161,7 +161,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     Ok(()) => retries = 0,
                     Err(Error::GoodbyeReceived) => {
                         println!("Goodbye recibido!");
-                        retries = RETRY_LIMIT;
+                        retries = RETRY_LIMIT
                     }
                     Err(_) => retries += 1,
                 }

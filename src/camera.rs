@@ -23,7 +23,11 @@ pub struct Camera {
 }
 
 impl Camera {
-    #[must_use] 
+    /// Create a new `Camera` configured with `media_config`.
+    ///
+    /// # Parameters
+    /// - `media_config`: media capture configuration (camera index,
+    ///   frame size and frame rate).
     pub fn new(media_config: MediaConfig) -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),

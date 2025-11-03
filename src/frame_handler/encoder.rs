@@ -27,7 +27,7 @@ impl Encoder {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::EncoderIntializationError`] if the encoder cannot
+    /// Returns [`Error::EncoderInitializationError`] if the encoder cannot
     /// be created by the `OpenH264` library.
     pub fn new(media_config: &MediaConfig) -> Result<Self, Error> {
         let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;

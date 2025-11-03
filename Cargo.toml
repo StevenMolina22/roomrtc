@@ -1,5 +1,5 @@
 [package]
-name = "roomrtc"
+name = "room-rtc"
 version = "0.1.0"
 edition = "2024"
 

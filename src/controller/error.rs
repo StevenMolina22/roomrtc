@@ -12,7 +12,8 @@ pub enum ControllerError {
     PoisonedLock,
     MapError(String),
     EmptyRTPSenderError,
-    JoinThreadError
+    JoinThreadError,
+    ConnectionNotStarted,
 }
 
 pub enum ThreadsError {
@@ -49,6 +50,7 @@ impl Display for ControllerError {
             Self::MapError(e) => write!(f, "{}", e),
             Self::EmptyRTPSenderError => write!(f, "Error: \"there is no RTP sender built yet\""),
             Self::JoinThreadError => write!(f, "Error: \"Failed to join thread\""),
+            Self::ConnectionNotStarted => write!(f, "Error: \"Connection not started\""),
         }
     }
 }

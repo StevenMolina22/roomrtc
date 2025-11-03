@@ -173,12 +173,10 @@ mod tests {
 
     #[test]
     fn test_from_bytes_exactly_header_size() {
-        // Test that we get a valid frame (with empty data)
-        // if the slice is exactly the header size (16 bytes).
-
+        // We get a valid empty frame if the slice is exactly the 16 bytes header size
         // Corresponds to: id=1, width=2, height=3
         let header_only_bytes: &[u8] = &[
-            1, 0, 0, 0, 0, 1, 0, 0, //
+            1, 0, 0, 0, 0, 0, 0, 0, //
             2, 0, 0, 0, //
             3, 0, 0, 0, //
         ];

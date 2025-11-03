@@ -1,75 +1,163 @@
-use std::io::Read;
-use opencv::{
-    prelude::*,
-    videoio,
-    imgproc,
-    core
-};
-use std::sync::{Arc, RwLock};
+use crate::config::MediaConfig;
+use crate::controller::ControllerError;
+use crate::frame_handler::Frame;
+use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
-pub struct Frame {
-    data: Vec<u8>,
-    width: u32,
-    height: u32
-}
+/// A camera that runs a capture thread and produces
+/// `Frame` instances over a channel.
+///
+/// `Camera` is a convenience wrapper around `OpenCV`'s `VideoCapture`.
+/// It exposes `start`/`stop` operations and internally uses shared
+/// state (`Arc<RwLock<...>>`) to control the capture thread and to
+/// produce incremental frame ids.
 pub struct Camera {
+    /// Flag used to signal the capture thread to keep running.
     running: Arc<RwLock<bool>>,
+
+    /// Monotonic counter used to assign `Frame.id` values.
+    frame_id: Arc<RwLock<usize>>,
+    media_config: MediaConfig,
 }
 
 impl Camera {
-    pub fn new() -> Self {
+    /// Create a new `Camera` configured with `media_config`.
+    ///
+    /// # Parameters
+    /// - `media_config`: media capture configuration (camera index,
+    ///   frame size and frame rate).
+    #[must_use]
+    pub fn new(media_config: MediaConfig) -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
+            frame_id: Arc::new(RwLock::new(0)),
+            media_config,
         }
     }
 
-    pub fn start(&self) -> Receiver<Frame> {
+    /// Start the capture thread and return a channel `Receiver<Frame>`
+    /// where captured frames will be sent.
+    ///
+    /// The returned receiver receives `Frame` instances continuously
+    /// until `stop()` is called or the sender is dropped. This method
+    /// spawns a background thread that captures frames from `OpenCV`'s
+    /// `VideoCapture` and converts them to RGB `Frame`s at the
+    /// configured frame rate.
+    pub fn start(&mut self) -> Result<Receiver<Frame>, ControllerError> {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
-        *running.write().unwrap() = true;
+        *running.write().map_err(|_| ControllerError::PoisonedLock)? = true;
+        let frame_id = self.frame_id.clone();
+
+        let config = self.media_config.clone();
 
         thread::spawn(move || {
-            let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY).unwrap();
-            if !videoio::VideoCapture::is_opened(&cam).unwrap() {
-                return
+            let camera_index = if let Ok(index) = i32::try_from(config.camera_index) {
+                index
+            } else {
+                eprintln!("Camera index is too large for i32. Stopping camera thread.");
+                return;
+            };
+
+            let mut cam = match videoio::VideoCapture::new(camera_index, videoio::CAP_ANY) {
+                Ok(cam) => cam,
+                Err(e) => {
+                    eprintln!("Failed to open camera: {e}. Stopping camera thread.");
+                    return;
+                }
+            };
+
+            if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
+                eprintln!("Camera is not open. Stopping camera thread.");
+                return;
             }
-            cam.set(videoio::CAP_PROP_FRAME_WIDTH, 640.0).unwrap();
-            cam.set(videoio::CAP_PROP_FRAME_HEIGHT, 480.0).unwrap();
+            if cam
+                .set(videoio::CAP_PROP_FRAME_WIDTH, config.frame_width)
+                .is_err()
+            {
+                eprintln!("Failed to set camera width. Stopping camera thread.");
+                return;
+            }
+            if cam
+                .set(videoio::CAP_PROP_FRAME_HEIGHT, config.frame_height)
+                .is_err()
+            {
+                eprintln!("Failed to set camera height. Stopping camera thread.");
+                return;
+            }
 
             let mut mat = Mat::default();
-            let mut yuv = Mat::default();
+            let mut rgb = Mat::default();
 
-            while *running.read().unwrap() {
-                if !cam.read(&mut mat).unwrap() || mat.empty() {
+            let frame_duration = Duration::from_millis(1000 / u64::from(config.frame_rate));
+
+            while {
+                match running.read() {
+                    Ok(guard) => *guard,
+                    Err(e) => {
+                        eprintln!("Failed to read running flag: {e}");
+                        false
+                    }
+                }
+            } {
+                if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
+                    eprintln!("Failed to read camera frame.");
                     continue;
                 }
 
-                imgproc::cvt_color(&mat, &mut yuv, imgproc::COLOR_BGR2YUV_I420, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT).unwrap();
-                let data = yuv.data_bytes().unwrap().to_vec();
+                if imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).is_err() {
+                    eprintln!("Failed to convert frame color.");
+                    continue;
+                }
+                let data = if let Ok(bytes) = rgb.data_bytes() {
+                    bytes.to_vec()
+                } else {
+                    eprintln!("Failed to extract frame data.");
+                    continue;
+                };
 
+                let id = {
+                    let mut id_lock = if let Ok(lock) = frame_id.write() {
+                        lock
+                    } else {
+                        eprintln!("Failed to acquire frame ID lock.");
+                        continue;
+                    };
+                    let id = *id_lock;
+                    *id_lock = id + 1;
+                    id
+                };
+
+                #[allow(clippy::cast_sign_loss)]
                 let frame = Frame {
                     data,
-                    width: yuv.cols() as u32,
-                    height: yuv.rows() as u32,
+                    width: rgb.cols() as usize,
+                    height: rgb.rows() as usize,
+                    id: id as u64,
                 };
 
                 if tx.send(frame).is_err() {
                     break;
                 }
-                
-                thread::sleep(Duration::from_millis(10));
-            }
 
+                thread::sleep(frame_duration);
+            }
         });
 
-        rx
+        Ok(rx)
     }
 
-    pub fn stop(&self) {
-        let mut run = self.running.write().unwrap();
+    /// Stop the capture thread by clearing the running flag. The
+    /// capture thread will observe this and exit shortly.
+    pub fn stop(&self) -> Result<(), ControllerError> {
+        let mut run = self
+            .running
+            .write()
+            .map_err(|_| ControllerError::PoisonedLock)?;
         *run = false;
+        Ok(())
     }
 }

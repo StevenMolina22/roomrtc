@@ -4,6 +4,13 @@ use super::connectivity_state::ConnectivityState;
 use super::error::IceError as Error;
 use if_addrs;
 
+/// An ICE agent that gathers local candidates, accepts remote candidates
+/// and forms candidate pairs for connectivity checks.
+///
+/// This agent implements a small subset of ICE functionality:
+/// gathering local host candidates, adding
+/// remote candidates, creating candidate pairs, and selecting a pair after
+/// simulated connectivity checks.
 pub struct IceAgent {
     local_candidates: Vec<Candidate>,
     remote_candidates: Vec<Candidate>,
@@ -18,7 +25,9 @@ impl Default for IceAgent {
 }
 
 impl IceAgent {
-    /// Creates a new empty ICE agent
+    /// Create a new, empty `IceAgent`.
+    ///
+    /// The agent starts with no local or remote candidates and no pairs.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -29,8 +38,11 @@ impl IceAgent {
         }
     }
 
-    /// Gathers local candidates (available IP addresses)
-    /// This implementation only gets the local IP
+    /// Gather local candidates and add them to the agent.
+    ///
+    /// This implementation performs a minimal gather: it selects a single
+    /// non-loopback IPv4 address from the host and creates a host
+    /// candidate.
     pub fn gather_candidates(&mut self, port: u16) -> Result<(), Error> {
         // Find my local IP and create a candidate
         let local_ip = get_local_ip()?;
@@ -42,13 +54,16 @@ impl IceAgent {
         Ok(())
     }
 
-    /// Adds a single remote candidate and creates pairs
+    /// Add a single remote candidate and create candidate pairs.
+    ///
+    /// Returns an error if no local candidates are available.
     pub fn add_remote_candidate(&mut self, candidate: Candidate) -> Result<(), Error> {
         self.remote_candidates.push(candidate);
         self.create_candidate_pair()
     }
 
-    /// Adds remote candidates received from the other peer and creates candidate pairs
+    /// Add multiple remote candidates (e.g., received from the peer) and
+    /// create candidate pairs for them.
     pub fn add_remote_candidates(&mut self, candidates: Vec<Candidate>) -> Result<(), Error> {
         for candidate in candidates {
             self.remote_candidates.push(candidate);
@@ -56,6 +71,10 @@ impl IceAgent {
         self.create_candidate_pair()
     }
 
+    /// Create pairs between all local and remote candidates.
+    ///
+    /// Validates that both local and remote candidate lists are non-empty
+    /// and constructs `CandidatePair` instances for every combination.
     fn create_candidate_pair(&mut self) -> Result<(), Error> {
         if self.local_candidates.is_empty() {
             return Err(Error::NoLocalCandidates);
@@ -74,7 +93,10 @@ impl IceAgent {
         Ok(())
     }
 
-    /// Starts connectivity checks and selects the best pair
+    /// Start connectivity checks and select a working pair.
+    ///
+    /// This function simulates connectivity checks by selecting the first
+    /// pair and marking it as `Succeeded`.
     pub fn start_connectivity_checks(&mut self) -> Result<(), Error> {
         if self.candidate_pairs.is_empty() {
             return Err(Error::NoCandidatePairs);
@@ -101,29 +123,41 @@ impl IceAgent {
         Ok(())
     }
 
+    pub fn get_local_ip_str(&self) -> Result<String, Error> {
+        get_local_ip()
+    }
+
+    /// Return a reference to the first local candidate, if any.
     #[must_use]
     pub fn get_local_candidate(&self) -> Option<&Candidate> {
         self.local_candidates.first()
     }
 
-    #[must_use]
-    pub const fn get_selected_pair(&self) -> Option<&CandidatePair> {
-        self.selected_pair.as_ref()
+    /// Return the selected candidate pair or an error if none was selected.
+    pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
+        self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
+    }
+
+    /// Clean remote candidates and candidate pairs.
+    pub fn clean_remote_candidates(&mut self) {
+        self.remote_candidates.clear();
+        self.candidate_pairs.clear();
+        self.selected_pair = None;
     }
 }
 
-/// Gets the local IP using if_addrs
+/// Get a non-loopback IPv4 address from the host using `if_addrs`.
+///
+/// Returns an error if no suitable interface is found or if the
+/// underlying call to list interfaces fails.
 fn get_local_ip() -> Result<String, Error> {
-    // Get all network interfaces
-    // returns a list with Interface type objects
-    // each Interface has name, addr, index, oper_status and is_loopback() method
     let interfaces = if_addrs::get_if_addrs().map_err(|_| Error::NetworkInterfaceError)?;
 
-    // Find the first interface that is not loopback
-    // loopback is a virtual internal interface of the operating system (doesn't connect any local network)
     for interface in interfaces {
-        if !interface.is_loopback() {
-            return Ok(interface.addr.ip().to_string());
+        if !interface.is_loopback()
+            && let std::net::IpAddr::V4(ipv4) = interface.addr.ip()
+        {
+            return Ok(ipv4.to_string());
         }
     }
 
@@ -155,7 +189,7 @@ mod tests {
         assert!(agent.local_candidates.is_empty());
         assert!(agent.remote_candidates.is_empty());
         assert!(agent.candidate_pairs.is_empty());
-        assert!(agent.get_selected_pair().is_none());
+        assert!(agent.get_selected_pair().is_err());
     }
 
     #[test]
@@ -174,9 +208,9 @@ mod tests {
     }
 
     #[test]
-    fn test_add_remote_candidate_creates_pairs() {
+    fn test_add_remote_candidate_creates_pairs() -> Result<(), Error> {
         let mut agent = IceAgent::new();
-        agent.gather_candidates(4000).unwrap();
+        agent.gather_candidates(4000)?;
 
         let remote = sample_remote_candidate();
 
@@ -189,21 +223,24 @@ mod tests {
         let pair = &agent.candidate_pairs[0];
         assert_eq!(pair.local.address, agent.local_candidates[0].address);
         assert_eq!(pair.remote.address, remote.address);
+        Ok(())
     }
 
     #[test]
-    fn test_start_connectivity_checks_selects_pair() {
+    fn test_start_connectivity_checks_selects_pair() -> Result<(), Error> {
         let mut agent = IceAgent::new();
-        agent.gather_candidates(4000).unwrap();
+        agent.gather_candidates(4000)?;
 
         let remote = sample_remote_candidate();
-        agent.add_remote_candidate(remote).unwrap();
+        agent.add_remote_candidate(remote)?;
 
         let result = agent.start_connectivity_checks();
         assert!(result.is_ok());
 
-        let selected = agent.get_selected_pair().unwrap();
+        let selected = agent.get_selected_pair()?;
         assert_eq!(selected.state, ConnectivityState::Succeeded);
+
+        Ok(())
     }
 
     #[test]

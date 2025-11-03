@@ -4,39 +4,41 @@ use crate::ice::Candidate;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
-/*
-#[derive(Debug, PartialEq, Eq)]
-pub enum MediaDescriptionError {
-    InvalidAttributeFormat,
-    InvalidFormat,
-}
 
-impl Display for MediaDescriptionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidAttributeFormat => write!(f, "Invalid attribute format"),
-            Self::InvalidFormat => {
-                write!(f, "Invalid format for this media description")
-            }
-        }
-    }
-}
-
-impl std::error::Error for MediaDescriptionError {}
-
- */
-
+/// Represents an SDP media description (`m=` line) together with its
+/// associated attributes.
+///
+/// `MediaDescription` holds the media type, port,
+/// transport protocol, the set of payload format
+/// identifiers advertised on the line, and the parsed attribute lines
+/// associated with the media section.
 pub struct MediaDescription {
+    /// Media type token.
     pub media_type: String,
+
+    /// Transport port for the media section.
     pub port: u16,
+
+    /// Transport protocol.
     pub protocol: String,
+
+    /// Set of payload format identifiers advertised in the media line.
     pub fmts: HashSet<u8>,
+
+    /// Attributes (`a=` lines) belonging to this media section.
     pub attributes: Vec<Attribute>,
 }
 
 impl FromStr for MediaDescription {
     type Err = Error;
 
+    /// Parse an SDP media description line of the form:
+    /// `m=<media> <port> <proto> <fmt> [<fmt> ...]`.
+    ///
+    /// Returns `InvalidMediaDescriptionFormatError` if there are fewer
+    /// than four tokens, `InvalidPortError` if the port is not a valid
+    /// `u16`, or `InvalidFmtError` if any advertised format token is not
+    /// a valid `u8`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s_vec: Vec<&str> = s.split_whitespace().collect();
         if s_vec.len() < 4 {
@@ -63,6 +65,10 @@ impl FromStr for MediaDescription {
 }
 
 impl Display for MediaDescription {
+    /// Render the media description and its attributes back to SDP text.
+    ///
+    /// The `m=` line is written first followed by each attribute on its
+    /// own line prefixed with a space for readability.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "m={} {} {}", self.media_type, self.port, self.protocol)?;
 
@@ -79,6 +85,8 @@ impl Display for MediaDescription {
 }
 
 impl MediaDescription {
+    /// Create a new `MediaDescription` with the given media type, port,
+    /// protocol and format set. The attribute list is initially empty.
     #[must_use]
     pub const fn new(media_type: String, port: u16, protocol: String, fmts: HashSet<u8>) -> Self {
         Self {
@@ -90,6 +98,11 @@ impl MediaDescription {
         }
     }
 
+    /// Add an attribute to this media section.
+    ///
+    /// Validates that an `RTPMap` attribute's payload type matches one of
+    /// the formats advertised in the `m=` line; otherwise returns
+    /// `UnmatchingMediaDescriptionAndAttributeError`.
     pub fn add_attribute(&mut self, attr: Attribute) -> Result<(), Error> {
         if let Attribute::RTPMap(fmt, _, _, _) = &attr
             && !self.fmts.contains(fmt)
@@ -101,6 +114,8 @@ impl MediaDescription {
         Ok(())
     }
 
+    /// Return the `Candidate` instances present in the attributes of this
+    /// media description.
     #[must_use]
     pub fn get_candidates(&self) -> Vec<Candidate> {
         let mut candidates: Vec<Candidate> = Vec::new();
@@ -121,22 +136,27 @@ mod tests {
     use crate::sdp::attribute::Attribute;
 
     #[test]
-    fn test_from_str_valid_media_description() {
+    fn test_from_str_valid_media_description() -> Result<(), Error> {
         let line = "audio 5004 RTP/AVP 96 97";
-        let md = MediaDescription::from_str(line).unwrap();
+        let md = MediaDescription::from_str(line)?;
 
         assert_eq!(md.media_type, "audio");
         assert_eq!(md.port, 5004);
         assert_eq!(md.protocol, "RTP/AVP");
         assert!(md.fmts.contains(&96));
         assert!(md.fmts.contains(&97));
+
+        Ok(())
     }
 
     #[test]
     fn test_from_str_invalid_format_missing_fields() {
         let line = "audio 5004 RTP/AVP";
         let result = MediaDescription::from_str(line);
-        assert!(matches!(result, Err(Error::InvalidMediaDescriptionFormatError)));
+        assert!(matches!(
+            result,
+            Err(Error::InvalidMediaDescriptionFormatError)
+        ));
     }
 
     #[test]
@@ -172,7 +192,9 @@ mod tests {
 
         let attr = Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into()));
         let result = md.add_attribute(attr);
-        assert!(matches!(result, Err(Error::UnmatchingMediaDescriptionAndAttributeError)));
+        assert!(matches!(
+            result,
+            Err(Error::UnmatchingMediaDescriptionAndAttributeError)
+        ));
     }
 }
-

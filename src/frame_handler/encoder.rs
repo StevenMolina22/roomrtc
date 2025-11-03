@@ -69,6 +69,8 @@ impl Encoder {
     }
 }
 
+/// Splits the encoded NALUs into smaller chunks based on the
+/// `max_chunk_size`.
 fn generate_chunks_from_nalus(nalus: EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
     let nalu_units = nalus.to_vec();
     let mut chunks = Vec::new();

@@ -23,8 +23,22 @@ pub struct RtcpReportHandler<S: Socket + Send + Sync + 'static> {
 }
 
 impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
-    /// Create a new `RtcpReportHandler` for the given socket and
+    /// Create a new `RtcpReportHandler` bound to a socket and a shared
     /// connection status handle.
+    ///
+    /// The handler spawns background threads to periodically send
+    /// connectivity reports and to listen for incoming reports or
+    /// control messages (e.g. goodbye). The provided `connection_status`
+    /// is used to coordinate session state between threads.
+    ///
+    /// # Parameters
+    /// - `socket`: an implementation of the project's `Socket` trait
+    ///   used for sending/receiving RTCP-style messages.
+    /// - `connection_status`: shared `Arc<RwLock<ConnectionStatus>>` used
+    ///   to publish the session state (Open/Closed) across threads.
+    ///
+    /// # Returns
+    /// A configured `RtcpReportHandler` that is ready to `start()`.
     pub fn new(socket: S, connection_status: Arc<RwLock<ConnectionStatus>>) -> Self {
         Self {
             socket: Arc::new(socket),
@@ -32,6 +46,16 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         }
     }
 
+    /// Perform the RTCP-style handshake to establish the reporting
+    /// session with a remote peer.
+    ///
+    /// This method sends a `Hello` packet, waits for the peer's
+    /// `Hello`, replies with `Ready` and transitions the local
+    /// `connection_status` to `Open` once the handshake completes.
+    ///
+    /// # Errors
+    /// Returns an `Error` when socket operations fail or when an
+    /// unexpected message is received during the handshake.
     pub fn init_connection(&self) -> Result<(), Error> {
         if let Err(e) = self.socket.send(RtcpPacket::Hello.as_bytes()) {
             eprintln!("{}", e);
@@ -71,7 +95,9 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     pub fn start(&self) -> Result<(), Error> {
         let sender_socket = Arc::clone(&self.socket);
         let receiver_socket = Arc::clone(&self.socket);
-
+        // Start the receiver thread first so it can immediately observe
+        // incoming messages; then start the sender thread which will
+        // periodically transmit connectivity reports.
         self.start_report_receiver(receiver_socket)?;
         self.start_report_sender(sender_socket);
         Ok(())
@@ -103,6 +129,11 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         });
     }
 
+    /// Spawn the background receiver thread which listens for incoming
+    /// RTCP-style packets and updates the `connection_status` accordingly.
+    ///
+    /// The receiver runs with a read timeout configured to `REPORT_RECEIVE_LIMIT`
+    /// and uses `try_receive_report` to parse and handle incoming data.
     fn start_report_receiver(&self, report_socket: Arc<S>) -> Result<(), Error> {
         report_socket
             .set_read_timeout(Some(REPORT_RECEIVE_LIMIT))
@@ -139,6 +170,11 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         Ok(())
     }
 
+    /// Close the reporting connection by sending a `Goodbye` packet
+    /// and updating the `connection_status` to `Closed`.
+    ///
+    /// # Returns
+    /// A result indicating success or failure.
     pub fn close_connection(&self) -> Result<(), Error> {
         if let Ok(mut conn) = self.connection_status.write() {
             *conn = ConnectionStatus::Closed;

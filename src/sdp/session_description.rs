@@ -8,26 +8,24 @@ use std::str::FromStr;
 
 /// SDP keys used when parsing session description lines.
 ///
-/// - `m` indicates the start of a media description line.
-/// - `a` indicates an attribute line that should be attached to the
-///   most-recently-parsed media description.
+/// These constants represent the single-letter SDP line prefixes used
+/// when processing a textual SDP. They are kept here to avoid magic
+/// strings scattered through the parser.
+///
+/// - `m` indicates the start of a media description line ("m=").
+/// - `a` indicates an attribute line ("a=") that should be attached
+///   to the most-recently-parsed media description.
 const MEDIA_DESCRIPTION_KEY: &str = "m";
 const ATTRIBUTE_KEY: &str = "a";
 
-/// In-memory representation of a SDP session description.
+/// In-memory representation of an SDP session description.
 ///
-/// This struct holds a reduced subset of SDP fields needed by the
-/// project: version, origin id, session name, timing, a list of media
-/// descriptions and connection data. Only `media_descriptions` is
-/// publicly exposed; other fields are initialized with defaults when
-/// parsing.
-/// In-memory representation of a SDP session description.
-///
-/// This struct contains the subset of SDP fields required by the
-/// project: version, origin id, session name, timing, a list of media
-/// descriptions and connection data. Only `media_descriptions` is
+/// The parser stores a subset of the SDP fields required by
+/// the project: version (v=), origin id (o=), session name (s=),
+/// timing (t=), a list of media descriptions (m= sections) and the
+/// session-level connection data (c=). Only `media_descriptions` is
 /// publicly exposed; other fields are initialized with sensible
-/// defaults when parsing or creating instances.
+/// defaults when creating or parsing an SDP.
 pub struct SessionDescriptionProtocol {
     /// SDP version (`v=`). Defaults to 0 in created instances.
     version: u8,
@@ -42,6 +40,9 @@ pub struct SessionDescriptionProtocol {
     timing: String,
 
     /// Media descriptions (`m=` sections) parsed from the SDP.
+    ///
+    /// Each entry corresponds to one media section in the textual SDP
+    /// and contains its attributes (including `a=rtpmap` and `a=candidate`).
     pub media_descriptions: Vec<MediaDescription>,
 
     /// Connection data (`c=`), e.g. `IN IP4 0.0.0.0` by default.

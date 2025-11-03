@@ -27,6 +27,26 @@ pub struct Client {
 }
 
 impl Client {
+    /// Crea un nuevo `Client` usando el puerto de medios y la
+    /// configuración de códec proporcionada.
+    ///
+    /// Parámetros:
+    /// - `media_port`: puerto UDP donde se realizará la recolección de
+    ///   candidatos ICE y donde el endpoint espera/recibe paquetes RTP.
+    /// - `media_config`: configuración del flujo de medios.
+    ///
+    /// El método realiza las siguientes tareas:
+    /// 1. Crea un `IceAgent` y llama a `gather_candidates` para obtener
+    ///    candidatos locales.
+    /// 2. Construye una `MediaDescription` local y añade un atributo
+    ///    `rtpmap` (y un atributo `candidate` si hay candidato local).
+    /// 3. Inicializa el `SessionDescriptionProtocol` local y, si existe
+    ///    un candidato local, escribe la dirección de conexión (`c=`)
+    ///    con la IP del candidato.
+    ///
+    /// # Retorno
+    /// Devuelve un `Client` con el SDP local y el `IceAgent` ya
+    /// configurado y con candidatos (si la recolección fue exitosa).
     pub fn new(media_port: u16, media_config: MediaConfig) -> Self {
         let mut ice_agent = IceAgent::new();
         if ice_agent.gather_candidates(media_port).is_err() {

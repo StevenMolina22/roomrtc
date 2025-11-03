@@ -75,7 +75,7 @@ impl Candidate {
     #[must_use]
     pub fn new_host(address: String, component_id: u8) -> Self {
         let candidate_type = CandidateType::Host;
-        let priority = Self::calculate_priority(&candidate_type, 65535); // High local preference
+        let priority = Self::calculate_priority(&candidate_type, 65535);
         let foundation = "1".to_string();
         let transport = "UDP".to_string();
 
@@ -96,11 +96,7 @@ impl Candidate {
     /// preference, local preference and component id into a single `u32`
     /// priority value.
     fn calculate_priority(candidate_type: &CandidateType, local_preference: u16) -> u32 {
-        let type_preference = match candidate_type {
-            CandidateType::Host => 126,
-            CandidateType::ServerReflexive => 100,
-        };
-        (type_preference << 24) | (u32::from(local_preference) << 8) | (256 - 1)
+        (candidate_type.priority() << 24) | (u32::from(local_preference) << 8) | (256 - 1)
     }
 }
 

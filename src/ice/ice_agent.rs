@@ -44,7 +44,6 @@ impl IceAgent {
     /// non-loopback IPv4 address from the host and creates a host
     /// candidate.
     pub fn gather_candidates(&mut self, port: u16) -> Result<(), Error> {
-        // Find my local IP and create a candidate
         let local_ip = get_local_ip()?;
         let mut candidate = Candidate::new_host(local_ip, 1);
         candidate.port = port;

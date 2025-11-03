@@ -63,7 +63,6 @@ mod tests {
 
     #[test]
     fn test_rtcp_packet_roundtrip_all_variants() {
-        //Create a list of all packet variants
         let all_packets = [
             RtcpPacket::ConnectivityReport,
             RtcpPacket::Goodbye,
@@ -71,7 +70,6 @@ mod tests {
             RtcpPacket::Ready,
         ];
 
-        // Loop through each one and test its roundtrip
         for original_packet in all_packets {
             let bytes = original_packet.as_bytes();
             let deserialized_option = RtcpPacket::from_bytes(bytes);
@@ -91,7 +89,6 @@ mod tests {
 
     #[test]
     fn test_from_bytes_invalid_data() {
-        // Create a byte slice that doesn't match any known packet
         let invalid_bytes = b"INVALID PACKET";
 
         let result = RtcpPacket::from_bytes(invalid_bytes);
@@ -110,7 +107,6 @@ mod tests {
 
     #[test]
     fn test_from_bytes_partial_match() {
-        // This is 'C' which is a prefix of 'CR', but not 'CR'
         let partial_bytes = b"C";
 
         let result = RtcpPacket::from_bytes(partial_bytes);

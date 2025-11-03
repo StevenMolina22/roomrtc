@@ -125,7 +125,6 @@ mod tests {
 
     #[test]
     fn test_rtp_packet_serialization_roundtrip() {
-        // Create a packet with unique, non-zero values for all fields
         let original_packet = RtpPacket {
             version: 2,
             marker: 5,
@@ -137,7 +136,6 @@ mod tests {
             payload: vec![10, 20, 30, 40, 50],
         };
 
-        // Serialize and then deserialize the packet
         let bytes = original_packet.to_bytes();
         let deserialized_option = RtpPacket::from_bytes(&bytes);
 
@@ -145,7 +143,6 @@ mod tests {
 
         let deserialized_packet = deserialized_option.unwrap();
 
-        // Assert every single field is identical
         assert_eq!(
             original_packet.version, deserialized_packet.version,
             "Version mismatch"
@@ -182,7 +179,6 @@ mod tests {
 
     #[test]
     fn test_from_bytes_too_short() {
-        // Header is 28 bytes, we send 27
         let short_bytes: &[u8] = &[0; 27];
 
         let result = RtpPacket::from_bytes(short_bytes);
@@ -195,15 +191,14 @@ mod tests {
 
     #[test]
     fn test_from_bytes_exactly_header_size() {
-        // A packet with 28 bytes should deserialize into a packet with an empty payload
         let header_only_bytes: &[u8] = &[
-            2,  // version
-            96, // payload_type
-            0, 0, 0, 0, 0, 0, 0, 1, // frame_id = 1
-            0, 0, 0, 0, 0, 0, 0, 0, // chunk_id = 0
-            0, 0, 0, 100, // timestamp = 100
-            0, 1, // marker = 1
-            0, 0, 0, 2, // ssrc = 2
+            2,
+            96,
+            0, 0, 0, 0, 0, 0, 0, 1,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 100,
+            0, 1,
+            0, 0, 0, 2,
         ];
 
         let result = RtpPacket::from_bytes(header_only_bytes);

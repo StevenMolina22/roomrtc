@@ -55,22 +55,22 @@ impl Display for IceError {
             Self::NetworkInterfaceError => {
                 write!(f, "Error: \"could not obtain network interface\"")
             }
-            IceError::NoNetworkInterfaceFound => write!(f, "Error: \"no network interface found\""),
-            IceError::InvalidCandidateAddress => write!(f, "Error: \"invalid candidate address\""),
-            IceError::InvalidCandidatePort => write!(f, "Error: \"invalid candidate port\""),
-            IceError::InvalidCandidateType => write!(f, "Error: \"invalid candidate type\""),
-            IceError::NoLocalCandidates => write!(f, "Error: \"no local candidate available\""),
-            IceError::NoRemoteCandidates => write!(f, "Error: \"no remote candidate available\""),
-            IceError::CandidatePairCreationFailed => write!(f, "Error: \"pair creation failed\""),
-            IceError::NoCandidatePairs => write!(f, "Error: \"no candidate pairs available\""),
-            IceError::InvalidConnectivityState => {
+            Self::NoNetworkInterfaceFound => write!(f, "Error: \"no network interface found\""),
+            Self::InvalidCandidateAddress => write!(f, "Error: \"invalid candidate address\""),
+            Self::InvalidCandidatePort => write!(f, "Error: \"invalid candidate port\""),
+            Self::InvalidCandidateType => write!(f, "Error: \"invalid candidate type\""),
+            Self::NoLocalCandidates => write!(f, "Error: \"no local candidate available\""),
+            Self::NoRemoteCandidates => write!(f, "Error: \"no remote candidate available\""),
+            Self::CandidatePairCreationFailed => write!(f, "Error: \"pair creation failed\""),
+            Self::NoCandidatePairs => write!(f, "Error: \"no candidate pairs available\""),
+            Self::InvalidConnectivityState => {
                 write!(f, "Error: \"invalid connectivity state\"")
             }
             Self::UnsupportedCandidateType => {
                 write!(f, "Error: \"unsupported candidate type\"")
             }
-            IceError::InternalError => write!(f, "Error: \"internal error\""),
-            IceError::NoSelectedPair => write!(f, "Error: \"no selected pair available\""),
+            Self::InternalError => write!(f, "Error: \"internal error\""),
+            Self::NoSelectedPair => write!(f, "Error: \"no selected pair available\""),
         }
     }
 }

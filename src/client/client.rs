@@ -48,9 +48,13 @@ impl Client {
     /// # Returns
     /// Returns a `Client` containing the local SDP and an `IceAgent`
     /// already configured with (potentially) gathered candidates.
+    #[must_use]
     pub fn new(media_port: u16, media_config: MediaConfig) -> Self {
         let mut ice_agent = IceAgent::new();
-        assert!(ice_agent.gather_candidates(media_port).is_ok(), "Failed to gather ICE candidates");
+        assert!(
+            ice_agent.gather_candidates(media_port).is_ok(),
+            "Failed to gather ICE candidates"
+        );
 
         let mut media_description = MediaDescription::new(
             MEDIA_TYPE.into(),
@@ -116,7 +120,7 @@ impl Client {
 
     /// Return the local SDP offer string generated from the current
     /// `SessionDescriptionProtocol` state.
-    #[must_use] 
+    #[must_use]
     pub fn get_offer(&self) -> String {
         self.sdp.to_string()
     }

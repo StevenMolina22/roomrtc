@@ -22,8 +22,7 @@ pub enum ClientError {
 impl Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            Self::SdpCreationError(e) => write!(f, "{e}"),
-            Self::IceConnectionError(e) => write!(f, "{e}"),
+            Self::SdpCreationError(e) | Self::IceConnectionError(e) => write!(f, "{e}"),
         }
     }
 }

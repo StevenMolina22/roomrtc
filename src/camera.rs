@@ -28,6 +28,7 @@ impl Camera {
     /// # Parameters
     /// - `media_config`: media capture configuration (camera index,
     ///   frame size and frame rate).
+    #[must_use]
     pub fn new(media_config: MediaConfig) -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
@@ -41,7 +42,7 @@ impl Camera {
     ///
     /// The returned receiver receives `Frame` instances continuously
     /// until `stop()` is called or the sender is dropped. This method
-    /// spawns a background thread that captures frames from OpenCV's
+    /// spawns a background thread that captures frames from `OpenCV`'s
     /// `VideoCapture` and converts them to RGB `Frame`s at the
     /// configured frame rate.
     pub fn start(&mut self) -> Receiver<Frame> {

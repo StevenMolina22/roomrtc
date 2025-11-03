@@ -39,23 +39,23 @@ impl Display for FrameError {
     /// Formats the error as a string.
     fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
         match self {
-            FrameError::EncoderInitializationError => {
+            Self::EncoderInitializationError => {
                 write!(fmt, "Error: failed to intialize encoder")
             }
-            FrameError::EncodingError => write!(fmt, "Error: failed to encode frame"),
-            FrameError::DecoderInitializationError => {
+            Self::EncodingError => write!(fmt, "Error: failed to encode frame"),
+            Self::DecoderInitializationError => {
                 write!(fmt, "Error: failed to initialize decoder")
             }
-            FrameError::DecodingError => write!(fmt, "Error: failed to decode frame"),
-            FrameError::EmptyFrameError => write!(fmt, "Error: no frame was provided"),
-            FrameError::UnableToCreateFrameFromYUVError => {
+            Self::DecodingError => write!(fmt, "Error: failed to decode frame"),
+            Self::EmptyFrameError => write!(fmt, "Error: no frame was provided"),
+            Self::UnableToCreateFrameFromYUVError => {
                 write!(fmt, "Error: failed to create a frame from yuv vec.")
             }
-            FrameError::ReshapingFrameError => write!(fmt, "Error: failed to reshape frame"),
-            FrameError::TypeConversionError => {
+            Self::ReshapingFrameError => write!(fmt, "Error: failed to reshape frame"),
+            Self::TypeConversionError => {
                 write!(fmt, "Error: failed to convert frame from yuv to rgb")
             }
-            FrameError::BytesConversionError => {
+            Self::BytesConversionError => {
                 write!(fmt, "Error: failed to convert frame to bytes")
             }
         }

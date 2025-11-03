@@ -64,10 +64,9 @@ impl Display for ControllerError {
     /// These messages include brief context and the underlying error details where present.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ParsingSocketAddressError(e) => write!(
-                f,
-                "Error: \"Failed to parse socket address\". Details: {e}"
-            ),
+            Self::ParsingSocketAddressError(e) => {
+                write!(f, "Error: \"Failed to parse socket address\". Details: {e}")
+            }
             Self::BindingAddressError(e) => {
                 write!(f, "Error: \"Failed to bind socket\". Details: {e}")
             }
@@ -80,10 +79,9 @@ impl Display for ControllerError {
             Self::RtpSenderError(e) => {
                 write!(f, "Error: \"Failed to create RTP sender\". Details: {e}")
             }
-            Self::RtpReceiverError(e) => write!(
-                f,
-                "Error: \"Failed to create RTP receiver\". Details: {e}"
-            ),
+            Self::RtpReceiverError(e) => {
+                write!(f, "Error: \"Failed to create RTP receiver\". Details: {e}")
+            }
             Self::PoisonedLock => write!(f, "Error: \"Poisoned lock\""),
             Self::MapError(e) => write!(f, "{e}"),
             Self::EmptyRTPSenderError => write!(f, "Error: \"there is no RTP sender built yet\""),

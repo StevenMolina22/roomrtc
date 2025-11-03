@@ -124,7 +124,7 @@ mod tests {
     fn new_candidate_fields_set_correctly() {
         let candidate = Candidate::new(
             CandidateType::ServerReflexive,
-            123456,
+            123_456,
             "10.0.0.5".to_string(),
             3478,
             1,
@@ -133,7 +133,7 @@ mod tests {
         );
 
         assert_eq!(candidate.candidate_type, CandidateType::ServerReflexive);
-        assert_eq!(candidate.priority, 123456);
+        assert_eq!(candidate.priority, 123_456);
         assert_eq!(candidate.address, "10.0.0.5");
         assert_eq!(candidate.port, 3478);
         assert_eq!(candidate.component_id, 1);
@@ -175,7 +175,7 @@ mod tests {
     fn display_format() {
         let candidate = Candidate::new(
             CandidateType::Host,
-            999999,
+            999_999,
             "8.8.8.8".to_string(),
             1234,
             1,

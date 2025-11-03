@@ -231,7 +231,7 @@ mod tests {
                 assert_eq!(cand.foundation, "1");
                 assert_eq!(cand.component_id, 1);
                 assert_eq!(cand.transport, "udp");
-                assert_eq!(cand.priority, 2122252543);
+                assert_eq!(cand.priority, 2_122_252_543);
                 assert_eq!(cand.address, "192.168.1.5");
                 assert_eq!(cand.port, 54400);
                 assert!(matches!(cand.candidate_type, CandidateType::Host));
@@ -306,7 +306,7 @@ mod tests {
     fn test_display_candidate() {
         let candidate = Candidate::new(
             CandidateType::Host,
-            2122252543,
+            2_122_252_543,
             "192.168.1.5".into(),
             54400,
             1,

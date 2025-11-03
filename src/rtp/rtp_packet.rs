@@ -130,10 +130,10 @@ mod tests {
             version: 2,
             marker: 5,
             payload_type: 96,
-            frame_id: 123456789,
+            frame_id: 123_456_789,
             chunk_id: 42,
-            timestamp: 1122334455,
-            ssrc: 987654321,
+            timestamp: 1_122_334_455,
+            ssrc: 987_654_321,
             payload: vec![10, 20, 30, 40, 50],
         };
 

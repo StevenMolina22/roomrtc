@@ -75,20 +75,19 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     Some(RtcpPacket::Ready) => {
                         if ready {
                             break;
-                        } else {
-                            ready = true;
-                            self.socket
-                                .send(RtcpPacket::Ready.as_bytes())
-                                .map_err(|e| Error::SendFailed(e.to_string()))?;
-                            let mut conn = self
-                                .connection_status
-                                .write()
-                                .map_err(|_| Error::ConnectionStatusLockFailed)?;
-                            *conn = ConnectionStatus::Open;
                         }
+                        ready = true;
+                        self.socket
+                            .send(RtcpPacket::Ready.as_bytes())
+                            .map_err(|e| Error::SendFailed(e.to_string()))?;
+                        let mut conn = self
+                            .connection_status
+                            .write()
+                            .map_err(|_| Error::ConnectionStatusLockFailed)?;
+                        *conn = ConnectionStatus::Open;
                     }
                     Some(_) => return Err(Error::UnexpectedMessage),
-                    None => continue,
+                    None => {}
                 },
                 Err(e) => return Err(Error::ReceiveFailed(e.to_string())),
             }
@@ -161,7 +160,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     Ok(()) => retries = 0,
                     Err(Error::GoodbyeReceived) => {
                         println!("Goodbye recibido!");
-                        retries = RETRY_LIMIT
+                        retries = RETRY_LIMIT;
                     }
                     Err(_) => retries += 1,
                 }

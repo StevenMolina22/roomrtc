@@ -72,17 +72,16 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                     if let Some(packet) = RtpPacket::from_bytes(&buf[..size]) {
                         return Ok(packet);
                     }
-                    continue;
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    let conn = self
+                    if self
                         .connection_status
                         .read()
-                        .map_err(|_| Error::ConnectionStatusLockFailed)?;
-                    if *conn == ConnectionStatus::Closed {
+                        .map_err(|_| Error::ConnectionStatusLockFailed)
+                        .map(|conn| *conn == ConnectionStatus::Closed)?
+                    {
                         return Err(Error::ConnectionClosed);
                     }
-                    continue;
                 }
                 Err(e) => {
                     self.report_handler

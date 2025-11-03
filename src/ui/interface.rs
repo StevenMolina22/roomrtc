@@ -8,7 +8,7 @@ use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, mpsc};
 
-/// Application state and UI controller for the RoomRTC GUI.
+/// Application state and UI controller for the `RoomRTC` GUI.
 ///
 /// This struct holds the UI view state, the controller used to manage
 /// the underlying client and media pipelines, the configuration, and
@@ -50,6 +50,7 @@ impl RoomRTCApp {
     /// - A fully initialised `RoomRTCApp` with channels created for
     ///   receiving local frames, remote frames and events. The
     ///   `Controller` is created and returned in a running state.
+    #[must_use]
     pub fn new(config: Config) -> Self {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
@@ -120,7 +121,7 @@ impl RoomRTCApp {
                 self.our_offer = self.controller.client.get_offer();
                 self.remote_sdp = String::new();
                 self.our_answer = None;
-                self.view = View::Connection
+                self.view = View::Connection;
             }
 
             ui.add_space(10.0);
@@ -143,10 +144,10 @@ impl RoomRTCApp {
     /// `offerer_flow` and `answerer_flow`). A Cancel button returns
     /// to the main menu.
     fn show_connection(&mut self, ui: &mut Ui) {
-        if !self.our_offer.is_empty() {
-            self.offerer_flow(ui);
-        } else {
+        if self.our_offer.is_empty() {
             self.answerer_flow(ui);
+        } else {
+            self.offerer_flow(ui);
         }
 
         if ui.button("Cancel").clicked() {
@@ -180,7 +181,7 @@ impl RoomRTCApp {
             let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
                 if let Err(e) = self.controller.shut_down() {
-                    eprintln!("{}", e);
+                    eprintln!("{e}");
                 }
                 self.reset();
                 self.view = View::Menu;
@@ -206,7 +207,7 @@ impl RoomRTCApp {
 
         if !self.remote_sdp.is_empty() && ui.button("Connect").clicked() {
             if let Err(e) = self.controller.client.process_answer(&self.remote_sdp) {
-                eprintln!("Failed to process answer: {}", e);
+                eprintln!("Failed to process answer: {e}");
             } else {
                 self.controller.start_call().unwrap();
                 self.view = View::Call;
@@ -231,7 +232,7 @@ impl RoomRTCApp {
         {
             match self.controller.client.process_offer(&self.remote_sdp) {
                 Ok(answer_str) => self.our_answer = Some(answer_str),
-                Err(e) => eprintln!("Failed to process offer: {}", e),
+                Err(e) => eprintln!("Failed to process offer: {e}"),
             }
         }
 
@@ -244,7 +245,7 @@ impl RoomRTCApp {
             let join_btn = egui::Button::new("Join Call");
             if ui.add(join_btn).clicked() {
                 if let Err(e) = self.controller.start_call() {
-                    eprintln!("Failed to start call: {}", e);
+                    eprintln!("Failed to start call: {e}");
                 }
                 self.view = View::Call;
             }

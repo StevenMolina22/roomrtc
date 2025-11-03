@@ -32,7 +32,8 @@ impl Display for RtcpPacket {
 impl RtcpPacket {
     /// Return a byte representation of the packet suitable for sending
     /// over a socket.
-    pub fn as_bytes(&self) -> &'static [u8] {
+    #[must_use]
+    pub const fn as_bytes(&self) -> &'static [u8] {
         match self {
             Self::ConnectivityReport => b"CR",
             Self::Goodbye => b"BY",
@@ -44,7 +45,8 @@ impl RtcpPacket {
     /// Parse a packet from the byte representation produced by
     /// `as_bytes`. Returns `Some(RtcpPacket)` if the bytes match a known
     /// variant, or `None` otherwise.
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+    #[must_use]
+    pub const fn from_bytes(data: &[u8]) -> Option<Self> {
         match data {
             b"CR" => Some(Self::ConnectivityReport),
             b"BY" => Some(Self::Goodbye),
@@ -76,8 +78,7 @@ mod tests {
 
             assert!(
                 deserialized_option.is_some(),
-                "from_bytes returned None for a valid packet: {:?}",
-                original_packet
+                "from_bytes returned None for a valid packet: {original_packet:?}"
             );
 
             assert_eq!(

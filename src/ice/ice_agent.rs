@@ -139,6 +139,7 @@ impl IceAgent {
         self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
     }
     
+    /// Clean remote candidates and candidate pairs.
     pub fn clean_remote_candidates(&mut self)  {
         self.remote_candidates.clear();
         self.candidate_pairs.clear();

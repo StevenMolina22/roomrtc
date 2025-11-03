@@ -29,8 +29,14 @@ pub enum RtcpError {
 
     /// Provided duration cannot be converted to the expected type.
     InvalidConfigDuration,
+
+    /// Sending an RTCP packet failed.
     SendFailed(String),
+
+    /// Receiving an RTCP packet failed.
     ReceiveFailed(String),
+
+    /// An unexpected RTCP message was received.
     UnexpectedMessage,
 }
 

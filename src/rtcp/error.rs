@@ -12,6 +12,7 @@ pub enum RtcpError {
     InvalidConfigDuration,
     SendFailed(String),
     ReceiveFailed(String),
+    UnexpectedMessage,
 }
 
 impl Display for RtcpError {
@@ -33,6 +34,7 @@ impl Display for RtcpError {
             }
             Self::SendFailed(e) => write!(f, "Error: \"Failed to send RTCP packet. Details: {}\"", e),
             Self::ReceiveFailed(e) => write!(f, "Error: \"Failed to receive RTCP packet. Details: {}\"", e),
+            Self::UnexpectedMessage => write!(f, "Error: Unexpected message"),
         }
     }
 }

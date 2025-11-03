@@ -26,19 +26,39 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     }
 
     pub fn init_connection(&self) -> Result<(), Error> {
-        self.socket.send(RtcpPacket::ConnectivityReport.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
+        if let Err(e) = self.socket.send(RtcpPacket::Hello.as_bytes()) {
+            eprintln!("{}", e);
+        }
+
+        let mut ready = false;
+
         loop {
             let mut buff = [0u8; 1024];
             match self.socket.recv_from(&mut buff) {
                 Ok((size, _addr)) => {
-                    if let Some(RtcpPacket::ConnectivityReport) = RtcpPacket::from_bytes(&buff[..size]) {
-                        let mut conn = self.connection_status.write().map_err(|_| Error::PoisonedLock)?;
-                        *conn = ConnectionStatus::Open;
-                        break;
+                    println!("Lei algo");
+                    match RtcpPacket::from_bytes(&buff[..size]) {
+                        Some(RtcpPacket::Hello) => {
+                            self.socket.send(RtcpPacket::Ready.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
+                        },
+                        Some(RtcpPacket::Ready) => {
+                            if ready {
+                                break;
+                            } else {
+                                ready = true;
+                                self.socket.send(RtcpPacket::Ready.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
+                                let mut conn = self.connection_status.write()
+                                    .map_err(|_| Error::ConnectionStatusLockFailed)?;
+                                *conn = ConnectionStatus::Open;
+                            }
+                        },
+                        Some(_) => return Err(Error::UnexpectedMessage),
+                        None => continue,
                     }
                 }
                 Err(e) => return Err(Error::ReceiveFailed(e.to_string())),
             }
+            println!("no lei nada");
         }
         Ok(())
     }
@@ -106,6 +126,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
             if let Ok(mut conn) = shared_connection_status.write() {
                 *conn = ConnectionStatus::Closed;
+                println!("cambio estado a closed");
             }
         });
 
@@ -136,6 +157,7 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
                 Ok(())
             }
             Some(RtcpPacket::Goodbye) => Err(Error::GoodbyeReceived),
+            Some(_) => Err(Error::UnexpectedMessage),
             None => {
                 if Local::now() - *last_report_time
                     > chrono::Duration::from_std(REPORT_RECEIVE_LIMIT).unwrap()

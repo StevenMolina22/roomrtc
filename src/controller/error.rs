@@ -14,6 +14,7 @@ pub enum ControllerError {
     EmptyRTPSenderError,
     JoinThreadError,
     ConnectionNotStarted,
+    ConnectionClosed,
 }
 
 pub enum ThreadsError {
@@ -51,6 +52,7 @@ impl Display for ControllerError {
             Self::EmptyRTPSenderError => write!(f, "Error: \"there is no RTP sender built yet\""),
             Self::JoinThreadError => write!(f, "Error: \"Failed to join thread\""),
             Self::ConnectionNotStarted => write!(f, "Error: \"Connection not started\""),
+            Self::ConnectionClosed => write!(f, "Error: \"Connection closed\""),
         }
     }
 }

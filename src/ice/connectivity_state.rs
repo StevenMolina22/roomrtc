@@ -3,7 +3,7 @@
 /// This enum represents the current state of connectivity probing for an
 /// ICE candidate pair. It is used to track progress of checks and to
 /// communicate status in logs and user interfaces.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConnectivityState {
     /// Initial state: the pair is waiting to be checked.
     Waiting,

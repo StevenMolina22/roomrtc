@@ -102,7 +102,7 @@ mod tests {
         let local = build_candidate(100);
         let remote = build_candidate(200);
 
-        let pair = CandidatePair::new(local.clone(), remote.clone());
+        let pair = CandidatePair::new(local, remote);
 
         assert_eq!(pair.local.priority, 100);
         assert_eq!(pair.remote.priority, 200);
@@ -132,7 +132,7 @@ mod tests {
 
         let pair = CandidatePair::new(local, remote);
 
-        let display = format!("{}", pair);
+        let display = format!("{pair}");
 
         assert!(display.contains("<->"));
         assert!(display.contains("priority"));

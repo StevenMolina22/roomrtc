@@ -1,6 +1,7 @@
 use super::error::{ControllerError as Error, ThreadsError};
 use crate::config::Config;
 use crate::frame_handler::{EncodedFrame, Frame};
+use crate::rtcp::RtcpReportHandler;
 use crate::rtp::{ConnectionStatus, RtpPacket};
 use crate::{
     camera::Camera,
@@ -14,7 +15,6 @@ use std::net::UdpSocket;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use crate::rtcp::RtcpReportHandler;
 
 pub struct Controller {
     pub client: Client,
@@ -88,10 +88,10 @@ impl Controller {
 
         let remote_rtp: SocketAddr = format!("{}:{}", pair.remote.address, pair.remote.port)
             .parse()
-            .map_err(|e| Error::ParsingSocketAddressError(e))?;
+            .map_err(Error::ParsingSocketAddressError)?;
         let remote_rtcp: SocketAddr = format!("{}:{}", pair.remote.address, pair.remote.port + 1)
             .parse()
-            .map_err(|e| Error::ParsingSocketAddressError(e))?;
+            .map_err(Error::ParsingSocketAddressError)?;
 
         self.rtp_socket
             .connect(remote_rtp)
@@ -126,12 +126,13 @@ impl Controller {
 
         match &self.rtcp_handler {
             Some(handler_lock) => {
-                handler_lock.lock()
+                handler_lock
+                    .lock()
                     .map_err(|_| Error::PoisonedLock)?
                     .start()
                     .map_err(|e| Error::MapError(e.to_string()))?;
-            },
-            None => return Err(Error::ConnectionNotStarted)
+            }
+            None => return Err(Error::ConnectionNotStarted),
         }
 
         self.generate_media_threads()
@@ -189,17 +190,19 @@ impl Controller {
                 for frame in rx_camera {
                     if let Err(e) = tx_local_cam.send(frame.clone()) {
                         let error = ThreadsError::Fatal(e.to_string());
-                        if let Err(_) = tx_thread.send(error) {
+                        if tx_thread.send(error).is_err() {
                             eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
-                        };
+                        }
                         break;
                     }
                     let encoded = match encoder.encode_frame(&frame) {
                         Ok(enc) => enc,
                         Err(e) => {
                             let error = ThreadsError::Fatal(e.to_string());
-                            if let Err(_) = tx_thread.send(error) {
-                                eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                            if tx_thread.send(error).is_err() {
+                                eprintln!(
+                                    "[THREAD] Failed to send error to monitor, exiting thread"
+                                );
                             }
                             break;
                         }
@@ -212,7 +215,7 @@ impl Controller {
                         height: frame.height,
                     };
 
-                    if let Err(_) = tx_encoded.send(encoded_frame) {
+                    if tx_encoded.send(encoded_frame).is_err() {
                         match camera.lock() {
                             Ok(cam) => cam.stop(),
                             Err(_) => {
@@ -236,7 +239,7 @@ impl Controller {
             Some(handler_lock) => Arc::clone(handler_lock),
             None => return Err(Error::ConnectionNotStarted),
         };
-        
+
         let rtp_sender = RtpSender::new(
             rtp_socket,
             rtcp_handler,
@@ -249,36 +252,36 @@ impl Controller {
         thread::spawn({
             move || {
                 loop {
-                    if let Ok(is_closed) = connection_is_closed(&tx_thread, &status) && is_closed {
-                        break
+                    if let Ok(is_closed) = connection_is_closed(&tx_thread, &status)
+                        && is_closed
+                    {
+                        break;
                     }
-                    let frame_lock = match rx_encoded.lock() {
-                        Ok(lock) => lock,
-                        Err(_) => {
-                            eprintln!("[THREAD] Failed to get receiver lock. Exiting thread");
-                            break;
-                        }
+                    let frame_lock = if let Ok(lock) = rx_encoded.lock() { lock } else {
+                        eprintln!("[THREAD] Failed to get receiver lock. Exiting thread");
+                        break;
                     };
                     let encoded_frame = match frame_lock.recv() {
                         Ok(f) => f,
                         Err(e) => {
                             let error = ThreadsError::Fatal(e.to_string());
-                            if let Err(_) = tx_thread.send(error) {
-                                eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                            if tx_thread.send(error).is_err() {
+                                eprintln!(
+                                    "[THREAD] Failed to send error to monitor, exiting thread"
+                                );
                             }
                             return;
                         }
                     };
                     for (i, c) in encoded_frame.chunks.iter().enumerate() {
-                        let mut sender = match rtp_sender.lock() {
-                            Ok(sender) => sender,
-                            Err(_) => {
-                                let error = ThreadsError::Fatal(Error::PoisonedLock.to_string());
-                                if let Err(_) = tx_thread.send(error) {
-                                    eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
-                                }
-                                return;
+                        let mut sender = if let Ok(sender) = rtp_sender.lock() { sender } else {
+                            let error = ThreadsError::Fatal(Error::PoisonedLock.to_string());
+                            if tx_thread.send(error).is_err() {
+                                eprintln!(
+                                    "[THREAD] Failed to send error to monitor, exiting thread"
+                                );
                             }
+                            return;
                         };
                         if let Err(e) = sender.send(
                             c,
@@ -289,8 +292,10 @@ impl Controller {
                             encoded_frame.chunks.len() as u16,
                         ) {
                             let error = ThreadsError::Fatal(e.to_string());
-                            if let Err(_) = tx_thread.send(error) {
-                                eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                            if tx_thread.send(error).is_err() {
+                                eprintln!(
+                                    "[THREAD] Failed to send error to monitor, exiting thread"
+                                );
                             }
                             break;
                         }
@@ -310,7 +315,7 @@ impl Controller {
             Some(handler_lock) => Arc::clone(handler_lock),
             None => return Err(Error::ConnectionNotStarted),
         };
-        
+
         thread::spawn({
             let mut receiver = RtpReceiver::new(
                 rtp_receiver_socket,
@@ -326,46 +331,46 @@ impl Controller {
                 let mut chunks = Vec::new();
 
                 loop {
-                    if let Ok(is_closed) = connection_is_closed(&tx_thread, &status) && is_closed {
-                        break
+                    if let Ok(is_closed) = connection_is_closed(&tx_thread, &status)
+                        && is_closed
+                    {
+                        break;
                     }
                     let rtp_packet = match receiver.receive() {
                         Ok(packet) => packet,
                         Err(e) => {
                             let error = ThreadsError::Fatal(e.to_string());
-                            if let Err(_) = tx_thread.send(error) {
-                                eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
+                            if tx_thread.send(error).is_err() {
+                                eprintln!(
+                                    "[THREAD] Failed to send error to monitor, exiting thread"
+                                );
                             }
                             break;
                         }
                     };
-                    match actual_frame {
-                        Some(act_frame_id) => {
-                            if act_frame_id == rtp_packet.frame_id {
-                                chunks.push(rtp_packet.clone());
-                            } else {
-                                chunks = vec![rtp_packet.clone()];
-                                actual_frame = Some(rtp_packet.frame_id);
-                            }
-
-                            if rtp_packet.marker == chunks.len() as u16 {
-                                if let Some(frame_data) =
-                                    generate_frame_from(&mut chunks, &mut decoder)
-                                {
-                                    if let Err(e) = tx_remote_cam_receiver.send(frame_data) {
-                                        let error = ThreadsError::Fatal(e.to_string());
-                                        if let Err(_) = tx_thread.send(error) {
-                                            eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            actual_frame = Some(rtp_packet.frame_id);
+                    if let Some(act_frame_id) = actual_frame {
+                        if act_frame_id == rtp_packet.frame_id {
                             chunks.push(rtp_packet.clone());
+                        } else {
+                            chunks = vec![rtp_packet.clone()];
+                            actual_frame = Some(rtp_packet.frame_id);
                         }
+
+                        if rtp_packet.marker == chunks.len() as u16
+                            && let Some(frame_data) =
+                                generate_frame_from(&mut chunks, &mut decoder)
+                                && let Err(e) = tx_remote_cam_receiver.send(frame_data) {
+                                    let error = ThreadsError::Fatal(e.to_string());
+                                    if tx_thread.send(error).is_err() {
+                                        eprintln!(
+                                            "[THREAD] Failed to send error to monitor, exiting thread"
+                                        );
+                                    }
+                                    break;
+                                }
+                    } else {
+                        actual_frame = Some(rtp_packet.frame_id);
+                        chunks.push(rtp_packet.clone());
                     }
                 }
             }
@@ -380,26 +385,25 @@ impl Controller {
 
         thread::spawn(move || {
             loop {
-                match rx_thread.lock().unwrap().recv() {
-                    Ok(err) => match err {
-                        ThreadsError::Recoverable(msg) => {
-                            eprintln!("[WARN] Thread error (recoverable): {}", msg);
+                if let Ok(err) = rx_thread.lock().unwrap().recv() { match err {
+                    ThreadsError::Recoverable(msg) => {
+                        eprintln!("[WARN] Thread error (recoverable): {msg}");
+                    }
+                    ThreadsError::Fatal(msg) => {
+                        eprintln!("[FATAL] Thread error: {msg}");
+                        if let Ok(mut conn) = connection_status.write() {
+                            *conn = ConnectionStatus::Closed;
                         }
-                        ThreadsError::Fatal(msg) => {
-                            eprintln!("[FATAL] Thread error: {}", msg);
-                            if let Ok(mut conn) = connection_status.write() {
-                                *conn = ConnectionStatus::Closed;
-                            }
-                            if let Err(_) = tx_event.send(msg) {
-                                eprintln!("[THREAD] Failed to send error to interface, exiting thread");
-                            }
-                            break;
+                        if tx_event.send(msg).is_err() {
+                            eprintln!(
+                                "[THREAD] Failed to send error to interface, exiting thread"
+                            );
                         }
-                    },
-                    Err(_) => {
-                        eprintln!("[ERROR] Monitor channel closed — all threads finished?");
                         break;
                     }
+                } } else {
+                    eprintln!("[ERROR] Monitor channel closed — all threads finished?");
+                    break;
                 }
             }
 
@@ -407,7 +411,12 @@ impl Controller {
         });
     }
 
-    pub fn reset(&mut self, tx_local: Sender<Frame>, tx_remote: Sender<Frame>, tx_event: Sender<String>) -> Result<(), Error> {
+    pub fn reset(
+        &mut self,
+        tx_local: Sender<Frame>,
+        tx_remote: Sender<Frame>,
+        tx_event: Sender<String>,
+    ) -> Result<(), Error> {
         let (tx_encoded, rx_encoded) = channel();
         let (tx_thread, rx_thread) = channel();
 
@@ -428,7 +437,6 @@ impl Controller {
         self.camera.lock().map_err(|_| Error::PoisonedLock)?.stop();
         Ok(())
     }
-    
 }
 fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {
     let fr_id = chunks.first()?.frame_id;
@@ -448,9 +456,12 @@ fn generate_frame_from(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Op
     })
 }
 
-fn connection_is_closed(tx_thread: &Sender<ThreadsError>, status: &Arc<RwLock<ConnectionStatus>>) -> Result<bool, Error> {
+fn connection_is_closed(
+    tx_thread: &Sender<ThreadsError>,
+    status: &Arc<RwLock<ConnectionStatus>>,
+) -> Result<bool, Error> {
     if *status.read().map_err(|_| Error::PoisonedLock)? == ConnectionStatus::Closed {
-        if let Err(_) = tx_thread.send(ThreadsError::Fatal(Error::ConnectionClosed.to_string())) {
+        if tx_thread.send(ThreadsError::Fatal(Error::ConnectionClosed.to_string())).is_err() {
             eprintln!("[THREAD] Failed to send error to monitor, exiting thread");
         }
         return Ok(true);

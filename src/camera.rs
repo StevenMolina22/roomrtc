@@ -9,7 +9,7 @@ use std::time::Duration;
 /// A camera that runs a capture thread and produces
 /// `Frame` instances over a channel.
 ///
-/// `Camera` is a convenience wrapper around OpenCV's `VideoCapture`.
+/// `Camera` is a convenience wrapper around `OpenCV`'s `VideoCapture`.
 /// It exposes `start`/`stop` operations and internally uses shared
 /// state (`Arc<RwLock<...>>`) to control the capture thread and to
 /// produce incremental frame ids.
@@ -23,6 +23,7 @@ pub struct Camera {
 }
 
 impl Camera {
+    #[must_use] 
     pub fn new(media_config: MediaConfig) -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
@@ -44,7 +45,7 @@ impl Camera {
                 match videoio::VideoCapture::new(config.camera_index as i32, videoio::CAP_ANY) {
                     Ok(cam) => cam,
                     Err(e) => {
-                        eprintln!("Failed to open camera: {}. Stopping camera thread.", e);
+                        eprintln!("Failed to open camera: {e}. Stopping camera thread.");
                         return;
                     }
                 };
@@ -61,7 +62,7 @@ impl Camera {
             let mut mat = Mat::default();
             let mut rgb = Mat::default();
 
-            let frame_duration = Duration::from_millis(1000 / config.frame_rate as u64);
+            let frame_duration = Duration::from_millis(1000 / u64::from(config.frame_rate));
 
             while *running.read().unwrap() {
                 if !cam.read(&mut mat).unwrap() || mat.empty() {

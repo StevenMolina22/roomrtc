@@ -4,9 +4,9 @@ use super::{error::FrameError as Error, frame::Frame};
 use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
 
-/// A basic H.264 video encoder using the OpenH264 library.
+/// A basic H.264 video encoder using the `OpenH264` library.
 ///
-/// This struct wraps the OpenH264 encoder and provides a simple way to
+/// This struct wraps the `OpenH264` encoder and provides a simple way to
 /// compress raw YUV frames into H.264-encoded byte chunks.
 /// These chunks can be sent over the network (e.g. via UDP) and later
 /// reassembled and decoded on the receiving side.
@@ -20,14 +20,14 @@ pub struct Encoder {
 impl Encoder {
     /// Creates a new H.264 encoder instance.
     ///
-    /// Initializes the internal OpenH264 encoder with default parameters.
+    /// Initializes the internal `OpenH264` encoder with default parameters.
     /// The `max_chunk_size` defines how large each output chunk can be
     /// (useful when sending frames over UDP or other datagram protocols).
     ///
     /// # Errors
     ///
     /// Returns [`Error::EncoderIntializationError`] if the encoder cannot
-    /// be created by the OpenH264 library.
+    /// be created by the `OpenH264` library.
     pub fn new(media_config: &MediaConfig) -> Result<Self, Error> {
         let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
 
@@ -42,7 +42,7 @@ impl Encoder {
     /// Encodes a raw frame into H.264 byte chunks.
     ///
     /// Takes a [`Frame`] containing raw YUV data, converts it into a
-    /// [`YUVBuffer`], and encodes it using OpenH264.
+    /// [`YUVBuffer`], and encodes it using `OpenH264`.
     /// The result is split into smaller chunks, each up to `max_chunk_size`
     /// bytes, ready for transmission.
     ///
@@ -53,7 +53,7 @@ impl Encoder {
         let rgb_source = RgbSliceU8::new(&frame.data, (frame.width, frame.height));
         let yuv = YUVBuffer::from_rgb8_source(rgb_source);
 
-        if self.frame_count % self.idr_interval == 0 {
+        if self.frame_count.is_multiple_of(self.idr_interval) {
             self.encoder.force_intra_frame();
         }
 

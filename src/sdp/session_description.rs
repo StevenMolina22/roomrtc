@@ -309,7 +309,7 @@ mod tests {
         let md = make_test_media_description()?;
         let sdp = SessionDescriptionProtocol::new(vec![md]);
 
-        let out = format!("{}", sdp);
+        let out = format!("{sdp}");
         assert!(out.contains("v=0"));
         assert!(out.contains("m=audio"));
         assert!(out.contains("a=rtpmap:96 opus/48000/2"));

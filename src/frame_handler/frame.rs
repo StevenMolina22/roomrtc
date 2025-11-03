@@ -1,5 +1,5 @@
 use super::FrameError as Error;
-use opencv::{imgproc, };
+use opencv::imgproc;
 use opencv::prelude::*;
 
 /// An in-memory video frame used by the frame handler.
@@ -25,7 +25,7 @@ pub struct Frame {
 impl Frame {
     /// Convert a YUV I420 frame stored in `self.data` to RGB bytes.
     ///
-    /// The implementation uses OpenCV to reinterpret the provided
+    /// The implementation uses `OpenCV` to reinterpret the provided
     /// bytes as a single-channel Mat with height = 3/2 * height
     /// (I420 layout) and then converts the color using
     /// `cv::cvtColor`. On success returns a new `Frame` containing
@@ -63,6 +63,7 @@ impl Frame {
     /// - bytes 8..12: `width`
     /// - bytes 12..16: `height`
     /// - bytes 16..: raw pixel bytes
+    #[must_use] 
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < 16 {
             return None;
@@ -74,11 +75,17 @@ impl Frame {
 
         let data = bytes[16..].to_vec();
 
-        Some(Self { data, width, height, id })
+        Some(Self {
+            data,
+            width,
+            height,
+            id,
+        })
     }
 
     /// Serialize the `Frame` into bytes in the same layout consumed by
     /// `from_bytes`.
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(16 + self.data.len());
         buf.extend_from_slice(&self.id.to_le_bytes());

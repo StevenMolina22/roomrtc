@@ -2,9 +2,9 @@ use super::error::FrameError as Error;
 use openh264::decoder::Decoder as H264Decoder;
 use openh264::formats::YUVSource;
 
-/// A basic H.264 video decoder using the OpenH264 library.
+/// A basic H.264 video decoder using the `OpenH264` library.
 ///
-/// This struct wraps the OpenH264 decoder and provides a simple way to
+/// This struct wraps the `OpenH264` decoder and provides a simple way to
 /// decode encoded H.264 frame data (`&[u8]`) into a YUV.
 ///
 /// Typically, this is used on the receiving side of a video stream,
@@ -16,11 +16,11 @@ pub struct Decoder {
 impl Decoder {
     /// Creates a new H.264 decoder instance.
     ///
-    /// This initializes an internal OpenH264 decoder with default settings.
+    /// This initializes an internal `OpenH264` decoder with default settings.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::DecoderInitializationError`] if the OpenH264 library
+    /// Returns [`Error::DecoderInitializationError`] if the `OpenH264` library
     /// fails to create the decoder instance.
     pub fn new() -> Result<Self, Error> {
         let decoder = H264Decoder::new().map_err(|_| Error::DecoderInitializationError)?;

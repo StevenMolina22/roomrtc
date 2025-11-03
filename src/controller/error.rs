@@ -27,28 +27,26 @@ impl Display for ControllerError {
         match self {
             Self::ParsingSocketAddressError(e) => write!(
                 f,
-                "Error: \"Failed to parse socket address\". Details: {}",
-                e
+                "Error: \"Failed to parse socket address\". Details: {e}"
             ),
             Self::BindingAddressError(e) => {
-                write!(f, "Error: \"Failed to bind socket\". Details: {}", e)
+                write!(f, "Error: \"Failed to bind socket\". Details: {e}")
             }
             Self::ConnectionSocketError(e) => {
-                write!(f, "Error: \"Failed to connect\". Details: {}", e)
+                write!(f, "Error: \"Failed to connect\". Details: {e}")
             }
             Self::CloningSocketError(e) => {
-                write!(f, "Error: \"Failed to clone UDP socket\" Details: {}", e)
+                write!(f, "Error: \"Failed to clone UDP socket\" Details: {e}")
             }
             Self::RtpSenderError(e) => {
-                write!(f, "Error: \"Failed to create RTP sender\". Details: {}", e)
+                write!(f, "Error: \"Failed to create RTP sender\". Details: {e}")
             }
             Self::RtpReceiverError(e) => write!(
                 f,
-                "Error: \"Failed to create RTP receiver\". Details: {}",
-                e
+                "Error: \"Failed to create RTP receiver\". Details: {e}"
             ),
             Self::PoisonedLock => write!(f, "Error: \"Poisoned lock\""),
-            Self::MapError(e) => write!(f, "{}", e),
+            Self::MapError(e) => write!(f, "{e}"),
             Self::EmptyRTPSenderError => write!(f, "Error: \"there is no RTP sender built yet\""),
             Self::JoinThreadError => write!(f, "Error: \"Failed to join thread\""),
             Self::ConnectionNotStarted => write!(f, "Error: \"Connection not started\""),

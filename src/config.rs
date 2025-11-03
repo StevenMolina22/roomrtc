@@ -48,7 +48,7 @@ impl Config {
             .ok_or("Missing [media] section")?;
         let rtcp_section = conf.section(Some("rtcp")).ok_or("Missing [rtcp] section")?;
 
-        Ok(Config {
+        Ok(Self {
             network: NetworkConfig {
                 bind_address: network_section
                     .get("bind_address")

@@ -7,6 +7,7 @@ use std::default::Default;
 /// that packs a small header followed by payload
 /// bytes.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct RtpPacket {
     /// Packet format version.
     version: u8,
@@ -33,26 +34,13 @@ pub struct RtpPacket {
     pub payload: Vec<u8>,
 }
 
-impl Default for RtpPacket {
-    fn default() -> Self {
-        Self {
-            version: 0,
-            marker: 0,
-            payload_type: 0,
-            frame_id: 0,
-            chunk_id: 0,
-            timestamp: 0,
-            ssrc: 0,
-            payload: Vec::new(),
-        }
-    }
-}
 impl RtpPacket {
     /// Create a new `RtpPacket` with the supplied fields.
     ///
     /// This constructor sets `version` to 2 and stores the provided
     /// values. No network encoding is performed at this stage.
-    pub fn new(
+    #[must_use] 
+    pub const fn new(
         marker: u16,
         payload_type: u8,
         payload: Vec<u8>,
@@ -79,6 +67,7 @@ impl RtpPacket {
     /// The layout used here is a simple custom header followed by the
     /// payload. The method allocates a buffer and appends fields in
     /// network byte order.
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(26 + self.payload.len());
 
@@ -96,6 +85,7 @@ impl RtpPacket {
 
     /// Decode an `RtpPacket` from a byte slice previously produced by
     /// `to_bytes`. Returns `None` if the slice is too short or malformed.
+    #[must_use] 
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
         if data.len() < 28 {
             return None;

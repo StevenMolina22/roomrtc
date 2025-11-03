@@ -26,7 +26,7 @@ impl fmt::Display for Attribute {
     /// Render the attribute back to SDP attribute line form.
     ///
     /// - Candidate: `a=candidate:<foundation> <component> <transport> <priority> <address> <port> typ <type>`
-    /// - RTPMap: `a=rtpmap:<fmt> <encoding_name>/<clock_rate>[/<encoding_params>]`
+    /// - `RTPMap`: `a=rtpmap:<fmt> <encoding_name>/<clock_rate>[/<encoding_params>]`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Candidate(candidate) => {

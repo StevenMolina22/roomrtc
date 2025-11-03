@@ -183,7 +183,7 @@ mod tests {
             "UDP".to_string(),
         );
 
-        let display = format!("{}", candidate);
+        let display = format!("{candidate}");
 
         assert!(display.contains("8.8.8.8"));
         assert!(display.contains("1234"));

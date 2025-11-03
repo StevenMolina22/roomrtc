@@ -1,8 +1,8 @@
-mod encoder;
-mod frame;
-mod error;
 mod decoder;
 mod encoded_frame;
+mod encoder;
+mod error;
+mod frame;
 
 pub use frame::Frame;
 

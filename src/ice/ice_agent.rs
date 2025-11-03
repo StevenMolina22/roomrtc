@@ -138,9 +138,9 @@ impl IceAgent {
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
     }
-    
+
     /// Clean remote candidates and candidate pairs.
-    pub fn clean_remote_candidates(&mut self)  {
+    pub fn clean_remote_candidates(&mut self) {
         self.remote_candidates.clear();
         self.candidate_pairs.clear();
         self.selected_pair = None;
@@ -155,11 +155,10 @@ fn get_local_ip() -> Result<String, Error> {
     let interfaces = if_addrs::get_if_addrs().map_err(|_| Error::NetworkInterfaceError)?;
 
     for interface in interfaces {
-        if !interface.is_loopback() {
-            if let std::net::IpAddr::V4(ipv4) = interface.addr.ip() {
+        if !interface.is_loopback()
+            && let std::net::IpAddr::V4(ipv4) = interface.addr.ip() {
                 return Ok(ipv4.to_string());
             }
-        }
     }
 
     Err(Error::NoNetworkInterfaceFound)
@@ -240,7 +239,7 @@ mod tests {
 
         let selected = agent.get_selected_pair()?;
         assert_eq!(selected.state, ConnectivityState::Succeeded);
-        
+
         Ok(())
     }
 

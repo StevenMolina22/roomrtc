@@ -1,11 +1,11 @@
-use chrono::{DateTime, Local};
-use std::sync::{Arc, RwLock};
-use std::thread;
-use std::time::Duration;
 use crate::rtcp::RtcpError as Error;
 use crate::rtcp::RtcpPacket;
 use crate::rtp::ConnectionStatus;
 use crate::tools::Socket;
+use chrono::{DateTime, Local};
+use std::sync::{Arc, RwLock};
+use std::thread;
+use std::time::Duration;
 
 /// How often (in seconds) a connectivity report is sent.
 const REPORT_PERIOD_MILLIS: u64 = 1000;
@@ -34,7 +34,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
     pub fn init_connection(&self) -> Result<(), Error> {
         if let Err(e) = self.socket.send(RtcpPacket::Hello.as_bytes()) {
-            eprintln!("{}", e);
+            eprintln!("{e}");
         }
 
         let mut ready = false;
@@ -42,32 +42,36 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         loop {
             let mut buff = [0u8; 1024];
             match self.socket.recv_from(&mut buff) {
-                Ok((size, _addr)) => {
-                    match RtcpPacket::from_bytes(&buff[..size]) {
-                        Some(RtcpPacket::Hello) => {
-                            self.socket.send(RtcpPacket::Ready.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
-                        },
-                        Some(RtcpPacket::Ready) => {
-                            if ready {
-                                break;
-                            } else {
-                                ready = true;
-                                self.socket.send(RtcpPacket::Ready.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
-                                let mut conn = self.connection_status.write()
-                                    .map_err(|_| Error::ConnectionStatusLockFailed)?;
-                                *conn = ConnectionStatus::Open;
-                            }
-                        },
-                        Some(_) => return Err(Error::UnexpectedMessage),
-                        None => continue,
+                Ok((size, _addr)) => match RtcpPacket::from_bytes(&buff[..size]) {
+                    Some(RtcpPacket::Hello) => {
+                        self.socket
+                            .send(RtcpPacket::Ready.as_bytes())
+                            .map_err(|e| Error::SendFailed(e.to_string()))?;
                     }
-                }
+                    Some(RtcpPacket::Ready) => {
+                        if ready {
+                            break;
+                        } else {
+                            ready = true;
+                            self.socket
+                                .send(RtcpPacket::Ready.as_bytes())
+                                .map_err(|e| Error::SendFailed(e.to_string()))?;
+                            let mut conn = self
+                                .connection_status
+                                .write()
+                                .map_err(|_| Error::ConnectionStatusLockFailed)?;
+                            *conn = ConnectionStatus::Open;
+                        }
+                    }
+                    Some(_) => return Err(Error::UnexpectedMessage),
+                    None => continue,
+                },
                 Err(e) => return Err(Error::ReceiveFailed(e.to_string())),
             }
         }
         Ok(())
     }
-    
+
     pub fn start(&self) -> Result<(), Error> {
         let sender_socket = Arc::clone(&self.socket);
         let receiver_socket = Arc::clone(&self.socket);
@@ -84,7 +88,8 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         thread::spawn(move || {
             loop {
                 if let Ok(conn) = shared_connection_status.read()
-                    && *conn == ConnectionStatus::Closed {
+                    && *conn == ConnectionStatus::Closed
+                {
                     break;
                 }
 
@@ -122,13 +127,13 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                 }
 
                 match try_receive_report(&*report_socket, &mut last_report_time) {
-                    Ok(_) => retries = 0,
+                    Ok(()) => retries = 0,
                     Err(Error::GoodbyeReceived) => {
                         println!("Goodbye recibido!");
-                        retries = RETRY_LIMIT
-                    },
+                        retries = RETRY_LIMIT;
+                    }
                     Err(_) => retries += 1,
-                };
+                }
             }
 
             if let Ok(mut conn) = shared_connection_status.write() {
@@ -176,7 +181,7 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
                 } else {
                     Ok(())
                 }
-            },
+            }
         },
         Err(_) => {
             if Local::now() - *last_report_time

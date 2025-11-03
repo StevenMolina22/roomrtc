@@ -6,7 +6,7 @@ use std::str::FromStr;
 /// Represents the origin category of an ICE candidate. The enum covers
 /// the candidate types used in this implementation and provides helper
 /// utilities such as a RFC-compliant priority value.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum CandidateType {
     /// Host candidate (direct local interface address).
     Host,
@@ -77,10 +77,7 @@ mod tests {
 
     #[test]
     fn test_candidate_type_from_str() -> Result<(), Error> {
-        assert_eq!(
-            CandidateType::from_str("host")?,
-            CandidateType::Host
-        );
+        assert_eq!(CandidateType::from_str("host")?, CandidateType::Host);
         assert_eq!(
             CandidateType::from_str("srflx")?,
             CandidateType::ServerReflexive

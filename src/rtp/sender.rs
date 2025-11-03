@@ -6,7 +6,6 @@ use crate::rtp::error::RtpError as Error;
 use crate::rtp::rtp_packet::RtpPacket;
 use crate::tools::Socket;
 
-
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
 ///
 /// The sender wraps a socket implementing the project's `Socket` trait
@@ -25,18 +24,17 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
     ///
     /// The RTCP report handler is started; on failure an `RtpError` is
     /// returned.
-    pub fn new(
+    pub const fn new(
         rtp_socket: S,
         report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
         ssrc: u32,
         connection_status: Arc<RwLock<ConnectionStatus>>,
     ) -> Result<Self, Error> {
-
         Ok(Self {
             rtp_socket,
             report_handler,
-            connection_status,
             ssrc,
+            connection_status,
         })
     }
 
@@ -73,7 +71,9 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         let data = rtp_package.to_bytes();
 
         if self.rtp_socket.send(&data).is_err() {
-            self.report_handler.lock().map_err(|_| Error::PoisonedLock)?
+            self.report_handler
+                .lock()
+                .map_err(|_| Error::PoisonedLock)?
                 .close_connection()
                 .map_err(|e| Error::RTCPError(e.to_string()))?;
             return Err(Error::SendFailed);

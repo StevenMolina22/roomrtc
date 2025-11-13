@@ -7,14 +7,9 @@ use crate::{
     ice::IceAgent,
     sdp::{Attribute, MediaDescription, SessionDescriptionProtocol},
 };
-use std::collections::HashSet;
-use std::str::FromStr;
+use std::{collections::HashSet, str::FromStr};
 
 use error::ClientError as Error;
-
-const MEDIA_TYPE: &str = "video";
-const MEDIA_PROTOCOL: &str = "RTP/AVP";
-// const MEDIA_FMT: u8 = 111;
 
 /// High-level client that exposes SDP and ICE operations used by the UI
 /// and signaling code.
@@ -60,9 +55,9 @@ impl Client {
         })?;
 
         let mut media_description = MediaDescription::new(
-            MEDIA_TYPE.into(),
+            media_config.rtp_media_type.clone(),
             media_port,
-            MEDIA_PROTOCOL.into(),
+            media_config.rtp_media_protocol.clone(),
             HashSet::from([media_config.rtp_payload_type]),
         );
         media_description

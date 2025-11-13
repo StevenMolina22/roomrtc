@@ -11,7 +11,7 @@ fn main() -> Result<(), eframe::Error> {
         eprintln!("Usage: {} /path/to/room_rtc.conf", args[0]);
         std::process::exit(1);
     }
-    
+
     let config_path = Path::new(&args[1]);
 
     let config = match Config::load(config_path) {

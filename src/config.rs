@@ -55,6 +55,12 @@ pub struct MediaConfig {
     /// RTP payload type number for the chosen codec.
     pub rtp_payload_type: u8,
 
+    ///RTP media type
+    pub rtp_media_type: String,
+
+    ///RTP media protocol
+    pub rtp_media_protocol: String,
+
     /// Codec name (e.g. "H264"). Used in SDP generation.
     pub codec_name: String,
 
@@ -139,6 +145,14 @@ impl Config {
                 rtp_payload_type: media_section
                     .get("rtp_payload_type")
                     .ok_or("Missing rtp_payload_type")?
+                    .parse()?,
+                rtp_media_type: media_section
+                    .get("rtp_media_type")
+                    .ok_or("Missing rtp_media_type")?
+                    .parse()?,
+                rtp_media_protocol: media_section
+                    .get("rtp_media_protocol")
+                    .ok_or("Missing rtp_media_protocol")?
                     .parse()?,
                 codec_name: media_section
                     .get("codec_name")

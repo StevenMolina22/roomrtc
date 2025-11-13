@@ -3,7 +3,7 @@ use crate::rtcp::RtcpPacket;
 use crate::rtp::ConnectionStatus;
 use crate::tools::Socket;
 use chrono::{DateTime, Local};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -56,13 +56,17 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// # Errors
     /// Returns an `Error` when socket operations fail or when an
     /// unexpected message is received during the handshake.
-    pub fn init_connection(&self) -> Result<(), Error> {
+    pub fn init_connection(&mut self) -> Result<(), Error> {
         if let Err(e) = self.socket.send(RtcpPacket::Hello.as_bytes()) {
             eprintln!("{e}");
         }
 
         let mut ready = false;
 
+        self.wait_for_peer_mesasage(&mut ready)?;
+        Ok(())
+    }
+    fn wait_for_peer_mesasage(&mut self, ready: &mut bool) -> Result<(), Error> {
         loop {
             let mut buff = [0u8; 1024];
             match self.socket.recv_from(&mut buff) {
@@ -73,17 +77,14 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                             .map_err(|e| Error::SendFailed(e.to_string()))?;
                     }
                     Some(RtcpPacket::Ready) => {
-                        if ready {
+                        if *ready {
                             break;
                         }
-                        ready = true;
+                        *ready = true;
                         self.socket
                             .send(RtcpPacket::Ready.as_bytes())
                             .map_err(|e| Error::SendFailed(e.to_string()))?;
-                        let mut conn = self
-                            .connection_status
-                            .write()
-                            .map_err(|_| Error::ConnectionStatusLockFailed)?;
+                        let mut conn = get_connection_status_write_lock(&self.connection_status)?;
                         *conn = ConnectionStatus::Open;
                     }
                     Some(_) => return Err(Error::UnexpectedMessage),
@@ -229,6 +230,15 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
                 Ok(())
             }
         }
+    }
+}
+
+fn get_connection_status_write_lock(
+    status: &Arc<RwLock<ConnectionStatus>>,
+) -> Result<RwLockWriteGuard<'_, ConnectionStatus>, Error> {
+    match status.write() {
+        Ok(connection_status) => Ok(connection_status),
+        Err(_) => Err(Error::ConnectionStatusLockFailed),
     }
 }
 

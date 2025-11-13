@@ -1,22 +1,8 @@
-use super::Attribute;
-use super::MediaDescription;
-use super::error::SdpError as Error;
+use super::{Attribute, MediaDescription, error::SdpError as Error, key};
 
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
-
-/// SDP keys used when parsing session description lines.
-///
-/// These constants represent the single-letter SDP line prefixes used
-/// when processing a textual SDP. They are kept here to avoid magic
-/// strings scattered through the parser.
-///
-/// - `m` indicates the start of a media description line ("m=").
-/// - `a` indicates an attribute line ("a=") that should be attached
-///   to the most-recently-parsed media description.
-const MEDIA_DESCRIPTION_KEY: &str = "m";
-const ATTRIBUTE_KEY: &str = "a";
 
 /// In-memory representation of an SDP session description.
 ///
@@ -67,12 +53,12 @@ impl FromStr for SessionDescriptionProtocol {
             };
 
             match key {
-                MEDIA_DESCRIPTION_KEY => {
+                key::MEDIA_DESCRIPTION_KEY => {
                     // parse an `m=` media description line and append it
                     // to the list of media descriptions
                     handle_media_description_line(value, &mut media_descriptions)?;
                 }
-                ATTRIBUTE_KEY => {
+                key::ATTRIBUTE_KEY => {
                     // parse an `a=` attribute line and attach it to the
                     // last media description
                     handle_attribute_line(value, &mut media_descriptions)?;

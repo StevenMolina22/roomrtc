@@ -192,13 +192,7 @@ mod tests {
     #[test]
     fn test_from_bytes_exactly_header_size() {
         let header_only_bytes: &[u8] = &[
-            2,
-            96,
-            0, 0, 0, 0, 0, 0, 0, 1,
-            0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 100,
-            0, 1,
-            0, 0, 0, 2,
+            2, 96, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 0, 1, 0, 0, 0, 2,
         ];
 
         let result = RtpPacket::from_bytes(header_only_bytes);

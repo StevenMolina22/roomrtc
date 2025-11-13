@@ -12,7 +12,11 @@ pub enum RtcpPacket {
 
     /// Goodbye message indicating the peer is closing the session.
     Goodbye,
+
+    ///Hello message for starting handshake
     Hello,
+
+    ///Ready message to let the other peer know you are ready to join call
     Ready,
 }
 

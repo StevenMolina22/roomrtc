@@ -387,8 +387,8 @@ impl Controller {
 
                     // If the number of chunks we have matches the expected total (marker), process the frame
                     if current_chunk_count == expected_marker {
-                        if let Some(frame_data) = generate_frame_from(&mut chunks, &mut decoder) {
-                            if let Err(e) = tx_remote_cam_receiver.send(frame_data) {
+                        if let Some(frame_data) = generate_frame_from(&mut chunks, &mut decoder)
+                            && let Err(e) = tx_remote_cam_receiver.send(frame_data) {
                                 let error = ThreadsError::Fatal(e.to_string());
                                 if tx_thread.send(error).is_err() {
                                     eprintln!(
@@ -397,7 +397,6 @@ impl Controller {
                                 }
                                 break;
                             }
-                        }
 
                         // Reset for the next frame
                         actual_frame = None;

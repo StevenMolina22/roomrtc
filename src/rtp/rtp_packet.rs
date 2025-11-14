@@ -36,10 +36,11 @@ pub struct RtpPacket {
 impl RtpPacket {
     /// Create a new `RtpPacket` with the supplied fields.
     ///
-    /// This constructor sets `version` to 2 and stores the provided
-    /// values. No network encoding is performed at this stage.
+    /// This constructor uses the provided version and stores all the
+    /// provided values. No network encoding is performed at this stage.
     #[must_use]
     pub const fn new(
+        version: u8,
         marker: u16,
         payload_type: u8,
         payload: Vec<u8>,
@@ -49,7 +50,7 @@ impl RtpPacket {
         ssrc: u32,
     ) -> Self {
         Self {
-            version: 2,
+            version,
             marker,
             payload_type,
             frame_id,
@@ -125,16 +126,16 @@ mod tests {
 
     #[test]
     fn test_rtp_packet_serialization_roundtrip() {
-        let original_packet = RtpPacket {
-            version: 2,
-            marker: 5,
-            payload_type: 96,
-            frame_id: 123_456_789,
-            chunk_id: 42,
-            timestamp: 1_122_334_455,
-            ssrc: 987_654_321,
-            payload: vec![10, 20, 30, 40, 50],
-        };
+        let original_packet = RtpPacket::new(
+            2,
+            5,
+            96,
+            vec![10, 20, 30, 40, 50],
+            1_122_334_455,
+            123_456_789,
+            42,
+            987_654_321,
+        );
 
         let bytes = original_packet.to_bytes();
         let deserialized_option = RtpPacket::from_bytes(&bytes);

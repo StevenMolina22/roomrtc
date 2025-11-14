@@ -16,6 +16,7 @@ pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     ssrc: u32,
     connection_status: Arc<RwLock<ConnectionStatus>>,
+    rtp_version: u8,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
@@ -24,17 +25,19 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
     ///
     /// The RTCP report handler is started; on failure an `RtpError` is
     /// returned.
-    pub const fn new(
+    pub fn new(
         rtp_socket: S,
         report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
         ssrc: u32,
         connection_status: Arc<RwLock<ConnectionStatus>>,
+        rtp_version: u8,
     ) -> Result<Self, Error> {
         Ok(Self {
             rtp_socket,
             report_handler,
             ssrc,
             connection_status,
+            rtp_version,
         })
     }
 
@@ -59,6 +62,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         }
 
         let rtp_package = RtpPacket::new(
+            self.rtp_version,
             marker,
             payload_type,
             payload.to_vec(),

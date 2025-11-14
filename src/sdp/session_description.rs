@@ -1,8 +1,21 @@
-use super::{Attribute, MediaDescription, error::SdpError as Error, key};
-
+use super::error::SdpError as Error;
+use super::{Attribute, MediaDescription};
+use crate::config::SdpConfig;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
+
+/// SDP keys used when parsing session description lines.
+///
+/// These constants represent the single-letter SDP line prefixes used
+/// when processing a textual SDP. They are kept here to avoid magic
+/// strings scattered through the parser.
+///
+/// - `m` indicates the start of a media description line ("m=").
+/// - `a` indicates an attribute line ("a=") that should be attached
+///   to the most-recently-parsed media description.
+const MEDIA_DESCRIPTION_KEY: &str = "m";
+const ATTRIBUTE_KEY: &str = "a";
 
 /// In-memory representation of an SDP session description.
 ///
@@ -53,12 +66,12 @@ impl FromStr for SessionDescriptionProtocol {
             };
 
             match key {
-                key::MEDIA_DESCRIPTION_KEY => {
+                MEDIA_DESCRIPTION_KEY => {
                     // parse an `m=` media description line and append it
                     // to the list of media descriptions
                     handle_media_description_line(value, &mut media_descriptions)?;
                 }
-                key::ATTRIBUTE_KEY => {
+                ATTRIBUTE_KEY => {
                     // parse an `a=` attribute line and attach it to the
                     // last media description
                     handle_attribute_line(value, &mut media_descriptions)?;
@@ -66,7 +79,7 @@ impl FromStr for SessionDescriptionProtocol {
                 _ => {}
             }
         }
-        Ok(Self::new(media_descriptions))
+        Ok(Self::new(media_descriptions, &SdpConfig::default()))
     }
 }
 
@@ -88,16 +101,21 @@ impl Display for SessionDescriptionProtocol {
 
 impl SessionDescriptionProtocol {
     /// Create a new `SessionDescriptionProtocol` with the given media
-    /// descriptions. Other fields are initialized with default values.
+    /// descriptions and SDP configuration values.
     #[must_use]
-    pub fn new(media_descriptions: Vec<MediaDescription>) -> Self {
+    pub fn new(media_descriptions: Vec<MediaDescription>, sdp_config: &SdpConfig) -> Self {
         Self {
-            version: 0,
-            origin_id: 0,
-            session_name: "-".into(),
-            timing: "0 0".into(),
+            version: sdp_config.version,
+            origin_id: sdp_config.origin_id,
+            session_name: sdp_config.session_name.clone(),
+            timing: sdp_config.timing.clone(),
             media_descriptions,
-            connection_data: "IN IP4 0.0.0.0".into(),
+            connection_data: format!(
+                "{} {} {}",
+                sdp_config.connection_data_net_type,
+                sdp_config.connection_data_addr_type,
+                sdp_config.connection_data_address
+            ),
         }
     }
     /// Create an SDP answer based on this local description and a remote
@@ -123,7 +141,18 @@ impl SessionDescriptionProtocol {
             }
         }
 
-        Ok(Self::new(answer_media_descriptions))
+        Ok(Self::new(
+            answer_media_descriptions,
+            &SdpConfig {
+                version: self.version,
+                origin_id: self.origin_id,
+                session_name: self.session_name.clone(),
+                timing: self.timing.clone(),
+                connection_data_net_type: "IN".to_string(),
+                connection_data_addr_type: "IP4".to_string(),
+                connection_data_address: "0.0.0.0".to_string(),
+            },
+        ))
     }
 
     /// Set the `c=` connection data for the session description.
@@ -221,7 +250,20 @@ fn handle_attribute_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SdpConfig;
     use crate::sdp::error::SdpError as Error;
+
+    fn make_test_sdp_config() -> SdpConfig {
+        SdpConfig {
+            version: 0,
+            origin_id: 0,
+            session_name: "-".to_string(),
+            timing: "0 0".to_string(),
+            connection_data_net_type: "IN".to_string(),
+            connection_data_addr_type: "IP4".to_string(),
+            connection_data_address: "0.0.0.0".to_string(),
+        }
+    }
 
     fn make_test_media_description() -> Result<MediaDescription, Error> {
         let mut fmts = HashSet::new();
@@ -294,7 +336,7 @@ mod tests {
     #[test]
     fn test_display_formats_sdp_correctly() -> Result<(), Error> {
         let md = make_test_media_description()?;
-        let sdp = SessionDescriptionProtocol::new(vec![md]);
+        let sdp = SessionDescriptionProtocol::new(vec![md], &make_test_sdp_config());
 
         let out = format!("{sdp}");
         assert!(out.contains("v=0"));
@@ -306,7 +348,7 @@ mod tests {
     #[test]
     fn test_set_connection_data_updates_value() -> Result<(), Error> {
         let md = make_test_media_description()?;
-        let mut sdp = SessionDescriptionProtocol::new(vec![md]);
+        let mut sdp = SessionDescriptionProtocol::new(vec![md], &make_test_sdp_config());
 
         assert_eq!(sdp.connection_data, "IN IP4 0.0.0.0");
 
@@ -317,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_set_connection_data_changes_value() {
-        let mut sdp = SessionDescriptionProtocol::new(vec![]);
+        let mut sdp = SessionDescriptionProtocol::new(vec![], &make_test_sdp_config());
         sdp.set_connection_data("IN", "IP4", "192.168.0.5");
 
         assert_eq!(sdp.connection_data, "IN IP4 192.168.0.5");
@@ -326,7 +368,7 @@ mod tests {
     #[test]
     fn test_create_answer_filters_incompatible_formats() -> Result<(), Error> {
         let local_md = make_test_media_description()?;
-        let local_sdp = SessionDescriptionProtocol::new(vec![local_md]);
+        let local_sdp = SessionDescriptionProtocol::new(vec![local_md], &make_test_sdp_config());
 
         let mut remote_fmts = HashSet::new();
         remote_fmts.insert(97);
@@ -334,7 +376,7 @@ mod tests {
             MediaDescription::new("audio".into(), 6000, "RTP/AVP".into(), remote_fmts);
         remote_md.add_attribute(Attribute::RTPMap(97, "vp8".into(), 90000, Some("1".into())))?;
 
-        let remote_sdp = SessionDescriptionProtocol::new(vec![remote_md]);
+        let remote_sdp = SessionDescriptionProtocol::new(vec![remote_md], &make_test_sdp_config());
 
         let answer = local_sdp.create_answer(&remote_sdp)?;
         assert_eq!(answer.media_descriptions.len(), 1);
@@ -347,7 +389,7 @@ mod tests {
     #[test]
     fn test_create_answer_preserves_compatible_formats() -> Result<(), Error> {
         let local_md = make_test_media_description()?;
-        let local_sdp = SessionDescriptionProtocol::new(vec![local_md]);
+        let local_sdp = SessionDescriptionProtocol::new(vec![local_md], &make_test_sdp_config());
 
         let mut offer_md =
             MediaDescription::new("audio".into(), 6000, "RTP/AVP".into(), HashSet::from([96]));
@@ -358,7 +400,7 @@ mod tests {
             Some("2".into()),
         ))?;
 
-        let offer_sdp = SessionDescriptionProtocol::new(vec![offer_md]);
+        let offer_sdp = SessionDescriptionProtocol::new(vec![offer_md], &make_test_sdp_config());
 
         let answer = local_sdp.create_answer(&offer_sdp)?;
         assert_eq!(answer.media_descriptions.len(), 1);

@@ -15,6 +15,12 @@ pub struct Config {
 
     /// RTCP reporting configuration.
     pub rtcp: RtcpConfig,
+
+    /// SDP session-level configuration.
+    pub sdp: SdpConfig,
+
+    /// ICE candidate configuration.
+    pub ice: IceConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +28,9 @@ pub struct Config {
 pub struct NetworkConfig {
     /// Address and port to bind sockets to (e.g. "0.0.0.0:8000").
     pub bind_address: String,
+
+    /// Maximum UDP packet size for receiver buffer.
+    pub max_udp_packet_size: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -55,17 +64,20 @@ pub struct MediaConfig {
     /// RTP payload type number for the chosen codec.
     pub rtp_payload_type: u8,
 
-    ///RTP media type
-    pub rtp_media_type: String,
-
-    ///RTP media protocol
-    pub rtp_media_protocol: String,
-
     /// Codec name (e.g. "H264"). Used in SDP generation.
     pub codec_name: String,
 
     /// Codec clock rate used in RTP timestamping and SDP.
     pub clock_rate: u32,
+
+    /// RTP packet version.
+    pub rtp_version: u8,
+
+    /// SDP media type (e.g. "video").
+    pub media_type: String,
+
+    /// SDP media protocol (e.g. "RTP/AVP").
+    pub media_protocol: String,
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +93,70 @@ pub struct RtcpConfig {
     /// Number of consecutive receive timeouts before closing the
     /// connection.
     pub retry_limit: usize,
+
+    /// RTP socket read timeout in milliseconds.
+    pub rtp_read_timeout_millis: u64,
+}
+
+#[derive(Debug, Clone)]
+/// SDP session-level configuration values.
+pub struct SdpConfig {
+    /// SDP version number.
+    pub version: u8,
+
+    /// Origin session identifier.
+    pub origin_id: usize,
+
+    /// Session name.
+    pub session_name: String,
+
+    /// Timing information.
+    pub timing: String,
+
+    /// Connection data network type.
+    pub connection_data_net_type: String,
+
+    /// Connection data address type.
+    pub connection_data_addr_type: String,
+
+    /// Connection data address.
+    pub connection_data_address: String,
+}
+
+#[derive(Debug, Clone)]
+/// ICE candidate configuration values.
+pub struct IceConfig {
+    /// Foundation identifier.
+    pub foundation: String,
+
+    /// Transport protocol.
+    pub transport: String,
+
+    /// Component identifier.
+    pub component_id: u8,
+
+    /// Host candidate type preference (RFC 8445).
+    pub host_priority_preference: u32,
+
+    /// Server reflexive candidate type preference (RFC 8445).
+    pub srflx_priority_preference: u32,
+
+    /// Host candidate local preference.
+    pub host_local_preference: u16,
+}
+
+impl Default for SdpConfig {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            origin_id: 0,
+            session_name: "-".to_string(),
+            timing: "0 0".to_string(),
+            connection_data_net_type: "IN".to_string(),
+            connection_data_addr_type: "IP4".to_string(),
+            connection_data_address: "0.0.0.0".to_string(),
+        }
+    }
 }
 
 impl Config {
@@ -105,6 +181,8 @@ impl Config {
             .section(Some("media"))
             .ok_or("Missing [media] section")?;
         let rtcp_section = conf.section(Some("rtcp")).ok_or("Missing [rtcp] section")?;
+        let sdp_section = conf.section(Some("sdp")).ok_or("Missing [sdp] section")?;
+        let ice_section = conf.section(Some("ice")).ok_or("Missing [ice] section")?;
 
         Ok(Self {
             network: NetworkConfig {
@@ -112,6 +190,10 @@ impl Config {
                     .get("bind_address")
                     .ok_or("Missing bind_address")?
                     .to_string(),
+                max_udp_packet_size: network_section
+                    .get("max_udp_packet_size")
+                    .ok_or("Missing max_udp_packet_size")?
+                    .parse()?,
             },
             media: MediaConfig {
                 camera_index: media_section
@@ -146,14 +228,6 @@ impl Config {
                     .get("rtp_payload_type")
                     .ok_or("Missing rtp_payload_type")?
                     .parse()?,
-                rtp_media_type: media_section
-                    .get("rtp_media_type")
-                    .ok_or("Missing rtp_media_type")?
-                    .parse()?,
-                rtp_media_protocol: media_section
-                    .get("rtp_media_protocol")
-                    .ok_or("Missing rtp_media_protocol")?
-                    .parse()?,
                 codec_name: media_section
                     .get("codec_name")
                     .ok_or("Missing codec_name")?
@@ -162,6 +236,18 @@ impl Config {
                     .get("clock_rate")
                     .ok_or("Missing clock_rate")?
                     .parse()?,
+                rtp_version: media_section
+                    .get("rtp_version")
+                    .ok_or("Missing rtp_version")?
+                    .parse()?,
+                media_type: media_section
+                    .get("media_type")
+                    .ok_or("Missing media_type")?
+                    .to_string(),
+                media_protocol: media_section
+                    .get("media_protocol")
+                    .ok_or("Missing media_protocol")?
+                    .to_string(),
             },
             rtcp: RtcpConfig {
                 report_period_millis: rtcp_section
@@ -175,6 +261,66 @@ impl Config {
                 retry_limit: rtcp_section
                     .get("retry_limit")
                     .ok_or("Missing retry_limit")?
+                    .parse()?,
+                rtp_read_timeout_millis: rtcp_section
+                    .get("rtp_read_timeout_millis")
+                    .ok_or("Missing rtp_read_timeout_millis")?
+                    .parse()?,
+            },
+            sdp: SdpConfig {
+                version: sdp_section
+                    .get("version")
+                    .ok_or("Missing version")?
+                    .parse()?,
+                origin_id: sdp_section
+                    .get("origin_id")
+                    .ok_or("Missing origin_id")?
+                    .parse()?,
+                session_name: sdp_section
+                    .get("session_name")
+                    .ok_or("Missing session_name")?
+                    .to_string(),
+                timing: sdp_section
+                    .get("timing")
+                    .ok_or("Missing timing")?
+                    .to_string(),
+                connection_data_net_type: sdp_section
+                    .get("connection_data_net_type")
+                    .ok_or("Missing connection_data_net_type")?
+                    .to_string(),
+                connection_data_addr_type: sdp_section
+                    .get("connection_data_addr_type")
+                    .ok_or("Missing connection_data_addr_type")?
+                    .to_string(),
+                connection_data_address: sdp_section
+                    .get("connection_data_address")
+                    .ok_or("Missing connection_data_address")?
+                    .to_string(),
+            },
+            ice: IceConfig {
+                foundation: ice_section
+                    .get("foundation")
+                    .ok_or("Missing foundation")?
+                    .to_string(),
+                transport: ice_section
+                    .get("transport")
+                    .ok_or("Missing transport")?
+                    .to_string(),
+                component_id: ice_section
+                    .get("component_id")
+                    .ok_or("Missing component_id")?
+                    .parse()?,
+                host_priority_preference: ice_section
+                    .get("host_priority_preference")
+                    .ok_or("Missing host_priority_preference")?
+                    .parse()?,
+                srflx_priority_preference: ice_section
+                    .get("srflx_priority_preference")
+                    .ok_or("Missing srflx_priority_preference")?
+                    .parse()?,
+                host_local_preference: ice_section
+                    .get("host_local_preference")
+                    .ok_or("Missing host_local_preference")?
                     .parse()?,
             },
         })

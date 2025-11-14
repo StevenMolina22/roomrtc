@@ -31,10 +31,11 @@ mod tests {
             rtp_max_chunk_size: 1200,
             default_ssrc: 42,
             rtp_payload_type: 111,
-            rtp_media_type: "video".to_string(),
-            rtp_media_protocol: "RTP/AVP".to_string(),
             codec_name: "H264".to_string(),
             clock_rate: 48000,
+            rtp_version: 2,
+            media_type: "video".to_string(),
+            media_protocol: "RTP/AVP".to_string(),
         };
 
         // Generate a synthetic RGB frame

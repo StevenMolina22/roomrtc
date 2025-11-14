@@ -1,3 +1,4 @@
+use crate::config::IceConfig;
 use crate::ice::candidate_type::CandidateType;
 
 /// An ICE candidate.
@@ -73,11 +74,15 @@ impl Candidate {
     /// The produced candidate uses a high local preference and sets default
     /// values for foundation and transport. The port is initialized to 0.
     #[must_use]
-    pub fn new_host(address: String, component_id: u8) -> Self {
+    pub fn new_host(address: String, component_id: u8, ice_config: &IceConfig) -> Self {
         let candidate_type = CandidateType::Host;
-        let priority = Self::calculate_priority(&candidate_type, 65535);
-        let foundation = "1".to_string();
-        let transport = "UDP".to_string();
+        let priority = Self::calculate_priority(
+            &candidate_type,
+            ice_config.host_local_preference,
+            ice_config,
+        );
+        let foundation = ice_config.foundation.clone();
+        let transport = ice_config.transport.clone();
 
         Self {
             candidate_type,
@@ -95,8 +100,16 @@ impl Candidate {
     /// The formula implemented here follows RFC 8445: combine type
     /// preference, local preference and component id into a single `u32`
     /// priority value.
-    fn calculate_priority(candidate_type: &CandidateType, local_preference: u16) -> u32 {
-        (candidate_type.priority() << 24) | (u32::from(local_preference) << 8) | (256 - 1)
+    fn calculate_priority(
+        candidate_type: &CandidateType,
+        local_preference: u16,
+        ice_config: &IceConfig,
+    ) -> u32 {
+        let type_preference = match candidate_type {
+            CandidateType::Host => ice_config.host_priority_preference,
+            CandidateType::ServerReflexive => ice_config.srflx_priority_preference,
+        };
+        (type_preference << 24) | (u32::from(local_preference) << 8) | (256 - 1)
     }
 }
 
@@ -115,6 +128,17 @@ impl std::fmt::Display for Candidate {
 mod tests {
     use super::*;
     use crate::ice::candidate_type::CandidateType;
+
+    fn test_ice_config() -> IceConfig {
+        IceConfig {
+            foundation: "1".to_string(),
+            transport: "UDP".to_string(),
+            component_id: 1,
+            host_priority_preference: 126,
+            srflx_priority_preference: 100,
+            host_local_preference: 65535,
+        }
+    }
 
     #[test]
     fn new_candidate_fields_set_correctly() {
@@ -139,7 +163,7 @@ mod tests {
 
     #[test]
     fn new_host_sets_correct_values() {
-        let candidate = Candidate::new_host("192.168.0.10".to_string(), 2);
+        let candidate = Candidate::new_host("192.168.0.10".to_string(), 2, &test_ice_config());
 
         assert_eq!(candidate.candidate_type, CandidateType::Host);
         assert_eq!(candidate.address, "192.168.0.10");
@@ -159,7 +183,7 @@ mod tests {
     #[test]
     fn calculate_priority_for_host() {
         // test indirectly through new_host
-        let candidate = Candidate::new_host("1.1.1.1".to_string(), 1);
+        let candidate = Candidate::new_host("1.1.1.1".to_string(), 1, &test_ice_config());
         let priority = candidate.priority;
 
         let expected = (126u32 << 24) | (u32::from(65535u16) << 8) | (256 - 1);

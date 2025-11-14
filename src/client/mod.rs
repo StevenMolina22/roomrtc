@@ -3,11 +3,12 @@ mod error;
 pub use error::ClientError;
 
 use crate::{
-    config::MediaConfig,
+    config::{IceConfig, MediaConfig, SdpConfig},
     ice::IceAgent,
     sdp::{Attribute, MediaDescription, SessionDescriptionProtocol},
 };
-use std::{collections::HashSet, str::FromStr};
+use std::collections::HashSet;
+use std::str::FromStr;
 
 use error::ClientError as Error;
 
@@ -29,6 +30,8 @@ pub struct Client {
 impl Client {
     /// Create a new `Client` using the provided media port and codec
     /// configuration.
+    /// - `ice_config`: ICE configuration for candidate creation.
+    /// - `sdp_config`: SDP session-level configuration values.
     ///
     /// Parameters:
     /// - `media_port`: UDP port where ICE candidate gathering is performed
@@ -48,16 +51,23 @@ impl Client {
     /// # Returns
     /// Returns a `Client` containing the local SDP and an `IceAgent`
     /// already configured with (potentially) gathered candidates.
-    pub fn new(media_port: u16, media_config: &MediaConfig) -> Result<Self, ClientError> {
+    pub fn new(
+        media_port: u16,
+        media_config: &MediaConfig,
+        ice_config: &IceConfig,
+        sdp_config: &SdpConfig,
+    ) -> Result<Self, ClientError> {
         let mut ice_agent = IceAgent::new();
-        ice_agent.gather_candidates(media_port).map_err(|e| {
-            ClientError::IceConnectionError(format!("Failed to gather ICE candidates: {e}"))
-        })?;
+        ice_agent
+            .gather_candidates(media_port, ice_config)
+            .map_err(|e| {
+                ClientError::IceConnectionError(format!("Failed to gather ICE candidates: {e}"))
+            })?;
 
         let mut media_description = MediaDescription::new(
-            media_config.rtp_media_type.clone(),
+            media_config.media_type.clone(),
             media_port,
-            media_config.rtp_media_protocol.clone(),
+            media_config.media_protocol.clone(),
             HashSet::from([media_config.rtp_payload_type]),
         );
         media_description
@@ -79,7 +89,7 @@ impl Client {
                 })?;
         }
 
-        let mut sdp = SessionDescriptionProtocol::new(vec![media_description]);
+        let mut sdp = SessionDescriptionProtocol::new(vec![media_description], sdp_config);
 
         if let Some(local_candidate) = ice_agent.get_local_candidate() {
             sdp.set_connection_data("IN", "IP4", local_candidate.address.clone().as_str());

@@ -1,8 +1,12 @@
-use super::{attribute_key, error::SdpError as Error};
+use super::error::SdpError as Error;
 use crate::ice::Candidate;
 use crate::ice::CandidateType;
 use std::fmt;
 use std::str::FromStr;
+
+/// SDP attribute keys used by the parser.
+const CANDIDATE_ATTR_KEY: &str = "candidate";
+const RTPMAP_ATTR_KEY: &str = "rtpmap";
 
 /// SDP attribute representation used by this module.
 ///
@@ -60,12 +64,8 @@ impl FromStr for Attribute {
     /// or malformed inputs produce an appropriate `SdpError`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once(':') {
-            Some((key, value)) if key == attribute_key::CANDIDATE_ATTR_KEY => {
-                parse_candidate_attr_values(value)
-            }
-            Some((key, value)) if key == attribute_key::RTPMAP_ATTR_KEY => {
-                parse_rptmap_attr_values(value)
-            }
+            Some((key, value)) if key == CANDIDATE_ATTR_KEY => parse_candidate_attr_values(value),
+            Some((key, value)) if key == RTPMAP_ATTR_KEY => parse_rptmap_attr_values(value),
             _ => Err(Error::InvalidRtpMapFormatError),
         }
     }

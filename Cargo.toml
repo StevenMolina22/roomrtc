@@ -11,3 +11,5 @@ openh264 = "0.9.0"
 opencv = { version="0.96.0", features = ["clang-runtime"] }
 if-addrs = "0.14.0"
 rust-ini = "0.21.3"
+udp-dtls = "0.1"
+openssl = { version = "0.10", features = ["v110"] }

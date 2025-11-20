@@ -13,6 +13,10 @@ pub enum ClientError {
     /// Error produced while performing ICE-related operations
     /// (adding remote candidates, starting connectivity checks, etc.).
     IceConnectionError(String),
+
+    /// Error produced while initializing the security context (certificates,
+    /// DTLS identity, etc.).
+    SecurityInitializationError(String),
 }
 
 /// Provide a compact representation for `ClientError`.
@@ -22,7 +26,11 @@ pub enum ClientError {
 impl Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            Self::SdpCreationError(e) | Self::IceConnectionError(e) => write!(f, "{e}"),
+            Self::SdpCreationError(e)
+            | Self::IceConnectionError(e)
+            | Self::SecurityInitializationError(e) => {
+                write!(f, "{e}")
+            }
         }
     }
 }

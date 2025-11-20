@@ -6,6 +6,7 @@ use crate::{
     config::{IceConfig, MediaConfig, SdpConfig},
     ice::IceAgent,
     sdp::{Attribute, MediaDescription, SessionDescriptionProtocol},
+    tools::{LocalCert, generate_self_signed_cert},
 };
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -25,6 +26,9 @@ pub struct Client {
     /// ICE agent responsible for gathering local candidates and
     /// performing connectivity checks with remote candidates.
     pub ice_agent: IceAgent,
+
+    /// Locally generated certificate and DTLS identity for DTLS handshakes.
+    pub local_cert: LocalCert,
 }
 
 impl Client {
@@ -95,7 +99,17 @@ impl Client {
             sdp.set_connection_data("IN", "IP4", local_candidate.address.clone().as_str());
         }
 
-        Ok(Self { sdp, ice_agent })
+        let local_cert = generate_self_signed_cert().map_err(|e| {
+            ClientError::SecurityInitializationError(format!(
+                "Failed to generate local certificate: {e}"
+            ))
+        })?;
+
+        Ok(Self {
+            sdp,
+            ice_agent,
+            local_cert,
+        })
     }
 
     /// Process an SDP offer string and return the generated SDP answer

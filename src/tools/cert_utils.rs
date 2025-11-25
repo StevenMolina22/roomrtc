@@ -11,6 +11,15 @@ pub struct LocalCert {
     pub identity: Identity,
     /// The SHA-256 fingerprint string (e.g., "AA:BB:CC") advertised in SDP.
     pub fingerprint: String,
+    pkcs12_der: Vec<u8>,
+}
+
+impl LocalCert {
+    /// Re-create the identity from the stored PKCS#12 material.
+    pub fn duplicate_identity(&self) -> Result<Identity, CertError> {
+        Identity::from_pkcs12(&self.pkcs12_der, PKCS12_PASSWORD)
+            .map_err(|e| CertError::Identity(format!("Failed to clone identity: {e}")))
+    }
 }
 
 /// Errors that can occur while creating a self-signed certificate.
@@ -93,6 +102,7 @@ pub fn generate_self_signed_cert() -> Result<LocalCert, CertError> {
     Ok(LocalCert {
         identity,
         fingerprint,
+        pkcs12_der,
     })
 }
 
@@ -118,5 +128,7 @@ mod tests {
             32,
             "SHA-256 fingerprint must have 32 bytes"
         );
+        cert.duplicate_identity()
+            .expect("cloning identity should succeed");
     }
 }

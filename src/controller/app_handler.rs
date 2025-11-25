@@ -5,11 +5,14 @@ use crate::config::Config;
 use crate::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
 use crate::rtcp::RtcpReportHandler;
 use crate::rtp::{ConnectionStatus, RtpPacket, RtpReceiver, RtpSender};
+use crate::sdp::{DtlsSetupRole, Fingerprint};
+use crate::tools::DtlsSocket;
 use chrono::prelude::*;
 use std::net::UdpSocket;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
+use udp_dtls::{DtlsAcceptor, DtlsConnector, DtlsStream, SignatureAlgorithm, UdpChannel};
 
 pub struct Controller {
     pub client: Client,
@@ -29,11 +32,13 @@ pub struct Controller {
 
     //Components
     pub camera: Arc<Mutex<Box<dyn FrameSource + Send>>>,
-    pub rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<UdpSocket>>>>,
+    pub rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<DtlsSocket>>>>,
 
     //Sockets
-    rtp_socket: UdpSocket,
-    rtcp_socket: UdpSocket,
+    rtp_udp_socket: UdpSocket,
+    rtcp_udp_socket: UdpSocket,
+    rtp_socket: Option<DtlsSocket>,
+    rtcp_socket: Option<DtlsSocket>,
 }
 
 impl Controller {
@@ -70,8 +75,10 @@ impl Controller {
             connection_status: Arc::new(RwLock::new(ConnectionStatus::Closed)),
             camera: Arc::new(Mutex::new(Box::new(Camera::new(config.media.clone())))),
             rtcp_handler: None,
-            rtp_socket,
-            rtcp_socket,
+            rtp_udp_socket: rtp_socket,
+            rtcp_udp_socket: rtcp_socket,
+            rtp_socket: None,
+            rtcp_socket: None,
             config,
         })
     }
@@ -91,17 +98,28 @@ impl Controller {
                 .parse()
                 .map_err(Error::ParsingSocketAddressError)?;
 
-        self.rtp_socket
+        self.rtp_udp_socket
             .connect(remote_rtp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
-        self.rtcp_socket
+        self.rtcp_udp_socket
             .connect(remote_rtcp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
 
-        let rtcp_handler = RtcpReportHandler::new(
-            self.rtcp_socket
+        let rtp_dtls = self.create_dtls_socket(
+            self.rtp_udp_socket
                 .try_clone()
                 .map_err(|e| Error::CloningSocketError(e.to_string()))?,
+            remote_rtp,
+        )?;
+        let rtcp_dtls = self.create_dtls_socket(
+            self.rtcp_udp_socket
+                .try_clone()
+                .map_err(|e| Error::CloningSocketError(e.to_string()))?,
+            remote_rtcp,
+        )?;
+
+        let rtcp_handler = RtcpReportHandler::new(
+            rtcp_dtls.clone(),
             Arc::clone(&self.connection_status),
             self.config.rtcp.clone(),
         );
@@ -109,6 +127,94 @@ impl Controller {
             .init_connection()
             .map_err(|e| Error::MapError(e.to_string()))?;
         self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
+        self.rtp_socket = Some(rtp_dtls);
+        self.rtcp_socket = Some(rtcp_dtls);
+        Ok(())
+    }
+
+    fn create_dtls_socket(
+        &self,
+        socket: UdpSocket,
+        remote_addr: std::net::SocketAddr,
+    ) -> Result<DtlsSocket, Error> {
+        let expected_fingerprint = self
+            .client
+            .remote_fingerprint
+            .as_ref()
+            .ok_or_else(|| Error::MapError("Remote fingerprint missing".to_string()))?;
+
+        let mut role = self.client.local_setup_role;
+        if matches!(role, DtlsSetupRole::ActPass) {
+            role = DtlsSetupRole::Active;
+        } else if matches!(role, DtlsSetupRole::HoldConn) {
+            role = DtlsSetupRole::Passive;
+        }
+
+        let channel = UdpChannel {
+            socket,
+            remote_addr,
+        };
+        let stream = match role {
+            DtlsSetupRole::Active => {
+                let mut builder = DtlsConnector::builder();
+                let identity = self
+                    .client
+                    .local_cert
+                    .duplicate_identity()
+                    .map_err(|e| Error::MapError(e.to_string()))?;
+                builder.identity(identity);
+                builder.danger_accept_invalid_certs(true);
+                builder.danger_accept_invalid_hostnames(true);
+                builder.use_sni(false);
+                builder
+                    .build()
+                    .map_err(|e| Error::ConnectionSocketError(e.to_string()))?
+                    .connect("roomrtc.local", channel)
+                    .map_err(|e| Error::ConnectionSocketError(format!("{e:?}")))?
+            }
+            DtlsSetupRole::Passive => {
+                let identity = self
+                    .client
+                    .local_cert
+                    .duplicate_identity()
+                    .map_err(|e| Error::MapError(e.to_string()))?;
+                DtlsAcceptor::builder(identity)
+                    .build()
+                    .map_err(|e| Error::ConnectionSocketError(e.to_string()))?
+                    .accept(channel)
+                    .map_err(|e| Error::ConnectionSocketError(format!("{e:?}")))?
+            }
+            _ => unreachable!("DTLS role should be normalized before handshake"),
+        };
+
+        self.verify_peer_fingerprint(&stream, expected_fingerprint)?;
+        Ok(DtlsSocket::new(stream, remote_addr))
+    }
+
+    fn verify_peer_fingerprint(
+        &self,
+        stream: &DtlsStream<UdpChannel>,
+        expected: &Fingerprint,
+    ) -> Result<(), Error> {
+        if !expected.algorithm().eq_ignore_ascii_case("sha-256") {
+            return Err(Error::MapError(format!(
+                "Unsupported fingerprint algorithm: {}",
+                expected.algorithm()
+            )));
+        }
+
+        let certificate = stream
+            .peer_certificate()
+            .map_err(|e| Error::MapError(e.to_string()))?
+            .ok_or_else(|| Error::MapError("Peer certificate missing".to_string()))?;
+        let fingerprint = certificate
+            .fingerprint(SignatureAlgorithm::Sha256)
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        if fingerprint.bytes != expected.bytes() {
+            return Err(Error::MapError(
+                "Peer certificate fingerprint mismatch".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -160,14 +266,13 @@ impl Controller {
     }
 
     fn generate_media_threads(&mut self) -> Result<(), Error> {
-        let rtp_sender_socket = self
+        let rtp_socket = self
             .rtp_socket
-            .try_clone()
-            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
-
-        let rtp_receiver_socket = rtp_sender_socket
-            .try_clone()
-            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
+            .as_ref()
+            .cloned()
+            .ok_or(Error::ConnectionNotStarted)?;
+        let rtp_sender_socket = rtp_socket.clone();
+        let rtp_receiver_socket = rtp_socket;
 
         self.spawn_camera_thread()?;
 
@@ -225,7 +330,7 @@ impl Controller {
         Ok(())
     }
 
-    fn spawn_rtp_sender_thread(&self, rtp_socket: UdpSocket) -> Result<(), Error> {
+    fn spawn_rtp_sender_thread(&self, rtp_socket: DtlsSocket) -> Result<(), Error> {
         let rx_encoded = self.rx_encoded.clone();
         let tx_thread = self.tx_thread.clone();
         let status = self.connection_status.clone();
@@ -318,7 +423,7 @@ impl Controller {
         Ok(())
     }
 
-    fn spawn_rtp_receiver_thread(&self, rtp_receiver_socket: UdpSocket) -> Result<(), Error> {
+    fn spawn_rtp_receiver_thread(&self, rtp_receiver_socket: DtlsSocket) -> Result<(), Error> {
         let tx_remote_cam_receiver = self.tx_remote.clone();
         let tx_thread = self.tx_thread.clone();
         let status = self.connection_status.clone();

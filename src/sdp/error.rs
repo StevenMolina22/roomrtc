@@ -46,6 +46,15 @@ pub enum SdpError {
     /// Generic candidate parsing failure.
     InvalidCandidateParsingError,
 
+    /// Fingerprint attribute missing required value.
+    MissingFingerprintValueError,
+
+    /// Fingerprint attribute has invalid hexadecimal format.
+    InvalidFingerprintFormatError,
+
+    /// DTLS setup attribute advertised an unknown role.
+    InvalidSetupRoleError,
+
     /// Media description was expected but not found.
     MissingMediaDescriptionError,
 
@@ -87,6 +96,13 @@ impl Display for SdpError {
             Self::InvalidCandidateParsingError => {
                 write!(f, "Error: \"Invalid Candidate parsing error\"")
             }
+            Self::MissingFingerprintValueError => {
+                write!(f, "Error: \"Missing fingerprint value\"")
+            }
+            Self::InvalidFingerprintFormatError => {
+                write!(f, "Error: \"Invalid fingerprint format\"")
+            }
+            Self::InvalidSetupRoleError => write!(f, "Error: \"Invalid setup role\""),
             Self::MissingMediaDescriptionError => {
                 write!(f, "Error: \"Missing media description\"")
             }

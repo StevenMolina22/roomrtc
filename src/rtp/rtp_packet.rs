@@ -34,6 +34,33 @@ pub struct RtpPacket {
 }
 
 impl RtpPacket {
+    /// Create a new `RtpPacket` with the supplied fields.
+    ///
+    /// This constructor uses the provided version and stores all the
+    /// provided values. No network encoding is performed at this stage.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        version: u8,
+        marker: u16,
+        payload_type: u8,
+        payload: Vec<u8>,
+        timestamp: u32,
+        frame_id: u64,
+        chunk_id: u64,
+        ssrc: u32,
+    ) -> Self {
+        Self {
+            version,
+            marker,
+            payload_type,
+            frame_id,
+            chunk_id,
+            timestamp,
+            ssrc,
+            payload,
+        }
+    }
     /// Encode the packet into a sequence of bytes suitable for sending
     /// over the network.
     ///
@@ -99,16 +126,17 @@ mod tests {
 
     #[test]
     fn test_rtp_packet_serialization_roundtrip() {
-        let original_packet = RtpPacket {
-            version: 2,
-            marker: 5,
-            payload_type: 96,
-            payload: vec![10, 20, 30, 40, 50],
-            timestamp: 1_122_334_455,
-            frame_id: 123_456_789,
-            chunk_id: 42,
-            ssrc: 987_654_321,
-        };
+        // Create a packet with unique, non-zero values for all fields
+        let original_packet = RtpPacket::new(
+            2,                        // version
+            5,                        // marker
+            96,                       // payload_type
+            vec![10, 20, 30, 40, 50], // payload
+            1_122_334_455,            // timestamp
+            123_456_789,              // frame_id
+            42,                       // chunk_id
+            987_654_321,              // ssrc
+        );
 
         let bytes = original_packet.to_bytes();
         let deserialized_option = RtpPacket::from_bytes(&bytes);

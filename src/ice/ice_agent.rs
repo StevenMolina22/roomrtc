@@ -206,6 +206,14 @@ mod tests {
     #[test]
     fn test_gather_candidates_adds_local_candidate() {
         let mut agent = IceAgent::new();
+        let ice_config = IceConfig {
+            foundation: "1".to_string(),
+            transport: "UDP".to_string(),
+            component_id: 1,
+            host_priority_preference: 126,
+            srflx_priority_preference: 100,
+            host_local_preference: 65535,
+        };
 
         let result = agent.gather_candidates(3478, &make_ice_config());
         if matches!(

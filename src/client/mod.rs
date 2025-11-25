@@ -51,6 +51,8 @@ impl Client {
     ///   and where the endpoint expects/receives RTP packets.
     /// - `media_config`: media stream configuration (payload type, codec
     ///   name and clock rate).
+    /// - `ice_config`: ICE configuration for candidate creation.
+    /// - `sdp_config`: SDP session-level configuration values.
     ///
     /// This method performs the following steps:
     /// 1. Creates an `IceAgent` and calls `gather_candidates` to obtain

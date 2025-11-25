@@ -456,6 +456,7 @@ impl Controller {
                     {
                         break;
                     }
+
                     let rtp_packet = match receiver.receive() {
                         Ok(packet) => packet,
                         Err(e) => {
@@ -468,6 +469,7 @@ impl Controller {
                             break;
                         }
                     };
+
                     // If this packet is for a new frame, reset the chunks
                     if actual_frame != Some(rtp_packet.frame_id) {
                         chunks = vec![rtp_packet.clone()];
@@ -513,7 +515,6 @@ impl Controller {
         });
         Ok(())
     }
-
     fn handle_threads_errors(&self) {
         let rx_thread = Arc::clone(&self.rx_thread);
         let connection_status = Arc::clone(&self.connection_status);

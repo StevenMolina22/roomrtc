@@ -61,16 +61,16 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
             return Err(Error::ConnectionClosed);
         }
 
-        let rtp_package = RtpPacket {
-            version: self.rtp_version,
+        let rtp_package = RtpPacket::new(
+            self.rtp_version,
             marker,
             payload_type,
-            payload: payload.to_vec(),
+            payload.to_vec(),
             timestamp,
             frame_id,
             chunk_id,
-            ssrc: self.ssrc,
-        };
+            self.ssrc,
+        );
 
         let data = rtp_package.to_bytes();
 

@@ -182,6 +182,15 @@ mod tests {
 
     #[test]
     fn calculate_priority_for_host() {
+        let ice_config = IceConfig {
+            foundation: "1".to_string(),
+            transport: "UDP".to_string(),
+            component_id: 1,
+            host_priority_preference: 126,
+            srflx_priority_preference: 100,
+            host_local_preference: 65535,
+        };
+
         // test indirectly through new_host
         let candidate = Candidate::new_host("1.1.1.1".to_string(), 1, &test_ice_config());
         let priority = candidate.priority;

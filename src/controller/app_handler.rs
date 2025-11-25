@@ -98,6 +98,8 @@ impl Controller {
             .connect(remote_rtcp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
 
+
+
         let rtcp_handler = RtcpReportHandler::new(
             self.rtcp_socket
                 .try_clone()
@@ -351,6 +353,7 @@ impl Controller {
                     {
                         break;
                     }
+
                     let rtp_packet = match receiver.receive() {
                         Ok(packet) => packet,
                         Err(e) => {
@@ -363,6 +366,7 @@ impl Controller {
                             break;
                         }
                     };
+
                     // If this packet is for a new frame, reset the chunks
                     if actual_frame != Some(rtp_packet.frame_id) {
                         chunks = vec![rtp_packet.clone()];
@@ -388,15 +392,16 @@ impl Controller {
                     // If the number of chunks we have matches the expected total (marker), process the frame
                     if current_chunk_count == expected_marker {
                         if let Some(frame_data) = generate_frame_from(&mut chunks, &mut decoder)
-                            && let Err(e) = tx_remote_cam_receiver.send(frame_data) {
-                                let error = ThreadsError::Fatal(e.to_string());
-                                if tx_thread.send(error).is_err() {
-                                    eprintln!(
-                                        "[THREAD] Failed to send error to monitor, exiting thread"
-                                    );
-                                }
-                                break;
+                            && let Err(e) = tx_remote_cam_receiver.send(frame_data)
+                        {
+                            let error = ThreadsError::Fatal(e.to_string());
+                            if tx_thread.send(error).is_err() {
+                                eprintln!(
+                                    "[THREAD] Failed to send error to monitor, exiting thread"
+                                );
                             }
+                            break;
+                        }
 
                         // Reset for the next frame
                         actual_frame = None;
@@ -407,7 +412,6 @@ impl Controller {
         });
         Ok(())
     }
-
     fn handle_threads_errors(&self) {
         let rx_thread = Arc::clone(&self.rx_thread);
         let connection_status = Arc::clone(&self.connection_status);

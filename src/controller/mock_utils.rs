@@ -53,6 +53,8 @@ pub fn setup_peer() -> Result<TestPeer, ControllerError> {
     // This channel is for injecting frames into the mock camera
     let (tx_inject_frame, rx_for_camera) = mpsc::channel();
 
+    // Use the config loading, but handle the error safely as in HEAD
+    // Note: Ensure room_rtc.conf exists for tests, or mock the config object if possible.
     let config = Arc::new(
         Config::load(Path::new("room_rtc.conf"))
             .map_err(|e| ControllerError::MapError(e.to_string()))?,
@@ -62,6 +64,7 @@ pub fn setup_peer() -> Result<TestPeer, ControllerError> {
 
     // Make a mock camera and swap it with the real one
     let mock_cam = MockCamera::new(rx_for_camera);
+    // HEAD uses Box, which is standard for dyn traits. Keep Box.
     controller.camera = Arc::new(Mutex::new(Box::new(mock_cam)));
 
     Ok(TestPeer {

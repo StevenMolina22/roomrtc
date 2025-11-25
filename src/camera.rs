@@ -46,7 +46,9 @@ impl Camera {
             media_config,
         }
     }
+}
 
+impl Camera {
     /// Start the capture thread and return a channel `Receiver<Frame>`
     /// where captured frames will be sent.
     ///

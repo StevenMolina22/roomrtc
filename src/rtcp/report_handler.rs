@@ -59,39 +59,63 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// Returns an `Error` when socket operations fail or when an
     /// unexpected message is received during the handshake.
     pub fn init_connection(&self) -> Result<(), Error> {
-        if let Err(e) = self.socket.send(RtcpPacket::Hello.as_bytes()) {
-            eprintln!("{e}");
-        }
+        self.socket
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .map_err(|_| Error::SocketConfigFailed)?;
 
         let mut ready = false;
 
         loop {
+            let packet = if ready {
+                RtcpPacket::Ready
+            } else {
+                RtcpPacket::Hello
+            };
+            if let Err(e) = self.socket.send(packet.as_bytes()) {
+                eprintln!("Handshake send error: {e}");
+            }
+
             let mut buff = [0u8; 1024];
             match self.socket.recv_from(&mut buff) {
                 Ok((size, _addr)) => match RtcpPacket::from_bytes(&buff[..size]) {
                     Some(RtcpPacket::Hello) => {
-                        self.socket
-                            .send(RtcpPacket::Ready.as_bytes())
-                            .map_err(|e| Error::SendFailed(e.to_string()))?;
+                        ready = true;
                     }
                     Some(RtcpPacket::Ready) => {
                         if ready {
+                            let mut conn = self
+                                .connection_status
+                                .write()
+                                .map_err(|_| Error::ConnectionStatusLockFailed)?;
+                            *conn = ConnectionStatus::Open;
                             break;
                         }
                         ready = true;
-                        self.socket
-                            .send(RtcpPacket::Ready.as_bytes())
-                            .map_err(|e| Error::SendFailed(e.to_string()))?;
+                    }
+                    // --- ADD THIS BLOCK ---
+                    Some(RtcpPacket::ConnectivityReport) => {
+                        // The other peer is already sending reports, so they are definitely connected.
+                        // We can safely transition to Open.
                         let mut conn = self
                             .connection_status
                             .write()
                             .map_err(|_| Error::ConnectionStatusLockFailed)?;
                         *conn = ConnectionStatus::Open;
+                        break;
                     }
+                    // ----------------------
                     Some(_) => return Err(Error::UnexpectedMessage),
                     None => {}
                 },
-                Err(e) => return Err(Error::ReceiveFailed(e.to_string())),
+                Err(e) => {
+                    let kind = e.kind();
+                    if kind == std::io::ErrorKind::WouldBlock
+                        || kind == std::io::ErrorKind::TimedOut
+                    {
+                        continue;
+                    }
+                    return Err(Error::ReceiveFailed(e.to_string()));
+                }
             }
         }
         Ok(())
@@ -142,41 +166,79 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// The receiver runs with a read timeout configured to `REPORT_RECEIVE_LIMIT`
     /// and uses `try_receive_report` to parse and handle incoming data.
     fn start_report_receiver(&self, report_socket: Arc<S>) -> Result<(), Error> {
+        // 1. Use a SHORT timeout (100ms) for the actual socket read.
+        // This ensures we release the Mutex frequently so the Sender can run.
         report_socket
-            .set_read_timeout(Some(Duration::from_millis(
-                self.config.receive_limit_millis,
-            )))
+            .set_read_timeout(Some(Duration::from_millis(100)))
             .map_err(|_| Error::SocketConfigFailed)?;
 
         let shared_connection_status = Arc::clone(&self.connection_status);
         let retry_limit = self.config.retry_limit;
-        let receive_limit = Duration::from_millis(self.config.receive_limit_millis);
 
-
+        // We manually track the "logical" timeout (3000ms)
+        let max_silence_duration =
+            chrono::Duration::milliseconds(self.config.receive_limit_millis as i64);
 
         thread::spawn(move || {
-            let mut last_report_time = Local::now();
-            let mut retries = 0;
+            let mut last_valid_packet_time = Local::now();
+            let mut timeouts_triggered = 0;
 
-            while retries < retry_limit {
-                if let Ok(conn) = shared_connection_status.read()
-                    && *conn == ConnectionStatus::Closed
-                {
+            loop {
+                // Check if connection was closed externally
+                if let Ok(conn) = shared_connection_status.read() {
+                    if *conn == ConnectionStatus::Closed {
+                        break;
+                    }
+                }
+
+                // 2. Try to receive with the short 100ms timeout
+                let mut buf = [0u8; 1024];
+                match report_socket.recv_from(&mut buf) {
+                    Ok((size, _)) => {
+                        match RtcpPacket::from_bytes(&buf[..size]) {
+                            Some(RtcpPacket::ConnectivityReport) => {
+                                last_valid_packet_time = Local::now();
+                                timeouts_triggered = 0; // Reset retries on success
+                            }
+                            Some(RtcpPacket::Goodbye) => {
+                                println!("Goodbye received!");
+                                break; // Exit loop to close
+                            }
+                            _ => {
+                                // Ignore HELLO/READY or garbage, but don't treat as fatal error
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // 3. Handle the expected short timeout
+                        let kind = e.kind();
+                        if kind == std::io::ErrorKind::WouldBlock
+                            || kind == std::io::ErrorKind::TimedOut
+                        {
+                            // Check if the *real* 3-second limit has passed
+                            if Local::now() - last_valid_packet_time > max_silence_duration {
+                                timeouts_triggered += 1;
+                                // Reset the timer so we count "intervals of silence" or just strictly count timeouts
+                                // The logic here depends on if you want "N sequential timeouts" or "Total time"
+                                // Based on your config struct, let's reset time to avoid double counting immediately
+                                last_valid_packet_time = Local::now();
+                            }
+                        } else {
+                            // Real socket error
+                            println!("RTCP Receive Error: {e}");
+                            timeouts_triggered += 1;
+                        }
+                    }
+                }
+
+                // 4. Check if we exceeded the retry limit
+                if timeouts_triggered >= retry_limit {
+                    println!("Connection timed out (RTCP)");
+                    if let Ok(mut conn) = shared_connection_status.write() {
+                        *conn = ConnectionStatus::Closed;
+                    }
                     break;
                 }
-
-                match try_receive_report(&*report_socket, &mut last_report_time, receive_limit) {
-                    Ok(()) => retries = 0,
-                    Err(Error::GoodbyeReceived) => {
-                        println!("Goodbye recibido!");
-                        retries = retry_limit;
-                    }
-                    Err(_) => retries += 1,
-                }
-            }
-
-            if let Ok(mut conn) = shared_connection_status.write() {
-                *conn = ConnectionStatus::Closed;
             }
         });
 

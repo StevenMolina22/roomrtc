@@ -8,9 +8,9 @@ pub use error::{ControllerError, ThreadsError};
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
+    use crate::sdp::{DtlsSetupRole, Fingerprint};
     use crate::{controller::mock_utils::setup_peer, frame_handler::Frame};
+    use std::time::Duration; // Add imports
 
     #[test]
     fn test_full_media_pipeline_e2e() {
@@ -30,7 +30,7 @@ mod tests {
             }
         };
 
-        // Manual handshake, swap ICE candidates
+        // Swap ICE Candidates
         let candidate_a = peer_a
             .controller
             .client
@@ -59,7 +59,20 @@ mod tests {
             .add_remote_candidate(candidate_a)
             .unwrap();
 
-        // connectivity checks
+        // Swap DTLS Fingerprints & Roles (Security Layer)
+        let fp_a_str = &peer_a.controller.client.local_cert.fingerprint;
+        let fp_b_str = &peer_b.controller.client.local_cert.fingerprint;
+
+        let fp_a = Fingerprint::from_hash_string("sha-256", fp_a_str).unwrap();
+        let fp_b = Fingerprint::from_hash_string("sha-256", fp_b_str).unwrap();
+
+        peer_a.controller.client.remote_fingerprint = Some(fp_b);
+        peer_b.controller.client.remote_fingerprint = Some(fp_a);
+
+        peer_a.controller.client.local_setup_role = DtlsSetupRole::Active; // Initiator
+        peer_b.controller.client.local_setup_role = DtlsSetupRole::Passive; // Listener
+
+        // Start connectivity checks
         peer_a
             .controller
             .client

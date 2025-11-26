@@ -1,9 +1,15 @@
 use openssl::{
-    asn1::Asn1Time, bn::BigNum, hash::MessageDigest, pkcs12::Pkcs12, pkey::PKey, rsa::Rsa,
-    x509::X509NameBuilder,
+    asn1::Asn1Time, bn::BigNum, error::ErrorStack, hash::MessageDigest, pkcs12::Pkcs12, pkey::PKey,
+    rsa::Rsa, x509::X509NameBuilder,
 };
 use std::fmt;
 use udp_dtls::Identity;
+
+const PKCS12_PASSWORD: &str = "roomrtc_pass";
+const FRIENDLY_NAME: &str = "room-rtc-identity";
+const SUBJECT_CN: &str = "RoomRTC-Peer";
+const VALIDITY_DAYS: u32 = 365;
+const SERIAL_NUMBER: u32 = 1;
 
 /// Holds the local cryptographic identity for this session.
 pub struct LocalCert {
@@ -25,7 +31,7 @@ impl LocalCert {
 /// Errors that can occur while creating a self-signed certificate.
 #[derive(Debug)]
 pub enum CertError {
-    Openssl(openssl::error::ErrorStack),
+    Openssl(ErrorStack),
     Identity(String),
 }
 
@@ -47,55 +53,53 @@ impl std::error::Error for CertError {
     }
 }
 
-impl From<openssl::error::ErrorStack> for CertError {
-    fn from(value: openssl::error::ErrorStack) -> Self {
+impl From<ErrorStack> for CertError {
+    fn from(value: ErrorStack) -> Self {
         Self::Openssl(value)
     }
 }
 
-const PKCS12_PASSWORD: &str = "roomrtc_pass";
-const FRIENDLY_NAME: &str = "room-rtc-identity";
-const SUBJECT_CN: &str = "RoomRTC-Peer";
-const VALIDITY_DAYS: u32 = 365;
-const SERIAL_NUMBER: u32 = 1;
-
 /// Generate a self-signed X.509 certificate, returning the udp_dtls
 /// identity plus the SHA-256 fingerprint string needed by SDP.
 pub fn generate_self_signed_cert() -> Result<LocalCert, CertError> {
-    let rsa = Rsa::generate(2048)?;
-    let pkey = PKey::from_rsa(rsa)?;
+    let rsa = Rsa::generate(2048)?; // 2048-bit RSA key
+    let pkey = PKey::from_rsa(rsa)?; // Wrap in OpenSSL PKey
 
     let mut builder = openssl::x509::X509::builder()?;
-    builder.set_version(2)?;
+    builder.set_version(2)?; // X.509 v3 format (0-indexed)
 
-    let serial_bn = BigNum::from_u32(SERIAL_NUMBER)?;
+    let serial_bn = BigNum::from_u32(SERIAL_NUMBER)?; // Constant serial: 1
     let serial = serial_bn.to_asn1_integer()?;
     builder.set_serial_number(&serial)?;
 
     let mut name_builder = X509NameBuilder::new()?;
-    name_builder.append_entry_by_text("CN", SUBJECT_CN)?;
+    name_builder.append_entry_by_text("CN", SUBJECT_CN)?; // "RoomRTC-Peer"
     let name = name_builder.build();
 
     builder.set_subject_name(&name)?;
-    builder.set_issuer_name(&name)?;
-    let not_before = Asn1Time::days_from_now(0)?;
-    builder.set_not_before(&not_before)?;
-    let not_after = Asn1Time::days_from_now(VALIDITY_DAYS)?;
-    builder.set_not_after(&not_after)?;
-    builder.set_pubkey(&pkey)?;
-    builder.sign(&pkey, MessageDigest::sha256())?;
+    builder.set_issuer_name(&name)?; // Self-signed: issuer == subject
 
-    let cert = builder.build();
+    let not_before = Asn1Time::days_from_now(0)?; // Valid immediately
+    builder.set_not_before(&not_before)?;
+    let not_after = Asn1Time::days_from_now(VALIDITY_DAYS)?; // 365 days
+    builder.set_not_after(&not_after)?;
+
+    builder.set_pubkey(&pkey)?; // Attach public key
+    builder.sign(&pkey, MessageDigest::sha256())?; // Self-sign with SHA-256
+
+    let cert = builder.build(); // Finalize certificate
     let digest = cert.digest(MessageDigest::sha256())?;
     let fingerprint = fingerprint_from_digest(digest.as_ref());
 
+    // Package into PKCS#12 (.p12) archive with password
     let pkcs12 = Pkcs12::builder()
-        .name(FRIENDLY_NAME)
+        .name(FRIENDLY_NAME) // "room-rtc-identity"
         .pkey(&pkey)
         .cert(&cert)
-        .build2(PKCS12_PASSWORD)?;
+        .build2(PKCS12_PASSWORD)?; // Uses constant password
     let pkcs12_der = pkcs12.to_der()?;
 
+    // Convert to DTLS identity used by udp_dtls crate
     let identity = Identity::from_pkcs12(&pkcs12_der, PKCS12_PASSWORD)
         .map_err(|e| CertError::Identity(format!("DTLS identity creation failed: {e}")))?;
 

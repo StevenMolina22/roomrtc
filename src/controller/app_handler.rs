@@ -118,6 +118,11 @@ impl Controller {
             remote_rtcp,
         )?;
 
+        let key_material = rtp_dtls
+            .export_keying_material("EXTRACTOR-dtls_srtp", 60)
+            .map_err(|e| Error::MapError(format!("Key export failed: {}", e)))?;
+        println!("DTLS-SRTP Key Material: {:?}", key_material);
+
         let rtcp_handler = RtcpReportHandler::new(
             rtcp_dtls.clone(),
             Arc::clone(&self.connection_status),

@@ -34,6 +34,18 @@ impl DtlsSocket {
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "DTLS stream poisoned"))?;
         f(&mut guard)
     }
+
+    pub fn export_keying_material(&self, label: &str, len: usize) -> io::Result<Vec<u8>> {
+        self.with_stream(|stream| {
+            let mut buf = vec![0u8; len];
+            stream
+                .0
+                .ssl()
+                .export_keying_material(&mut buf, label, None)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            Ok(buf)
+        })
+    }
 }
 
 impl Socket for DtlsSocket {

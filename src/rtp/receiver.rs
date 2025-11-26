@@ -2,7 +2,9 @@ use crate::rtcp::RtcpReportHandler;
 use crate::rtp::ConnectionStatus;
 use crate::rtp::error::RtpError as Error;
 use crate::rtp::rtp_packet::RtpPacket;
+use crate::srtp::SrtpContext;
 use crate::tools::Socket;
+use std::net::UdpSocket;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -13,10 +15,12 @@ use std::time::Duration;
 /// a locked `RtcpReportHandler` used to drive RTCP-style reporting and
 /// a shared `connection_status` used to observe/drive session state.
 pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
-    rtp_socket: S,
+    rtp_socket: UdpSocket,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     connection_status: Arc<RwLock<ConnectionStatus>>,
     max_udp_packet_size: usize,
+    srtp_context: Arc<Mutex<SrtpContext>>,
+    is_client: bool,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
@@ -35,11 +39,13 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
     /// Returns `Error::SocketConfigFailed` if configuring the socket
     /// read timeout fails.
     pub fn new(
-        rtp_socket: S,
+        rtp_socket: UdpSocket,
         report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
         connection_status: Arc<RwLock<ConnectionStatus>>,
         rtp_read_timeout_millis: u64,
         max_udp_packet_size: usize,
+        srtp_context: Arc<Mutex<SrtpContext>>,
+        is_client: bool,
     ) -> Result<Self, Error> {
         rtp_socket
             .set_read_timeout(Some(Duration::from_millis(rtp_read_timeout_millis)))
@@ -50,6 +56,8 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
             report_handler,
             connection_status,
             max_udp_packet_size,
+            srtp_context,
+            is_client,
         })
     }
 
@@ -70,8 +78,30 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         loop {
             match self.rtp_socket.recv_from(&mut buf) {
                 Ok((size, _addr)) => {
-                    if let Some(packet) = RtpPacket::from_bytes(&buf[..size]) {
-                        return Ok(packet);
+                    let packet_data = &buf[..size];
+                    if packet_data.is_empty() {
+                        continue;
+                    }
+
+                    let first_byte = packet_data[0];
+
+                    // DTLS (20-63)
+                    if (20..=63).contains(&first_byte) {
+                        println!("Received DTLS Keep-alive");
+                        continue;
+                    }
+                    // RTP/RTCP (128-191)
+                    else if (128..=191).contains(&first_byte) {
+                         let unprotected_packet = self
+                            .srtp_context
+                            .lock()
+                            .map_err(|_| Error::PoisonedLock)?
+                            .unprotect(packet_data, self.is_client)
+                            .map_err(|e| Error::ReceiveFailed(e.to_string()))?;
+                        return Ok(unprotected_packet);
+                    } else {
+                        println!("Unknown packet type: {}", first_byte);
+                        continue;
                     }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {

@@ -1,9 +1,11 @@
+use std::net::UdpSocket;
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::rtcp::RtcpReportHandler;
 use crate::rtp::ConnectionStatus;
 use crate::rtp::error::RtpError as Error;
 use crate::rtp::rtp_packet::RtpPacket;
+use crate::srtp::SrtpContext;
 use crate::tools::Socket;
 
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
@@ -12,11 +14,13 @@ use crate::tools::Socket;
 /// and an RTCP report handler. It offers `send` for sending payloads as
 /// `RtpPacket`s and `terminate` to gracefully close the session.
 pub struct RtpSender<S: Socket + Send + Sync + 'static> {
-    rtp_socket: S,
+    rtp_socket: UdpSocket,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     ssrc: u32,
     connection_status: Arc<RwLock<ConnectionStatus>>,
     rtp_version: u8,
+    srtp_context: Arc<Mutex<SrtpContext>>,
+    is_client: bool,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
@@ -26,11 +30,13 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
     /// The RTCP report handler is started; on failure an `RtpError` is
     /// returned.
     pub fn new(
-        rtp_socket: S,
+        rtp_socket: UdpSocket,
         report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
         ssrc: u32,
         connection_status: Arc<RwLock<ConnectionStatus>>,
         rtp_version: u8,
+        srtp_context: Arc<Mutex<SrtpContext>>,
+        is_client: bool,
     ) -> Result<Self, Error> {
         Ok(Self {
             rtp_socket,
@@ -38,6 +44,8 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
             ssrc,
             connection_status,
             rtp_version,
+            srtp_context,
+            is_client,
         })
     }
 
@@ -72,9 +80,14 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
             self.ssrc,
         );
 
-        let data = rtp_package.to_bytes();
+        let protected_data = self
+            .srtp_context
+            .lock()
+            .map_err(|_| Error::PoisonedLock)?
+            .protect(&rtp_package, self.is_client)
+            .map_err(|e| Error::SrtpError(e.to_string()))?;
 
-        if self.rtp_socket.send(&data).is_err() {
+        if self.rtp_socket.send(&protected_data).is_err() {
             self.report_handler
                 .lock()
                 .map_err(|_| Error::PoisonedLock)?

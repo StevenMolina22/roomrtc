@@ -1,9 +1,9 @@
-use crate::rtp::RtpPacket;
 use super::error::SrtpError;
-use openssl::symm::{encrypt, decrypt, Cipher};
+use crate::rtp::RtpPacket;
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::sign::Signer;
+use openssl::symm::{Cipher, decrypt, encrypt};
 use std::collections::HashMap;
 
 pub struct SrtpContext {
@@ -76,16 +76,12 @@ impl SrtpContext {
         let mut packet_bytes = packet.to_bytes();
         let header_len = 28;
         if packet_bytes.len() < header_len {
-             return Err(SrtpError::PacketTooShort);
+            return Err(SrtpError::PacketTooShort);
         }
 
         let payload = &packet_bytes[header_len..];
-        let encrypted_payload = encrypt(
-            Cipher::aes_128_ctr(),
-            key,
-            Some(&iv),
-            payload
-        ).map_err(SrtpError::from)?;
+        let encrypted_payload =
+            encrypt(Cipher::aes_128_ctr(), key, Some(&iv), payload).map_err(SrtpError::from)?;
 
         // Replace payload in packet_bytes with encrypted payload
         packet_bytes.truncate(header_len);
@@ -107,7 +103,11 @@ impl SrtpContext {
         Ok(packet_bytes)
     }
 
-    pub fn unprotect(&mut self, packet_bytes: &[u8], is_client: bool) -> Result<RtpPacket, SrtpError> {
+    pub fn unprotect(
+        &mut self,
+        packet_bytes: &[u8],
+        is_client: bool,
+    ) -> Result<RtpPacket, SrtpError> {
         if packet_bytes.len() < 28 + 10 {
             return Err(SrtpError::PacketTooShort);
         }
@@ -126,7 +126,7 @@ impl SrtpContext {
         let (key, salt) = if is_client {
             (&self.server_write_key, &self.server_write_salt)
         } else {
-             (&self.client_write_key, &self.client_write_salt)
+            (&self.client_write_key, &self.client_write_salt)
         };
 
         // Verify HMAC
@@ -146,12 +146,8 @@ impl SrtpContext {
         let iv = Self::get_iv(salt, temp_packet.ssrc, roc, seq_num);
         let encrypted_payload = &temp_packet.payload;
 
-        let decrypted_payload = decrypt(
-            Cipher::aes_128_ctr(),
-            key,
-            Some(&iv),
-            encrypted_payload
-        ).map_err(SrtpError::from)?;
+        let decrypted_payload = decrypt(Cipher::aes_128_ctr(), key, Some(&iv), encrypted_payload)
+            .map_err(SrtpError::from)?;
 
         temp_packet.payload = decrypted_payload;
 
@@ -169,28 +165,26 @@ mod tests {
         let mut context = SrtpContext::new(&keying_material).unwrap();
 
         let packet = RtpPacket::new(
-            1, // version
-            0, // marker
-            96, // payload_type
+            1,                // version
+            0,                // marker
+            96,               // payload_type
             vec![1, 2, 3, 4], // payload
-            12345, // timestamp
-            100, // frame_id
-            1, // chunk_id
-            999, // ssrc
+            12345,            // timestamp
+            100,              // frame_id
+            1,                // chunk_id
+            999,              // ssrc
         );
 
         // Client protects
         let protected = context.protect(&packet, true).expect("Protection failed");
 
-        // Server unprotects (simulated by using same context but is_client=false)
-        // Wait, if I use same context and is_client=false, it will use client_write_key to unprotect.
-        // Since client protected with client_write_key, server should unprotect with client_write_key.
-        // My logic:
-        // protect(is_client=true) -> uses client_write_key.
-        // unprotect(is_client=false) -> uses client_write_key.
-        // So this is correct for a loopback test with same context.
-
-        let unprotected = context.unprotect(&protected, false).expect("Unprotection failed");
+        // Verify key symmetry (Loopback Test):
+        // The unprotect function, when called by the Receiver (is_client=false),
+        // must automatically select the key associated with the Sender (client_write_key).
+        // This confirms the key assignment logic is correctly swapped.
+        let unprotected = context
+            .unprotect(&protected, false)
+            .expect("Unprotection failed");
 
         assert_eq!(packet.payload, unprotected.payload);
         assert_eq!(packet.ssrc, unprotected.ssrc);

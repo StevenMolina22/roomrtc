@@ -6,9 +6,10 @@ use crate::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
 use crate::rtcp::RtcpReportHandler;
 use crate::rtp::{ConnectionStatus, RtpPacket, RtpReceiver, RtpSender};
 use crate::sdp::{DtlsSetupRole, Fingerprint};
+use crate::srtp::SrtpContext;
 use crate::tools::DtlsSocket;
 use chrono::prelude::*;
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -39,6 +40,7 @@ pub struct Controller {
     rtcp_udp_socket: UdpSocket,
     rtp_socket: Option<DtlsSocket>,
     rtcp_socket: Option<DtlsSocket>,
+    srtp_context: Option<Arc<Mutex<SrtpContext>>>,
 }
 
 impl Controller {
@@ -80,6 +82,7 @@ impl Controller {
             rtp_socket: None,
             rtcp_socket: None,
             config,
+            srtp_context: None,
         })
     }
 
@@ -123,6 +126,10 @@ impl Controller {
             .map_err(|e| Error::MapError(format!("Key export failed: {}", e)))?;
         println!("DTLS-SRTP Key Material: {:?}", key_material);
 
+        let srtp_context = SrtpContext::new(&key_material)
+            .map_err(|e| Error::MapError(format!("SRTP context creation failed: {}", e)))?;
+        self.srtp_context = Some(Arc::new(Mutex::new(srtp_context)));
+
         let rtcp_handler = RtcpReportHandler::new(
             rtcp_dtls.clone(),
             Arc::clone(&self.connection_status),
@@ -140,7 +147,7 @@ impl Controller {
     fn create_dtls_socket(
         &self,
         socket: UdpSocket,
-        remote_addr: std::net::SocketAddr,
+        remote_addr: SocketAddr,
     ) -> Result<DtlsSocket, Error> {
         let expected_fingerprint = self
             .client
@@ -168,6 +175,7 @@ impl Controller {
                     .duplicate_identity()
                     .map_err(|e| Error::MapError(e.to_string()))?;
                 builder.identity(identity);
+                // ignore standard CA validation (use fingerprint certification instead)
                 builder.danger_accept_invalid_certs(true);
                 builder.danger_accept_invalid_hostnames(true);
                 builder.use_sni(false);
@@ -272,17 +280,32 @@ impl Controller {
 
     fn generate_media_threads(&mut self) -> Result<(), Error> {
         let rtp_socket = self
-            .rtp_socket
+            .rtp_udp_socket
+            .try_clone()
+            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
+        let rtp_sender_socket = rtp_socket
+            .try_clone()
+            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
+        let rtp_receiver_socket = rtp_socket;
+
+        let srtp_context = self
+            .srtp_context
             .as_ref()
             .cloned()
             .ok_or(Error::ConnectionNotStarted)?;
-        let rtp_sender_socket = rtp_socket.clone();
-        let rtp_receiver_socket = rtp_socket;
+
+        let mut role = self.client.local_setup_role;
+        if matches!(role, DtlsSetupRole::ActPass) {
+            role = DtlsSetupRole::Active;
+        } else if matches!(role, DtlsSetupRole::HoldConn) {
+            role = DtlsSetupRole::Passive;
+        }
+        let is_client = matches!(role, DtlsSetupRole::Active);
 
         self.spawn_camera_thread()?;
 
-        self.spawn_rtp_sender_thread(rtp_sender_socket)?;
-        self.spawn_rtp_receiver_thread(rtp_receiver_socket)?;
+        self.spawn_rtp_sender_thread(rtp_sender_socket, srtp_context.clone(), is_client)?;
+        self.spawn_rtp_receiver_thread(rtp_receiver_socket, srtp_context, is_client)?;
         self.handle_threads_errors();
 
         Ok(())
@@ -335,7 +358,12 @@ impl Controller {
         Ok(())
     }
 
-    fn spawn_rtp_sender_thread(&self, rtp_socket: DtlsSocket) -> Result<(), Error> {
+    fn spawn_rtp_sender_thread(
+        &self,
+        rtp_socket: UdpSocket,
+        srtp_context: Arc<Mutex<SrtpContext>>,
+        is_client: bool,
+    ) -> Result<(), Error> {
         let rx_encoded = self.rx_encoded.clone();
         let tx_thread = self.tx_thread.clone();
         let status = self.connection_status.clone();
@@ -352,6 +380,8 @@ impl Controller {
             self.config.media.default_ssrc,
             Arc::clone(&self.connection_status),
             self.config.media.rtp_version,
+            srtp_context,
+            is_client,
         )
         .map_err(|e| Error::RtpSenderError(e.to_string()))?;
         let rtp_sender = Arc::new(Mutex::new(rtp_sender));
@@ -428,7 +458,12 @@ impl Controller {
         Ok(())
     }
 
-    fn spawn_rtp_receiver_thread(&self, rtp_receiver_socket: DtlsSocket) -> Result<(), Error> {
+    fn spawn_rtp_receiver_thread(
+        &self,
+        rtp_receiver_socket: UdpSocket,
+        srtp_context: Arc<Mutex<SrtpContext>>,
+        is_client: bool,
+    ) -> Result<(), Error> {
         let tx_remote_cam_receiver = self.tx_remote.clone();
         let tx_thread = self.tx_thread.clone();
         let status = self.connection_status.clone();
@@ -446,6 +481,8 @@ impl Controller {
                 Arc::clone(&self.connection_status),
                 rtp_timeout,
                 self.config.network.max_udp_packet_size,
+                srtp_context,
+                is_client,
             )
             .map_err(|e| Error::RtpReceiverError(e.to_string()))?;
 
@@ -591,6 +628,7 @@ impl Controller {
         Ok(())
     }
 }
+
 fn generate_frame_from(chunks: &mut [RtpPacket], decoder: &mut Decoder) -> Option<Frame> {
     let fr_id = chunks.first()?.frame_id;
 

@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use crate::config::Config;
+use crate::tools::Socket;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::{RtpPacket, RtpReceiver, RtpSender};
 
@@ -13,7 +14,7 @@ pub struct MediaTransport {
     pub rtp_address: SocketAddr,
     rtp_socket: UdpSocket,
 
-    rtcp_address: SocketAddr,
+    rtcp_socket: UdpSocket,
     rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<UdpSocket>>>>,
 
     connected: Arc<AtomicBool>,
@@ -29,12 +30,15 @@ impl MediaTransport {
             .map_err(|e| Error::BindingError(e.to_string()))?;
 
         let rtcp_address = SocketAddr::new(rtp_address.ip(), rtp_address.port() + 1);
+        let rtcp_socket = UdpSocket::bind(rtcp_address)
+            .map_err(|e| Error::BindingError(e.to_string()))?;
+
 
         Ok(Self {
             config: Arc::clone(config),
             rtp_address,
             rtp_socket,
-            rtcp_address,
+            rtcp_socket,
             rtcp_handler: None,
             connected: Arc::new(AtomicBool::new(false)),
         })
@@ -42,20 +46,15 @@ impl MediaTransport {
 
     pub fn start(&mut self, remote_rtp_address: SocketAddr, remote_rtcp_address: SocketAddr) -> Result<(Sender<RtpPacket>, Receiver<RtpPacket>), Error> {
         self.rtp_socket.connect(remote_rtp_address).map_err(|e| Error::SocketConnectionError(e.to_string()))?;
-
-        let rtcp_socket = UdpSocket::bind(self.rtcp_address)
-            .map_err(|e| Error::BindingError(e.to_string()))?;
-
-        rtcp_socket.connect(remote_rtcp_address)
-            .map_err(|e| Error::SocketConnectionError(e.to_string()))?;
+        self.rtcp_socket.connect(remote_rtcp_address).map_err(|e| Error::SocketConnectionError(e.to_string()))?;
 
         println!("RTP binded adrr: {}", self.rtp_socket.local_addr().unwrap());
         println!("RTP connected adrr: {}\n", remote_rtp_address);
-        println!("RTCP binded adrr: {}", rtcp_socket.local_addr().unwrap());
+        println!("RTCP binded adrr: {}", self.rtcp_socket.local_addr().unwrap());
         println!("RTCP connected adrr: {}\n", remote_rtcp_address);
 
         let rtcp_handler = RtcpReportHandler::new(
-            rtcp_socket,
+            self.rtcp_socket.try_clone().map_err(|e| Error::CloningSocketError(e.to_string()))?,
             Arc::clone(&self.connected),
             self.config.rtcp.clone(),
         );

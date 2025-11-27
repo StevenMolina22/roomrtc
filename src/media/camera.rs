@@ -1,4 +1,4 @@
-use crate::config::MediaConfig;
+use crate::config::{Config, MediaConfig};
 use crate::controller::ControllerError;
 use crate::media::frame_handler::Frame;
 use opencv::{imgproc, prelude::*, videoio};
@@ -29,7 +29,7 @@ pub struct Camera {
 
     /// Monotonic counter used to assign `Frame.id` values.
     frame_id: Arc<RwLock<usize>>,
-    media_config: MediaConfig,
+    config: Arc<Config>,
 }
 
 impl Camera {
@@ -39,11 +39,11 @@ impl Camera {
     /// - `media_config`: media capture configuration (camera index,
     ///   frame size and frame rate).
     #[must_use]
-    pub fn new(media_config: MediaConfig) -> Self {
+    pub fn new(media_config: &Arc<Config>) -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
             frame_id: Arc::new(RwLock::new(0)),
-            media_config,
+            config: Arc::clone(media_config),
         }
     }
 
@@ -61,10 +61,10 @@ impl Camera {
         *running.write().map_err(|_| ControllerError::PoisonedLock)? = true;
         let frame_id = self.frame_id.clone();
 
-        let config = self.media_config.clone();
+        let config = self.config.clone();
 
         thread::spawn(move || {
-            let camera_index = if let Ok(index) = i32::try_from(config.camera_index) {
+            let camera_index = if let Ok(index) = i32::try_from(config.media.camera_index) {
                 index
             } else {
                 eprintln!("Camera index is too large for i32. Stopping camera thread.");
@@ -84,14 +84,14 @@ impl Camera {
                 return;
             }
             if cam
-                .set(videoio::CAP_PROP_FRAME_WIDTH, config.frame_width)
+                .set(videoio::CAP_PROP_FRAME_WIDTH, config.media.frame_width)
                 .is_err()
             {
                 eprintln!("Failed to set camera width. Stopping camera thread.");
                 return;
             }
             if cam
-                .set(videoio::CAP_PROP_FRAME_HEIGHT, config.frame_height)
+                .set(videoio::CAP_PROP_FRAME_HEIGHT, config.media.frame_height)
                 .is_err()
             {
                 eprintln!("Failed to set camera height. Stopping camera thread.");
@@ -101,7 +101,7 @@ impl Camera {
             let mut mat = Mat::default();
             let mut rgb = Mat::default();
 
-            let frame_duration = Duration::from_millis(1000 / u64::from(config.frame_rate));
+            let frame_duration = Duration::from_millis(1000 / u64::from(config.media.frame_rate));
 
             while {
                 match running.read() {

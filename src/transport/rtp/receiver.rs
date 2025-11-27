@@ -1,3 +1,4 @@
+use std::net::UdpSocket;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
 use crate::transport::rtp::rtp_packet::RtpPacket;
@@ -57,13 +58,19 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
 
     pub fn start(&mut self) -> Result<Receiver<RtpPacket>, Error> {
         let (remote_to_local_rtp_tx, remote_to_local_rtp_rx) = mpsc::channel();
+        
+        let connected = self.connected.clone();
+        let rtp_socket = self.rtp_socket.try_clone().map_err(|_| Error::SocketCloneFailed)?;
+        let rtcp_handler = self.report_handler.clone();
+        let config = self.config.clone();
+        
         thread::spawn({
             move || {
                 loop {
-                    if !self.connected.load(Ordering::SeqCst) {
+                    if !connected.load(Ordering::SeqCst) {
                         break;
                     }
-                    let rtp_packet = match self.receive() {
+                    let rtp_packet = match receive(&rtp_socket, &connected, &config,&rtcp_handler) {
                         Ok(packet) => packet,
                         Err(_) => break,
                     };
@@ -78,42 +85,43 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         Ok(remote_to_local_rtp_rx)
     }
 
-    /// Wait for and return the next decoded `RtpPacket`.
-    ///
-    /// This method loops until a valid `RtpPacket` is decoded from the
-    /// underlying socket. If the shared `connection_status` transitions
-    /// to `Closed` while waiting, the method returns
-    /// `Error::ConnectionClosed`. On other socket errors it will attempt
-    /// to close the RTCP reporting handler and propagate a
-    /// `ReceiveFailed` error.
-    ///
-    /// # Errors
-    /// Returns `Error::ReceiveFailed` for unexpected socket errors and
-    /// `Error::ConnectionClosed` if the session is closed while waiting.
-    pub fn receive(&mut self) -> Result<RtpPacket, Error> {
-        let mut buf = vec![0u8; self.config.rtp.max_packet_size];
-        loop {
-            match self.rtp_socket.recv_from(&mut buf) {
-                Ok((size, _addr)) => {
-                    if let Some(packet) = RtpPacket::from_bytes(&buf[..size]) {
-                        return Ok(packet);
-                    }
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if !self.connected.load(Ordering::SeqCst) {
-                        return Err(Error::ConnectionClosed);
-                    }
-                }
-                Err(e) => {
-                    self.report_handler
-                        .lock()
-                        .map_err(|_| Error::PoisonedLock)?
-                        .close_connection()
-                        .map_err(|e| Error::RTCPError(e.to_string()))?;
-                    return Err(Error::ReceiveFailed(e.to_string()));
+}
+/// Wait for and return the next decoded `RtpPacket`.
+///
+/// This method loops until a valid `RtpPacket` is decoded from the
+/// underlying socket. If the shared `connection_status` transitions
+/// to `Closed` while waiting, the method returns
+/// `Error::ConnectionClosed`. On other socket errors it will attempt
+/// to close the RTCP reporting handler and propagate a
+/// `ReceiveFailed` error.
+///
+/// # Errors
+/// Returns `Error::ReceiveFailed` for unexpected socket errors and
+/// `Error::ConnectionClosed` if the session is closed while waiting.
+pub fn receive<S: Socket + Send + Sync + 'static>(rtp_socket: &S, connected: &Arc<AtomicBool>, config: &Arc<Config>, report_handler: &Arc<Mutex<RtcpReportHandler<S>>>) -> Result<RtpPacket, Error> {
+    let mut buf = vec![0u8; config.rtp.max_packet_size];
+    
+    loop {
+        match rtp_socket.recv_from(&mut buf) {
+            Ok((size, _addr)) => {
+                if let Some(packet) = RtpPacket::from_bytes(&buf[..size]) {
+                    return Ok(packet);
                 }
             }
-            buf.clear();
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if !connected.load(Ordering::SeqCst) {
+                    return Err(Error::ConnectionClosed);
+                }
+            }
+            Err(e) => {
+                report_handler
+                    .lock()
+                    .map_err(|_| Error::PoisonedLock)?
+                    .close_connection()
+                    .map_err(|e| Error::RTCPError(e.to_string()))?;
+                return Err(Error::ReceiveFailed(e.to_string()));
+            }
         }
+        buf.clear();
     }
 }

@@ -6,7 +6,6 @@ pub enum MediaTransportError {
     MapError(String),
     CloningSocketError(String),
     ConnectionNotStarted,
-    ConnectionError(String),
 }
 
 impl Display for MediaTransportError {

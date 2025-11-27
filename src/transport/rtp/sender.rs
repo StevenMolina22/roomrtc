@@ -41,53 +41,62 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
             rtp_version,
         })
     }
-    pub fn start(&mut self) -> Result<Sender<RtpPacket>, Error> {
-        let (local_to_remote_rtp_tx, local_to_remote_rtp_rx) = mpsc::channel();
+    
+    pub fn start(&self) -> Result<Sender<RtpPacket>, Error> {
+        let (tx, rx) = mpsc::channel();
 
-        thread::spawn({
-            move || {
-                loop {
-                    if !self.connected.load(Ordering::SeqCst) {
-                        break;
-                    }
+        let rtp_socket = self.rtp_socket.try_clone().map_err(|e| Error::SocketCloneFailed)?;
+        let report_handler = Arc::clone(&self.report_handler);
+        let connected = Arc::clone(&self.connected);
+        let ssrc = self.ssrc;
+        let version = self.rtp_version;
 
-                    let rtp_packet = match local_to_remote_rtp_rx.recv() {
-                        Ok(rtp_packet) => rtp_packet,
-                        Err(_) => break,
-                    };
+        thread::spawn(move || {
+            loop {
+                if !connected.load(Ordering::SeqCst) {
+                    break;
+                }
 
-                    if let Err(_) = self.send(rtp_packet) {
-                        break
-                    }
+                let packet = match rx.recv() {
+                    Ok(p) => p,
+                    Err(_) => break,
+                };
+
+                if send_packet(&rtp_socket, &report_handler, &connected, packet).is_err() {
+                    break;
                 }
             }
         });
 
-        Ok(local_to_remote_rtp_tx)
+        Ok(tx)
     }
 
-    /// Send an RTP packet created from the provided payload and metadata.
-    ///
-    /// The method checks the connection status first. If the underlying
-    /// socket send fails it attempts to close the RTCP handler and
-    /// returns an appropriate `RtpError`.
-    fn send(
-        &mut self,
-        rtp_packet: RtpPacket
-    ) -> Result<(), Error> {
-        if !self.connected {
-            return Err(Error::ConnectionClosed);
-        }
 
-        if self.rtp_socket.send(&rtp_packet.to_bytes()).is_err() {
-            self.report_handler
-                .lock()
-                .map_err(|_| Error::PoisonedLock)?
-                .close_connection()
-                .map_err(|e| Error::RTCPError(e.to_string()))?;
-            return Err(Error::SendFailed);
-        }
+}
 
-        Ok(())
+/// Send an RTP packet created from the provided payload and metadata.
+///
+/// The method checks the connection status first. If the underlying
+/// socket send fails it attempts to close the RTCP handler and
+/// returns an appropriate `RtpError`.
+fn send_packet<S: Socket + Send + Sync + 'static>(
+    socket: &S,
+    report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
+    connected: &AtomicBool,
+    packet: RtpPacket,
+) -> Result<(), Error> {
+    if !connected.load(Ordering::SeqCst) {
+        return Err(Error::ConnectionClosed);
     }
+
+    if socket.send(&packet.to_bytes()).is_err() {
+        report_handler
+            .lock()
+            .map_err(|_| Error::PoisonedLock)?
+            .close_connection()
+            .map_err(|e| Error::RTCPError(e.to_string()))?;
+
+        return Err(Error::SendFailed);
+    }
+    Ok(())
 }

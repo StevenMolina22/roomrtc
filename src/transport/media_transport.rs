@@ -61,29 +61,27 @@ impl MediaTransport {
 
         self.spawn_rtp_threads()
     }
-    
+
     pub fn stop(&mut self) -> Result<(), Error> {
-        if let Some(rtcp_handler) = self.rtcp_handler.take() {
-            if let Ok(mut rtcp_handler) = rtcp_handler.lock() {
-                return rtcp_handler.close_connection().map_err(|e| Error::ConnectionError(e.to_string()))
+        if let Some(rtcp_handler) = &self.rtcp_handler {
+            if let Ok(rtcp_handler) = rtcp_handler.lock() {
+                return rtcp_handler.close_connection().map_err(|e| Error::MapError(e.to_string()))
             }
         }
-        
+
         self.connected.store(false, Ordering::SeqCst);
         Ok(())
     }
-    
+
 
     fn spawn_rtp_threads(&self) -> Result<(Sender<RtpPacket>, Receiver<RtpPacket>), Error> {
-        self.spawn_camera_thread()?;
-
         let rtcp_handler = match &self.rtcp_handler {
             Some(handler_lock) => Arc::clone(handler_lock),
             None => return Err(Error::ConnectionNotStarted),
         };
 
-        let mut local_to_remote_rtp_tx = self.start_rtp_sender(&rtcp_handler)?;
-        let mut remote_to_local_rtp_rx = self.start_rtp_receiver(&rtcp_handler)?;
+        let local_to_remote_rtp_tx = self.start_rtp_sender(&rtcp_handler)?;
+        let remote_to_local_rtp_rx = self.start_rtp_receiver(&rtcp_handler)?;
 
         Ok((local_to_remote_rtp_tx, remote_to_local_rtp_rx))
     }
@@ -93,7 +91,7 @@ impl MediaTransport {
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
 
-        let mut rtp_sender = RtpSender::new(
+        let rtp_sender = RtpSender::new(
             rtp_sender_socket,
             rtcp_handler,
             self.config.media.default_ssrc,

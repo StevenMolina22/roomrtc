@@ -1,12 +1,13 @@
-use super::views::View;
-use crate::config::Config;
-use crate::controller::AppHandler;
-use crate::frame_handler::Frame;
 use eframe::egui;
 use eframe::epaint::{Color32, FontId};
 use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
+use super::views::View;
+use crate::config::Config;
+use crate::controller::{AppEvent, Controller};
+use crate::media::frame_handler::Frame;
+use crate::ui::GUIError as Error;
 
 /// Application state and UI controller for the `RoomRTC` GUI.
 ///
@@ -21,13 +22,16 @@ use std::sync::{Arc, mpsc};
 /// application. Create instances using [`RoomRTCApp::new`].
 pub struct RoomRTCApp {
     view: View,
-    controller: AppHandler,
+    controller: Controller,
     config: Arc<Config>,
 
+    // Senders
+    event_tx: Sender<AppEvent>,
+
     // Receivers
-    rx_local: Receiver<Frame>,
-    rx_remote: Receiver<Frame>,
-    rx_event: Receiver<String>,
+    event_rx: Receiver<AppEvent>,
+    local_frame_rx:Option<Receiver<Frame>>,
+    remote_frame_rx: Option<Receiver<Frame>>,
 
     // SDP
     our_offer: String,
@@ -55,24 +59,22 @@ impl RoomRTCApp {
     ///   `AppHandler` is created and returned in a running state.
     #[must_use]
     pub fn new(config: Config) -> Self {
-        let (tx_local, rx_local) = mpsc::channel();
-        let (tx_remote, rx_remote) = mpsc::channel();
-        let (tx_event, rx_event) = mpsc::channel();
-        let conf = Arc::new(config);
-        let controller = match AppHandler::new(tx_local, tx_remote, tx_event, conf.clone()) {
-            Ok(controller) => controller,
-            Err(e) => {
-                panic!("Failed to create controller: {e}");
-            }
+        let config = Arc::new(config);
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let controller = match Controller::new(event_tx.clone(), &config) {
+            Ok(c) => c,
+            Err(e) => panic!("Failed to initialize controller: {}", e),
         };
 
         Self {
             view: View::default(),
             controller,
-            config: conf,
-            rx_local,
-            rx_remote,
-            rx_event,
+            config,
+            event_tx,
+            event_rx,
+            local_frame_rx: None,
+            remote_frame_rx: None,
             our_offer: String::new(),
             remote_sdp: String::new(),
             our_answer: None,
@@ -97,8 +99,10 @@ impl eframe::App for RoomRTCApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
-            while self.rx_event.try_recv().is_ok() {
-                if let Err(e) = self.controller.stop_local_camera() {
+
+            // Esto es momentaneo, despues deberiamos tener un thread de eventos en la gui
+            while self.event_rx.try_recv().is_ok() {
+                if let Err(e) = self.controller.hang_down() {
                     self.error_message = Some(format!("Failed to stop camera: {e}"));
                 } else {
                     self.error_message = Some("Call ended by remote peer".to_string());
@@ -131,7 +135,7 @@ impl RoomRTCApp {
             let create_btn =
                 egui::Button::new("Create Call (Offer)").min_size(egui::vec2(200.0, 40.0));
             if ui.add_sized([200.0, 40.0], create_btn).clicked() {
-                self.our_offer = self.controller.client.get_offer();
+                self.our_offer = self.controller.get_sdp_offer();
                 self.remote_sdp = String::new();
                 self.our_answer = None;
                 self.view = View::Connection;
@@ -178,7 +182,12 @@ impl RoomRTCApp {
             ui.heading("Llamada");
             ui.add_space(20.0);
 
-            self.update_video_textures(ctx);
+            if let Err(e) = self.update_video_textures(ctx) {
+                self.error_message = Some(e.to_string());
+                self.reset();
+                self.view = View::Error;
+                return;
+            }
 
             ui.horizontal_centered(|ui| {
                 ui.vertical(|ui| {
@@ -193,7 +202,7 @@ impl RoomRTCApp {
 
             let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
-                if let Err(e) = self.controller.shut_down() {
+                if let Err(e) = self.controller.hang_down() {
                     eprintln!("{e}");
                 }
                 self.reset();
@@ -219,13 +228,18 @@ impl RoomRTCApp {
         ui.add(egui::TextEdit::multiline(&mut self.remote_sdp).hint_text("Paste SDP Answer..."));
 
         if !self.remote_sdp.is_empty() && ui.button("Connect").clicked() {
-            match self.controller.client.process_answer(&self.remote_sdp) {
+            match self.controller.process_answer(&self.remote_sdp) {
                 Ok(()) => {
-                    if let Err(e) = self.controller.start_call() {
-                        self.error_message = Some(format!("Failed to start call: {e}"));
-                        self.view = View::Error;
-                    } else {
-                        self.view = View::Call;
+                    match self.controller.start_call() {
+                        Ok((local_frame_rx, remote_frame_rx)) => {
+                            self.local_frame_rx = Some(local_frame_rx);
+                            self.remote_frame_rx = Some(remote_frame_rx);
+                            self.view = View::Call;
+                        },
+                        Err(e) => {
+                            self.error_message = Some(format!("Failed to start call: {e}"));
+                            self.view = View::Error;
+                        }
                     }
                 }
                 Err(e) => {
@@ -251,7 +265,7 @@ impl RoomRTCApp {
             && !self.remote_sdp.is_empty()
             && ui.button("Generate Answer").clicked()
         {
-            match self.controller.client.process_offer(&self.remote_sdp) {
+            match self.controller.process_offer(&self.remote_sdp) {
                 Ok(answer_str) => self.our_answer = Some(answer_str),
                 Err(e) => {
                     self.error_message = Some(format!("Failed to process offer: {e}"));
@@ -283,14 +297,14 @@ impl RoomRTCApp {
     /// This function polls the `rx_local` and `rx_remote` channels
     /// and updates the corresponding `TextureHandle`s so the GUI
     /// can display the newest frames.
-    fn update_video_textures(&mut self, ctx: &Context) {
-        update_camera_view(ctx, &self.rx_local, &mut self.local_texture, "local_camera");
-        update_camera_view(
-            ctx,
-            &self.rx_remote,
-            &mut self.remote_texture,
-            "remote_camera",
-        );
+    fn update_video_textures(&mut self, ctx: &Context) -> Result<(), Error> {
+        let local_frame_rx = self.local_frame_rx.as_ref().ok_or(Error::EmptyReceiver)?;
+        let remote_frame_rx = self.remote_frame_rx.as_ref().ok_or(Error::EmptyReceiver)?;
+
+        update_camera_view(ctx, &local_frame_rx, &mut self.local_texture, "local_camera");
+        update_camera_view(ctx, &remote_frame_rx, &mut self.remote_texture, "remote_camera");
+        
+        Ok(())
     }
 
     /// Show the local camera image in the UI.
@@ -366,25 +380,19 @@ impl RoomRTCApp {
     /// `AppHandler` with a fresh instance while dropping existing
     /// textures so a new call can be established cleanly.
     pub fn reset(&mut self) {
-        let (tx_local, rx_local) = mpsc::channel();
-        let (tx_remote, rx_remote) = mpsc::channel();
-        let (tx_event, rx_event) = mpsc::channel();
-
-        self.rx_local = rx_local;
-        self.rx_remote = rx_remote;
-        self.rx_event = rx_event;
+        self.local_frame_rx = None;
+        self.remote_frame_rx = None;
 
         self.local_texture = None;
         self.remote_texture = None;
 
-        self.controller = match AppHandler::new(tx_local, tx_remote, tx_event, self.config.clone())
-        {
-            Ok(controller) => controller,
+        self.controller = match Controller::new(self.event_tx.clone(), &self.config) {
+            Ok(c) => c,
             Err(e) => {
                 self.error_message = Some(format!("Failed to create controller: {e}"));
                 self.view = View::Error;
                 return;
-            }
+            },
         };
     }
 }

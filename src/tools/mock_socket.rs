@@ -37,4 +37,16 @@ impl Socket for MockSocket {
     fn set_read_timeout(&self, _dur: Option<Duration>) -> Result<(), std::io::Error> {
         Ok(())
     }
+    
+    fn try_clone(&self) -> Result<Self, std::io::Error> {
+        let sent_data = match self.sent_data.lock().map_err(|_| std::io::ErrorKind::WouldBlock.into()) {
+            Ok(data) => data.clone(),
+            Err(e) => return Err(e),
+        };
+            
+        Ok(MockSocket { 
+            sent_data: Arc::new(Mutex::new(sent_data)),
+            data_to_receive: self.data_to_receive.clone(),
+        })
+    }
 }

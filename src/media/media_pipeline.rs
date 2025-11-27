@@ -13,16 +13,16 @@ use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
 pub struct MediaPipeline {
     camera: Camera,
     config: Arc<Config>,
-
-    on: AtomicBool
+    
+    on: Arc<AtomicBool>
 }
 
 impl MediaPipeline {
     pub fn new(config: &Arc<Config>) -> Self {
         Self {
-            camera: Camera::new(config.media),
+            camera: Camera::new(&config),
             config: Arc::clone(config),
-            on: AtomicBool::new(false),
+            on: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -33,7 +33,7 @@ impl MediaPipeline {
         self.on.store(true, Ordering::SeqCst);
         Ok((local_frame_rx, remote_frame_rx))
     }
-    
+
     pub fn stop(&self) {
         self.on.store(false, Ordering::SeqCst)
     }
@@ -42,14 +42,15 @@ impl MediaPipeline {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
 
         let mut decoder = Decoder::new().map_err(|e| Error::MapError(e.to_string()))?;
-
+        let on = Arc::clone(&self.on);
+        
         thread::spawn({
             move || {
                 let mut actual_frame = None;
                 let mut chunks = Vec::new();
 
                 loop {
-                    if !self.on.load(Ordering::SeqCst) {
+                    if !on.load(Ordering::SeqCst) {
                         break;
                     }
 
@@ -92,21 +93,26 @@ impl MediaPipeline {
         let camera_frame_rx = self.camera.start().map_err(|e| Error::MapError(e.to_string()))?;
         let mut encoder = Encoder::new(&self.config.media).map_err(|e| Error::MapError(e.to_string()))?;
 
+        let on = Arc::clone(&self.on);
+        let version = 0; // No se que poner (por ahi q sea un valor q le llegue por constructor)
+        let src = 0;    // No se que poner (por ahi q sea un valor q le llegue por constructor)
+
         thread::spawn(move || {
             for frame in camera_frame_rx {
-                if !self.on.load(Ordering::SeqCst) {
+                if !on.load(Ordering::SeqCst) {
                     break;
                 }
-                if let Err(_) = local_frame_tx.send(frame.clone()) {
+
+                if local_frame_tx.send(frame.clone()).is_err() {
                     break;
                 }
 
                 let encoded_frame = match encoder.encode_frame(&frame) {
-                    Ok(encoded_frame) => encoded_frame,
+                    Ok(f) => f,
                     Err(_) => break,
                 };
 
-                if self.send_encoded_frame(encoded_frame, &rtp_tx).is_err() {
+                if send_encoded_frame(encoded_frame, &rtp_tx, version, src, &on).is_err() {
                     break;
                 }
             }
@@ -115,27 +121,34 @@ impl MediaPipeline {
         Ok(local_frame_rx)
     }
 
-    fn send_encoded_frame(&self, encoded_frame: EncodedFrame, rtp_tx: &Sender<RtpPacket>) -> Result<(), Error> {
-        if !self.on.load(Ordering::SeqCst) {
-            return Err(Error::SendError(String::from("Media pipeline turned off")));
-        }
-
-        for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
-            let marker = u16::try_from(encoded_frame.chunks.len()).map_err(|e| Error::ParsingError(e.to_string()))?;
-
-            rtp_tx.send(RtpPacket {
-                version: self.rtp_version, // En este no estoy seguro q poner
-                marker,
-                payload_type: 0, // En este no estoy seguro q poner
-                frame_id: encoded_frame.id,
-                chunk_id: chunk_id as u64,
-                timestamp: Local::now().timestamp_millis() as u32,
-                ssrc: self.src, // En este no estoy seguro q poner
-                payload: payload.to_vec(),
-            }).map_err(|e| Error::SendError(e.to_string()))?;
-        }
-        Ok(())
+}
+fn send_encoded_frame(
+    encoded_frame: EncodedFrame,
+    rtp_tx: &Sender<RtpPacket>,
+    version: u8,
+    src: u32,
+    on: &Arc<AtomicBool>
+) -> Result<(), Error> {
+    if !on.load(Ordering::SeqCst) {
+        return Err(Error::SendError("Media pipeline turned off".into()));
     }
+
+    for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
+        let marker = encoded_frame.chunks.len() as u16;
+
+        rtp_tx.send(RtpPacket {
+            version,
+            marker,
+            payload_type: 0,
+            frame_id: encoded_frame.id,
+            chunk_id: chunk_id as u64,
+            timestamp: Local::now().timestamp_millis() as u32,
+            ssrc: src,
+            payload: payload.clone(),
+        })
+        .map_err(|e| Error::SendError(e.to_string()))?;
+    }
+    Ok(())
 }
 
 fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {

@@ -13,15 +13,16 @@ use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
 pub struct MediaPipeline {
     camera: Camera,
     config: Arc<Config>,
-    
+    src: u32,
     on: Arc<AtomicBool>
 }
 
 impl MediaPipeline {
-    pub fn new(config: &Arc<Config>) -> Self {
+    pub fn new(config: &Arc<Config>, src: u32) -> Self {
         Self {
             camera: Camera::new(&config),
             config: Arc::clone(config),
+            src,
             on: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -94,9 +95,9 @@ impl MediaPipeline {
         let mut encoder = Encoder::new(&self.config.media).map_err(|e| Error::MapError(e.to_string()))?;
 
         let on = Arc::clone(&self.on);
-        let version = 0; // No se que poner (por ahi q sea un valor q le llegue por constructor)
-        let src = 0;    // No se que poner (por ahi q sea un valor q le llegue por constructor)
-
+        let src = self.src;
+        let config = Arc::clone(&self.config);
+        
         thread::spawn(move || {
             for frame in camera_frame_rx {
                 if !on.load(Ordering::SeqCst) {
@@ -112,7 +113,7 @@ impl MediaPipeline {
                     Err(_) => break,
                 };
 
-                if send_encoded_frame(encoded_frame, &rtp_tx, version, src, &on).is_err() {
+                if send_encoded_frame(encoded_frame, &rtp_tx, src, &on, &config).is_err() {
                     break;
                 }
             }
@@ -125,9 +126,9 @@ impl MediaPipeline {
 fn send_encoded_frame(
     encoded_frame: EncodedFrame,
     rtp_tx: &Sender<RtpPacket>,
-    version: u8,
     src: u32,
-    on: &Arc<AtomicBool>
+    on: &Arc<AtomicBool>,
+    config: &Arc<Config>,
 ) -> Result<(), Error> {
     if !on.load(Ordering::SeqCst) {
         return Err(Error::SendError("Media pipeline turned off".into()));
@@ -137,9 +138,9 @@ fn send_encoded_frame(
         let marker = encoded_frame.chunks.len() as u16;
 
         rtp_tx.send(RtpPacket {
-            version,
+            version: config.media.rtp_version,
             marker,
-            payload_type: 0,
+            payload_type: config.media.rtp_payload_type,
             frame_id: encoded_frame.id,
             chunk_id: chunk_id as u64,
             timestamp: Local::now().timestamp_millis() as u32,

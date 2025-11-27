@@ -192,6 +192,7 @@ impl Config {
         let media_section = conf
             .section(Some("media"))
             .ok_or("Missing [media] section")?;
+        let rtp_section = conf.section(Some("rtp")).ok_or("Missing [rtp] section")?;
         let rtcp_section = conf.section(Some("rtcp")).ok_or("Missing [rtcp] section")?;
         let sdp_section = conf.section(Some("sdp")).ok_or("Missing [sdp] section")?;
         let ice_section = conf.section(Some("ice")).ok_or("Missing [ice] section")?;
@@ -276,11 +277,11 @@ impl Config {
                     .parse()?,
             },
             rtp: RtpConfig {
-                max_packet_size: rtcp_section
+                max_packet_size: rtp_section
                     .get("max_packet_size")
                     .ok_or("Missing max_packet_size")?
                     .parse()?,
-                read_timeout_millis: rtcp_section
+                read_timeout_millis: rtp_section
                     .get("read_timeout_millis")
                     .ok_or("Missing read_timeout_millis")?
                     .parse()?,

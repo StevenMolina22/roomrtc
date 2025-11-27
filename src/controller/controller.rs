@@ -22,8 +22,9 @@ impl Controller {
     pub fn new(_event_tx: Sender<AppEvent>, config: &Arc<Config>) -> Result<Self, Error> {
         // let client_server_stream = TcpStream::connect(&cfg.signaling_server.client_server_address)
         //     .map_err(|_| Error::ConnectingToServerFailed)?;
-
-        let media_pipeline = MediaPipeline::new(config);
+        
+        // Le pongo src 0 pero le podriamos poner un token o algo
+        let media_pipeline = MediaPipeline::new(config, 0);
         let transport = MediaTransport::new(config).map_err(|e| Error::MapError(e.to_string()))?;
         let call_session = CallSession::new(transport.rtp_address.port(), config).map_err(|e| Error::MapError(e.to_string()))?;
 

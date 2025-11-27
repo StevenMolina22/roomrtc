@@ -48,8 +48,6 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         let rtp_socket = self.rtp_socket.try_clone().map_err(|e| Error::SocketCloneFailed)?;
         let report_handler = Arc::clone(&self.report_handler);
         let connected = Arc::clone(&self.connected);
-        let ssrc = self.ssrc;
-        let version = self.rtp_version;
 
         thread::spawn(move || {
             loop {

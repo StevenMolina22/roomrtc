@@ -1,4 +1,3 @@
-use std::env;
 use std::path::Path;
 
 use room_rtc::config::Config;

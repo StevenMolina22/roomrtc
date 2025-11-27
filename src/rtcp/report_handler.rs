@@ -92,10 +92,8 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                         }
                         ready = true;
                     }
-                    // --- ADD THIS BLOCK ---
                     Some(RtcpPacket::ConnectivityReport) => {
-                        // The other peer is already sending reports, so they are definitely connected.
-                        // We can safely transition to Open.
+                        // Peer is already connected, transition to Open.
                         let mut conn = self
                             .connection_status
                             .write()
@@ -103,7 +101,6 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                         *conn = ConnectionStatus::Open;
                         break;
                     }
-                    // ----------------------
                     Some(_) => return Err(Error::UnexpectedMessage),
                     None => {}
                 },
@@ -166,16 +163,15 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// The receiver runs with a read timeout configured to `REPORT_RECEIVE_LIMIT`
     /// and uses `try_receive_report` to parse and handle incoming data.
     fn start_report_receiver(&self, report_socket: Arc<S>) -> Result<(), Error> {
-        // 1. Use a SHORT timeout (100ms) for the actual socket read.
-        // This ensures we release the Mutex frequently so the Sender can run.
+        // Set timeout to 10ms to prevent Mutex starvation
         report_socket
-            .set_read_timeout(Some(Duration::from_millis(100)))
+            .set_read_timeout(Some(Duration::from_millis(10)))
             .map_err(|_| Error::SocketConfigFailed)?;
 
         let shared_connection_status = Arc::clone(&self.connection_status);
         let retry_limit = self.config.retry_limit;
 
-        // We manually track the "logical" timeout (3000ms)
+        // Track logical timeout duration
         let max_silence_duration =
             chrono::Duration::milliseconds(self.config.receive_limit_millis as i64);
 
@@ -184,56 +180,45 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
             let mut timeouts_triggered = 0;
 
             loop {
-                // Check if connection was closed externally
+                // Check if connection closed externally
                 if let Ok(conn) = shared_connection_status.read() {
                     if *conn == ConnectionStatus::Closed {
                         break;
                     }
                 }
 
-                // 2. Try to receive with the short 100ms timeout
                 let mut buf = [0u8; 1024];
                 match report_socket.recv_from(&mut buf) {
                     Ok((size, _)) => {
+                        // On valid packet (ConnectivityReport), reset timers
                         match RtcpPacket::from_bytes(&buf[..size]) {
                             Some(RtcpPacket::ConnectivityReport) => {
                                 last_valid_packet_time = Local::now();
-                                timeouts_triggered = 0; // Reset retries on success
+                                timeouts_triggered = 0;
                             }
                             Some(RtcpPacket::Goodbye) => {
-                                println!("Goodbye received!");
-                                break; // Exit loop to close
+                                break;
                             }
-                            _ => {
-                                // Ignore HELLO/READY or garbage, but don't treat as fatal error
-                            }
+                            _ => {}
                         }
                     }
                     Err(e) => {
-                        // 3. Handle the expected short timeout
                         let kind = e.kind();
                         if kind == std::io::ErrorKind::WouldBlock
                             || kind == std::io::ErrorKind::TimedOut
                         {
-                            // Check if the *real* 3-second limit has passed
+                            // Only count as a timeout if the REAL duration has passed
                             if Local::now() - last_valid_packet_time > max_silence_duration {
                                 timeouts_triggered += 1;
-                                // Reset the timer so we count "intervals of silence" or just strictly count timeouts
-                                // The logic here depends on if you want "N sequential timeouts" or "Total time"
-                                // Based on your config struct, let's reset time to avoid double counting immediately
-                                last_valid_packet_time = Local::now();
+                                last_valid_packet_time = Local::now(); // Reset to avoid spamming
                             }
                         } else {
-                            // Real socket error
-                            println!("RTCP Receive Error: {e}");
                             timeouts_triggered += 1;
                         }
                     }
                 }
 
-                // 4. Check if we exceeded the retry limit
                 if timeouts_triggered >= retry_limit {
-                    println!("Connection timed out (RTCP)");
                     if let Ok(mut conn) = shared_connection_status.write() {
                         *conn = ConnectionStatus::Closed;
                     }
@@ -241,7 +226,6 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                 }
             }
         });
-
         Ok(())
     }
 

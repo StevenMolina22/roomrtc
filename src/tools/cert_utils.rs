@@ -5,7 +5,7 @@ use openssl::{
 use std::fmt;
 use udp_dtls::Identity;
 
-const PKCS12_PASSWORD: &str = "roomrtc_pass";
+pub const PKCS12_PASSWORD: &str = "roomrtc_pass";
 const FRIENDLY_NAME: &str = "room-rtc-identity";
 const SUBJECT_CN: &str = "RoomRTC-Peer";
 const VALIDITY_DAYS: u32 = 365;
@@ -17,7 +17,7 @@ pub struct LocalCert {
     pub identity: Identity,
     /// The SHA-256 fingerprint string (e.g., "AA:BB:CC") advertised in SDP.
     pub fingerprint: String,
-    pkcs12_der: Vec<u8>,
+    pub pkcs12_der: Vec<u8>,
 }
 
 impl LocalCert {

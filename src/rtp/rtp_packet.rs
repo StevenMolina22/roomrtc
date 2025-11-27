@@ -70,8 +70,9 @@ impl RtpPacket {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(26 + self.payload.len());
+        let header_byte = self.version << 6;
 
-        buf.push(self.version);
+        buf.push(header_byte);
         buf.push(self.payload_type);
         buf.extend_from_slice(&self.frame_id.to_be_bytes());
         buf.extend_from_slice(&self.chunk_id.to_be_bytes());
@@ -91,7 +92,7 @@ impl RtpPacket {
             return None;
         }
 
-        let version = data[0];
+        let version = data[0] >> 6;
         let payload_type = data[1];
         let frame_id = u64::from_be_bytes(array_from_slice::<8>(&data[2..10]));
         let chunk_id = u64::from_be_bytes(array_from_slice::<8>(&data[10..18]));

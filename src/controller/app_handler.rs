@@ -8,7 +8,10 @@ use crate::rtp::{ConnectionStatus, RtpPacket, RtpReceiver, RtpSender};
 use crate::sdp::{DtlsSetupRole, Fingerprint};
 use crate::srtp::SrtpContext;
 use crate::tools::DtlsSocket;
+use crate::tools::cert_utils::PKCS12_PASSWORD;
 use chrono::prelude::*;
+use openssl::pkcs12::Pkcs12;
+use openssl::ssl::{SslAcceptor, SslMethod, SslVerifyMode};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
@@ -186,14 +189,36 @@ impl Controller {
                     .map_err(|e| Error::ConnectionSocketError(format!("{e:?}")))?
             }
             DtlsSetupRole::Passive => {
-                let identity = self
-                    .client
-                    .local_cert
-                    .duplicate_identity()
+                // Configure SslAcceptor manually to enable mTLS (client auth)
+                let pkcs12 = Pkcs12::from_der(&self.client.local_cert.pkcs12_der)
+                    .map_err(|e| Error::MapError(e.to_string()))?
+                    .parse(PKCS12_PASSWORD)
                     .map_err(|e| Error::MapError(e.to_string()))?;
-                DtlsAcceptor::builder(identity)
-                    .build()
-                    .map_err(|e| Error::ConnectionSocketError(e.to_string()))?
+
+                let mut acceptor_builder = SslAcceptor::mozilla_intermediate(SslMethod::dtls())
+                    .map_err(|e| Error::MapError(e.to_string()))?;
+                acceptor_builder
+                    .set_private_key(&pkcs12.pkey)
+                    .map_err(|e| Error::MapError(e.to_string()))?;
+                acceptor_builder
+                    .set_certificate(&pkcs12.cert)
+                    .map_err(|e| Error::MapError(e.to_string()))?;
+                acceptor_builder
+                    .check_private_key()
+                    .map_err(|e| Error::MapError(e.to_string()))?;
+
+                // Use callback to ignore CA validation but require certificate
+                acceptor_builder.set_verify_callback(
+                    SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT,
+                    |_, _| true, // Always return true. We verify the fingerprint manually later.
+                );
+
+                let ssl_acceptor = acceptor_builder.build();
+
+                // Wrap in DtlsAcceptor (assuming it's a tuple struct based on compiler hint)
+                let acceptor = DtlsAcceptor(ssl_acceptor);
+
+                acceptor
                     .accept(channel)
                     .map_err(|e| Error::ConnectionSocketError(format!("{e:?}")))?
             }
@@ -279,6 +304,7 @@ impl Controller {
     }
 
     fn generate_media_threads(&mut self) -> Result<(), Error> {
+        // FIX: Use the RAW UDP socket, not the DTLS wrapper
         let rtp_socket = self
             .rtp_udp_socket
             .try_clone()

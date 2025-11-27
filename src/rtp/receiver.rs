@@ -85,14 +85,13 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
 
                     let first_byte = packet_data[0];
 
-                    // DTLS (20-63)
+                    // Filter out DTLS packets (20-63)
                     if (20..=63).contains(&first_byte) {
-                        println!("Received DTLS Keep-alive");
                         continue;
                     }
-                    // RTP/RTCP (128-191)
+                    // Process SRTP/RTP packets (128-191)
                     else if (128..=191).contains(&first_byte) {
-                         let unprotected_packet = self
+                        let unprotected_packet = self
                             .srtp_context
                             .lock()
                             .map_err(|_| Error::PoisonedLock)?
@@ -100,7 +99,6 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                             .map_err(|e| Error::ReceiveFailed(e.to_string()))?;
                         return Ok(unprotected_packet);
                     } else {
-                        println!("Unknown packet type: {}", first_byte);
                         continue;
                     }
                 }

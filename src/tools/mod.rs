@@ -1,4 +1,4 @@
-mod cert_utils;
+pub mod cert_utils;
 mod dtls_socket;
 mod mock_socket;
 mod socket;

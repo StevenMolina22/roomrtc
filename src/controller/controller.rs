@@ -52,9 +52,20 @@ impl Controller {
     }
 
     pub fn start_call(&mut self) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
-        let remote_rtp_address = self.call_session.get_remote_address().map_err(|e| Error::MapError(e.to_string()))?;
-        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.transport.start(remote_rtp_address).map_err(|e| Error::MapError(e.to_string()))?;
-
+        // let remote_rtp_address = self.call_session.get_remote_address().map_err(|e| Error::MapError(e.to_string()))?;
+        let pair = self.call_session.get_selected_pair().map_err(|e| Error::MapError(e.to_string()))?;
+        
+        let remote_rtp_address: std::net::SocketAddr =
+            format!("{}:{}", pair.remote.address, pair.remote.port)
+                .parse()
+                .map_err(Error::ParsingSocketAddressError)?;
+        let remote_rtcp_address: std::net::SocketAddr =
+            format!("{}:{}", pair.remote.address, pair.remote.port + 1)
+                .parse()
+                .map_err(Error::ParsingSocketAddressError)?;
+        
+        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.transport.start(remote_rtp_address, remote_rtcp_address).map_err(|e| Error::MapError(e.to_string()))?;
+        
         self.media_pipeline.start(local_to_remote_rtp_tx, remote_to_local_rtp_rx).map_err(|e| Error::MapError(e.to_string()))
     }
 

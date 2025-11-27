@@ -40,8 +40,7 @@ impl MediaTransport {
         })
     }
 
-    pub fn start(&mut self, remote_rtp_address: SocketAddr) -> Result<(Sender<RtpPacket>, Receiver<RtpPacket>), Error> {
-        let remote_rtcp_address = SocketAddr::new(remote_rtp_address.ip(), remote_rtp_address.port() + 1);
+    pub fn start(&mut self, remote_rtp_address: SocketAddr, remote_rtcp_address: SocketAddr) -> Result<(Sender<RtpPacket>, Receiver<RtpPacket>), Error> {
         self.rtp_socket.connect(remote_rtp_address).map_err(|e| Error::SocketConnectionError(e.to_string()))?;
 
         let rtcp_socket = UdpSocket::bind(self.rtcp_address)
@@ -49,6 +48,11 @@ impl MediaTransport {
 
         rtcp_socket.connect(remote_rtcp_address)
             .map_err(|e| Error::SocketConnectionError(e.to_string()))?;
+
+        println!("RTP binded adrr: {}", self.rtp_socket.local_addr().unwrap());
+        println!("RTP connected adrr: {}\n", remote_rtp_address);
+        println!("RTCP binded adrr: {}", rtcp_socket.local_addr().unwrap());
+        println!("RTCP connected adrr: {}\n", remote_rtcp_address);
 
         let rtcp_handler = RtcpReportHandler::new(
             rtcp_socket,

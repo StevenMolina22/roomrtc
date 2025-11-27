@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use crate::session::error::CallSessionError as Error;
-use crate::session::ice::IceAgent;
+use crate::session::ice::{CandidatePair, IceAgent};
 use crate::session::sdp::{Attribute, MediaDescription, SessionDescriptionProtocol};
 
 /// High-level session that exposes SDP and ICE operations used by the UI
@@ -160,6 +160,13 @@ impl CallSession {
             .parse()
             .map_err(|_| Error::BadAddress)?;
 
+        println!("Selected pair local address: {}:{}", pair.local.address, pair.local.port);
+        println!("Selected pair remote address: {}:{}", pair.remote.address, pair.remote.port);
+        
         Ok(SocketAddr::from((ip, pair.remote.port)))
+    }
+    
+    pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
+        self.ice_agent.get_selected_pair().map_err(|e| Error::IceConnectionError(e.to_string()))
     }
 }

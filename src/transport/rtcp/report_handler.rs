@@ -102,9 +102,9 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                 Err(e) => return Err(Error::ReceiveFailed(e.to_string())),
             }
         }
+
         Ok(())
     }
-
 
     /// Spawn the background sender thread that periodically sends
     /// connectivity reports until the connection is closed.

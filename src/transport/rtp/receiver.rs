@@ -1,10 +1,13 @@
-use crate::rtcp::RtcpReportHandler;
-use crate::rtp::ConnectionStatus;
-use crate::rtp::error::RtpError as Error;
-use crate::rtp::rtp_packet::RtpPacket;
+use crate::transport::rtcp::RtcpReportHandler;
+use crate::transport::rtp::error::RtpError as Error;
+use crate::transport::rtp::rtp_packet::RtpPacket;
 use crate::tools::Socket;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
+use std::thread;
 use std::time::Duration;
+use crate::config::Config;
 
 /// RTP receiver that reads `RtpPacket` instances from a socket and
 /// manages RTCP reporting through a `RtcpReportHandler`.
@@ -13,10 +16,10 @@ use std::time::Duration;
 /// a locked `RtcpReportHandler` used to drive RTCP-style reporting and
 /// a shared `connection_status` used to observe/drive session state.
 pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
+    config: Arc<Config>,
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
-    connection_status: Arc<RwLock<ConnectionStatus>>,
-    max_udp_packet_size: usize,
+    connected: Arc<AtomicBool>,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
@@ -35,22 +38,44 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
     /// Returns `Error::SocketConfigFailed` if configuring the socket
     /// read timeout fails.
     pub fn new(
+        config: &Arc<Config>,
         rtp_socket: S,
-        report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
-        connection_status: Arc<RwLock<ConnectionStatus>>,
-        rtp_read_timeout_millis: u64,
-        max_udp_packet_size: usize,
+        report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
+        connected: &Arc<AtomicBool>,
     ) -> Result<Self, Error> {
         rtp_socket
-            .set_read_timeout(Some(Duration::from_millis(rtp_read_timeout_millis)))
+            .set_read_timeout(Some(Duration::from_millis(config.rtp.read_timeout_millis)))
             .map_err(|_| Error::SocketConfigFailed)?;
 
         Ok(Self {
+            config: Arc::clone(config),
             rtp_socket,
-            report_handler,
-            connection_status,
-            max_udp_packet_size,
+            report_handler: Arc::clone(report_handler),
+            connected: Arc::clone(connected),
         })
+    }
+
+    pub fn start(&mut self) -> Result<Receiver<RtpPacket>, Error> {
+        let (remote_to_local_rtp_tx, remote_to_local_rtp_rx) = mpsc::channel();
+        thread::spawn({
+            move || {
+                loop {
+                    if !self.connected.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let rtp_packet = match self.receive() {
+                        Ok(packet) => packet,
+                        Err(_) => break,
+                    };
+
+                    if let Err(_) = remote_to_local_rtp_tx.send(rtp_packet) {
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(remote_to_local_rtp_rx)
     }
 
     /// Wait for and return the next decoded `RtpPacket`.
@@ -66,7 +91,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
     /// Returns `Error::ReceiveFailed` for unexpected socket errors and
     /// `Error::ConnectionClosed` if the session is closed while waiting.
     pub fn receive(&mut self) -> Result<RtpPacket, Error> {
-        let mut buf = vec![0u8; self.max_udp_packet_size];
+        let mut buf = vec![0u8; self.config.rtp.max_packet_size];
         loop {
             match self.rtp_socket.recv_from(&mut buf) {
                 Ok((size, _addr)) => {
@@ -75,12 +100,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                     }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if self
-                        .connection_status
-                        .read()
-                        .map_err(|_| Error::ConnectionStatusLockFailed)
-                        .map(|conn| *conn == ConnectionStatus::Closed)?
-                    {
+                    if !self.connected.load(Ordering::SeqCst) {
                         return Err(Error::ConnectionClosed);
                     }
                 }
@@ -93,6 +113,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                     return Err(Error::ReceiveFailed(e.to_string()));
                 }
             }
+            buf.clear();
         }
     }
 }

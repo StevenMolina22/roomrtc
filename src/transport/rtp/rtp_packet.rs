@@ -9,13 +9,13 @@ use std::default::Default;
 #[derive(Debug, Clone, Default)]
 pub struct RtpPacket {
     /// Packet format version.
-    pub(crate) version: u8,
+    pub version: u8,
 
     /// Marker/total-chunks field used by the application.
     pub marker: u16,
 
     /// Payload type.
-    pub(crate) payload_type: u8,
+    pub payload_type: u8,
 
     /// Logical frame identifier for the packet's media frame.
     pub frame_id: u64,
@@ -27,7 +27,7 @@ pub struct RtpPacket {
     pub timestamp: u32,
 
     /// SSRC (synchronization source) identifier.
-    pub(crate) ssrc: u32,
+    pub ssrc: u32,
 
     /// Payload bytes of the packet.
     pub payload: Vec<u8>,

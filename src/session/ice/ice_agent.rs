@@ -167,8 +167,8 @@ fn get_local_ip() -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ice::candidate::Candidate;
-    use crate::ice::candidate_type::CandidateType;
+    use crate::session::ice::candidate::Candidate;
+    use crate::session::ice::candidate_type::CandidateType;
 
     fn make_ice_config() -> IceConfig {
         IceConfig {

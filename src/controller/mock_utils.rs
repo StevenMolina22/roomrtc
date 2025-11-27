@@ -2,9 +2,9 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use crate::camera::FrameSource;
+use crate::media::camera::FrameSource;
 use crate::config::Config;
-use crate::controller::{Controller, ControllerError};
+use crate::controller::{AppHandler, ControllerError};
 use crate::frame_handler::Frame;
 
 /// Mock camera to manually send frames in tests.
@@ -14,7 +14,7 @@ pub struct MockCamera {
 
 /// Holds all the parts needed to test one peer.
 pub struct TestPeer {
-    pub controller: Controller,
+    pub controller: AppHandler,
     pub tx_inject_frame: Sender<Frame>, // Send frames to the camera
     pub rx_remote_frame: Receiver<Frame>, // Receive frames from the controller
     pub rx_event: Receiver<String>,     // Receive error events
@@ -58,7 +58,7 @@ pub fn setup_peer() -> Result<TestPeer, ControllerError> {
             .map_err(|e| ControllerError::MapError(e.to_string()))?,
     );
 
-    let mut controller = Controller::new(tx_local, tx_remote, tx_event, config.clone())?;
+    let mut controller = AppHandler::new(tx_local, tx_remote, tx_event, config.clone())?;
 
     // Make a mock camera and swap it with the real one
     let mock_cam = MockCamera::new(rx_for_camera);

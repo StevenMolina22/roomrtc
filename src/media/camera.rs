@@ -1,6 +1,6 @@
 use crate::config::MediaConfig;
 use crate::controller::ControllerError;
-use crate::frame_handler::Frame;
+use crate::media::frame_handler::Frame;
 use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, RwLock};

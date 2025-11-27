@@ -1,6 +1,6 @@
 use super::views::View;
 use crate::config::Config;
-use crate::controller::Controller;
+use crate::controller::AppHandler;
 use crate::frame_handler::Frame;
 use eframe::egui;
 use eframe::epaint::{Color32, FontId};
@@ -11,7 +11,7 @@ use std::sync::{Arc, mpsc};
 /// Application state and UI controller for the `RoomRTC` GUI.
 ///
 /// This struct holds the UI view state, the controller used to manage
-/// the underlying client and media pipelines, the configuration, and
+/// the underlying session and media pipelines, the configuration, and
 /// the channels used to receive frames and events from background
 /// threads. It also stores textures used to render the local and
 /// remote camera frames in the GUI.
@@ -21,7 +21,7 @@ use std::sync::{Arc, mpsc};
 /// application. Create instances using [`RoomRTCApp::new`].
 pub struct RoomRTCApp {
     view: View,
-    controller: Controller,
+    controller: AppHandler,
     config: Arc<Config>,
 
     // Receivers
@@ -47,19 +47,19 @@ impl RoomRTCApp {
     ///
     /// Inputs:
     /// - `config`: application configuration used to construct the
-    ///   `Controller` and to configure the client behavior.
+    ///   `AppHandler` and to configure the session behavior.
     ///
     /// Outputs:
     /// - A fully initialised `RoomRTCApp` with channels created for
     ///   receiving local frames, remote frames and events. The
-    ///   `Controller` is created and returned in a running state.
+    ///   `AppHandler` is created and returned in a running state.
     #[must_use]
     pub fn new(config: Config) -> Self {
         let (tx_local, rx_local) = mpsc::channel();
         let (tx_remote, rx_remote) = mpsc::channel();
         let (tx_event, rx_event) = mpsc::channel();
         let conf = Arc::new(config);
-        let controller = match Controller::new(tx_local, tx_remote, tx_event, conf.clone()) {
+        let controller = match AppHandler::new(tx_local, tx_remote, tx_event, conf.clone()) {
             Ok(controller) => controller,
             Err(e) => {
                 panic!("Failed to create controller: {e}");
@@ -363,7 +363,7 @@ impl RoomRTCApp {
     /// Reset the application state to initial values.
     ///
     /// This recreates the internal channels and replaces the
-    /// `Controller` with a fresh instance while dropping existing
+    /// `AppHandler` with a fresh instance while dropping existing
     /// textures so a new call can be established cleanly.
     pub fn reset(&mut self) {
         let (tx_local, rx_local) = mpsc::channel();
@@ -377,7 +377,7 @@ impl RoomRTCApp {
         self.local_texture = None;
         self.remote_texture = None;
 
-        self.controller = match Controller::new(tx_local, tx_remote, tx_event, self.config.clone())
+        self.controller = match AppHandler::new(tx_local, tx_remote, tx_event, self.config.clone())
         {
             Ok(controller) => controller,
             Err(e) => {

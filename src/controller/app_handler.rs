@@ -1,18 +1,20 @@
 use super::error::{ControllerError as Error, ThreadsError};
-use crate::camera::{Camera, FrameSource};
-use crate::client::Client;
+use crate::media::camera::{Camera, FrameSource};
+use crate::session::CallSession;
 use crate::config::Config;
 use crate::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
-use crate::rtcp::RtcpReportHandler;
-use crate::rtp::{ConnectionStatus, RtpPacket, RtpReceiver, RtpSender};
+use crate::transport::rtcp::RtcpReportHandler;
+use crate::transport::rtp::{RtpPacket, RtpReceiver, RtpSender};
 use chrono::prelude::*;
 use std::net::UdpSocket;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
+use crate::media::frame_handler::Frame;
+use crate::transport::rtcp::RtcpReportHandler;
 
-pub struct Controller {
-    pub client: Client,
+pub struct AppHandler {
+    pub client: CallSession,
     pub config: Arc<Config>,
 
     //Channels
@@ -30,13 +32,13 @@ pub struct Controller {
     //Components
     pub camera: Arc<Mutex<Box<dyn FrameSource + Send>>>,
     pub rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<UdpSocket>>>>,
-
+    //
     //Sockets
     rtp_socket: UdpSocket,
     rtcp_socket: UdpSocket,
 }
 
-impl Controller {
+impl AppHandler {
     pub fn new(
         tx_local: Sender<Frame>,
         tx_remote: Sender<Frame>,
@@ -58,7 +60,7 @@ impl Controller {
             UdpSocket::bind(&rtcp_addr).map_err(|e| Error::MapError(e.to_string()))?;
 
         Ok(Self {
-            client: Client::new(rtp_port, &config.media, &config.ice, &config.sdp)
+            client: CallSession::new(rtp_port, &config.media, &config.ice, &config.sdp)
                 .map_err(|e| Error::MapError(e.to_string()))?,
             tx_encoded,
             rx_encoded: Arc::new(Mutex::new(rx_encoded)),
@@ -90,7 +92,7 @@ impl Controller {
             format!("{}:{}", pair.remote.address, pair.remote.port + 1)
                 .parse()
                 .map_err(Error::ParsingSocketAddressError)?;
-
+        
         self.rtp_socket
             .connect(remote_rtp)
             .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;

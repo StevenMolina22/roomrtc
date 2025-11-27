@@ -251,7 +251,7 @@ fn handle_attribute_line(
 mod tests {
     use super::*;
     use crate::config::SdpConfig;
-    use crate::sdp::error::SdpError as Error;
+    use crate::session::sdp::error::SdpError as Error;
 
     fn make_test_sdp_config() -> SdpConfig {
         SdpConfig {

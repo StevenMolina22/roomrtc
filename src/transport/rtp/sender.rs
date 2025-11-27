@@ -1,9 +1,10 @@
-use std::sync::{Arc, Mutex, RwLock};
-
-use crate::rtcp::RtcpReportHandler;
-use crate::rtp::ConnectionStatus;
-use crate::rtp::error::RtpError as Error;
-use crate::rtp::rtp_packet::RtpPacket;
+use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
+use std::thread;
+use crate::transport::rtcp::RtcpReportHandler;
+use crate::transport::rtp::error::RtpError as Error;
+use crate::transport::rtp::rtp_packet::RtpPacket;
 use crate::tools::Socket;
 
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
@@ -15,7 +16,7 @@ pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     ssrc: u32,
-    connection_status: Arc<RwLock<ConnectionStatus>>,
+    connected: Arc<AtomicBool>,
     rtp_version: u8,
 }
 
@@ -27,18 +28,42 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
     /// returned.
     pub fn new(
         rtp_socket: S,
-        report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
+        report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
         ssrc: u32,
-        connection_status: Arc<RwLock<ConnectionStatus>>,
+        connected: &Arc<AtomicBool>,
         rtp_version: u8,
     ) -> Result<Self, Error> {
         Ok(Self {
             rtp_socket,
-            report_handler,
+            report_handler: Arc::clone(report_handler),
             ssrc,
-            connection_status,
+            connected: Arc::clone(connected),
             rtp_version,
         })
+    }
+    pub fn start(&mut self) -> Result<Sender<RtpPacket>, Error> {
+        let (local_to_remote_rtp_tx, local_to_remote_rtp_rx) = mpsc::channel();
+
+        thread::spawn({
+            move || {
+                loop {
+                    if !self.connected.load(Ordering::SeqCst) {
+                        break;
+                    }
+
+                    let rtp_packet = match local_to_remote_rtp_rx.recv() {
+                        Ok(rtp_packet) => rtp_packet,
+                        Err(_) => break,
+                    };
+
+                    if let Err(_) = self.send(rtp_packet) {
+                        break
+                    }
+                }
+            }
+        });
+
+        Ok(local_to_remote_rtp_tx)
     }
 
     /// Send an RTP packet created from the provided payload and metadata.
@@ -46,35 +71,15 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
     /// The method checks the connection status first. If the underlying
     /// socket send fails it attempts to close the RTCP handler and
     /// returns an appropriate `RtpError`.
-    pub fn send(
+    fn send(
         &mut self,
-        payload: &[u8],
-        payload_type: u8,
-        timestamp: u32,
-        frame_id: u64,
-        chunk_id: u64,
-        marker: u16,
+        rtp_packet: RtpPacket
     ) -> Result<(), Error> {
-        if let Ok(conn) = self.connection_status.read()
-            && *conn == ConnectionStatus::Closed
-        {
+        if !self.connected {
             return Err(Error::ConnectionClosed);
         }
 
-        let rtp_package = RtpPacket {
-            version: self.rtp_version,
-            marker,
-            payload_type,
-            payload: payload.to_vec(),
-            timestamp,
-            frame_id,
-            chunk_id,
-            ssrc: self.ssrc,
-        };
-
-        let data = rtp_package.to_bytes();
-
-        if self.rtp_socket.send(&data).is_err() {
+        if self.rtp_socket.send(&rtp_packet.to_bytes()).is_err() {
             self.report_handler
                 .lock()
                 .map_err(|_| Error::PoisonedLock)?

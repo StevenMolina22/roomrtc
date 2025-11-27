@@ -1,6 +1,6 @@
 use crate::config::MediaConfig;
 
-use super::{error::FrameError as Error, frame::Frame};
+use super::{error::FrameError as Error, frame::Frame, EncodedFrame};
 use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
 
@@ -50,7 +50,7 @@ impl Encoder {
     /// # Errors
     ///
     /// - [`Error::EncodingError`] — if encoding fails due to invalid frame data.
-    pub fn encode_frame(&mut self, frame: &Frame) -> Result<Vec<Vec<u8>>, Error> {
+    pub fn encode_frame(&mut self, frame: &Frame) -> Result<EncodedFrame, Error> {
         let rgb_source = RgbSliceU8::new(&frame.data, (frame.width, frame.height));
         let yuv = YUVBuffer::from_rgb8_source(rgb_source);
 
@@ -66,7 +66,12 @@ impl Encoder {
 
         self.frame_count += 1;
 
-        Ok(chunks)
+        Ok(EncodedFrame {
+            id: frame.id,
+            chunks,
+            width: frame.width,
+            height: frame.height,
+        })
     }
 }
 

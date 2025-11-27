@@ -2,15 +2,16 @@ mod app_handler;
 mod error;
 #[cfg(test)]
 mod mock_utils;
+mod controller;
 
-pub use app_handler::Controller;
+pub use app_handler::AppHandler;
 pub use error::{ControllerError, ThreadsError};
 
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
-    use crate::{controller::mock_utils::setup_peer, frame_handler::Frame};
+    use crate::{controller::mock_utils::setup_peer, media::frame_handler::Frame};
 
     #[test]
     fn test_full_media_pipeline_e2e() {

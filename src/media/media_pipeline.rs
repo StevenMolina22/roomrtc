@@ -146,8 +146,6 @@ fn send_encoded_frame(
 
     let marker = encoded_frame.chunks.len() as u16;
     for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
-        let payload = payload.to_vec();
-
         rtp_tx.send(RtpPacket {
             version: config.media.rtp_version,
             marker,
@@ -156,7 +154,7 @@ fn send_encoded_frame(
             chunk_id: chunk_id as u64,
             timestamp: Local::now().timestamp_millis() as u32,
             ssrc,
-            payload: payload,
+            payload: payload.to_vec(),
         })
         .map_err(|e| Error::SendError(e.to_string()))?;
     }

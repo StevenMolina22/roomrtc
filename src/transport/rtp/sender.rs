@@ -2,6 +2,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender};
 use std::thread;
+use crate::config::Config;
+use crate::media::frame_handler::EncodedFrame;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
 use crate::transport::rtp::rtp_packet::RtpPacket;
@@ -17,7 +19,7 @@ pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     ssrc: u32,
     connected: Arc<AtomicBool>,
-    rtp_version: u8,
+    config: Arc<Config>,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
@@ -31,23 +33,24 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
         ssrc: u32,
         connected: &Arc<AtomicBool>,
-        rtp_version: u8,
+        config: &Arc<Config>,
     ) -> Result<Self, Error> {
         Ok(Self {
             rtp_socket,
             report_handler: Arc::clone(report_handler),
             ssrc,
             connected: Arc::clone(connected),
-            rtp_version,
+            config: Arc::clone(config),
         })
     }
     
-    pub fn start(&self) -> Result<Sender<RtpPacket>, Error> {
+    pub fn start(&self) -> Result<Sender<EncodedFrame>, Error> {
         let (tx, rx) = mpsc::channel();
 
         let rtp_socket = self.rtp_socket.try_clone().map_err(|_| Error::SocketCloneFailed)?;
         let report_handler = Arc::clone(&self.report_handler);
         let connected = Arc::clone(&self.connected);
+        let config = self.config.clone();
 
         thread::spawn(move || {
             loop {
@@ -56,7 +59,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     break;
                 }
 
-                let packet = match rx.recv() {
+                let enc_frame = match rx.recv() {
                     Ok(p) => p,
                     Err(e) => {
                         println!("Error rtp sender recv: {e}");
@@ -64,7 +67,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     },
                 };
 
-                if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, packet) {
+                if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, enc_frame, &config) {
                     println!("Error sending rtp packet: {e}");
                     break;
                 }
@@ -86,20 +89,35 @@ fn send_packet<S: Socket + Send + Sync + 'static>(
     socket: &S,
     report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
     connected: &AtomicBool,
-    packet: RtpPacket,
+    enc_frame: EncodedFrame,
+    config: &Arc<Config>,
 ) -> Result<(), Error> {
     if !connected.load(Ordering::SeqCst) {
         return Err(Error::ConnectionClosed);
     }
 
-    if socket.send(&packet.to_bytes()).is_err() {
-        report_handler
-            .lock()
-            .map_err(|_| Error::PoisonedLock)?
-            .close_connection()
-            .map_err(|e| Error::RTCPError(e.to_string()))?;
+    let marker = enc_frame.chunks.len() as u16;
+    for (chunk_id, payload) in enc_frame.chunks.iter().enumerate() {
+        let packet = RtpPacket {
+            version: config.media.rtp_version,
+            marker,
+            payload_type: config.media.rtp_payload_type,
+            frame_id: enc_frame.id,
+            chunk_id: chunk_id as u64,
+            timestamp: Local::now().timestamp_millis() as u32,
+            ssrc: 12345,
+            payload: payload.to_vec(),
+        };
 
-        return Err(Error::SendFailed);
+        if socket.send(&packet.to_bytes()).is_err() {
+            report_handler
+                .lock()
+                .map_err(|_| Error::PoisonedLock)?
+                .close_connection()
+                .map_err(|e| Error::RTCPError(e.to_string()))?;
+
+            return Err(Error::SendFailed);
+        }
     }
     Ok(())
 }

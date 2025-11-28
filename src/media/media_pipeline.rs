@@ -58,13 +58,10 @@ impl MediaPipeline {
 
                     let rtp_packet = match rtp_rx.recv() {
                         Ok(packet) => packet,
-                        Err(e) => { 
-                            println!("[MEDIA PIPELINE] remote frames pipeline: {e}");
+                        Err(e) => {
                             break; 
                         },
                     };
-
-                    println!("[MEDIA PIPELINE] rtp packet received: {}", rtp_packet.to_string());
 
                     if actual_frame != Some(rtp_packet.frame_id) {
                         chunks = vec![rtp_packet.clone()];
@@ -79,10 +76,8 @@ impl MediaPipeline {
                     if current_chunk_count == expected_marker {
                         if let Some(frame_data) = generate_frame_from_chunks(&mut chunks, &mut decoder) {
                             if let Err(e) = remote_frame_tx.send(frame_data.clone()) {
-                                println!("[MEDIA PIPELINE] failed to send frame: {e}");
                                 break;
                             }
-                            println!("[MEDIA PIPELINE] frame decoded: {}", frame_data.to_string());
                         }
 
                         actual_frame = None;
@@ -111,17 +106,13 @@ impl MediaPipeline {
                 }
 
                 if let Err(e) = local_frame_tx.send(frame.clone()) {
-                    println!("[MEDIA PIPELINE] local frames send failed: {e}");
                     break;
                 }
-                println!("[MEDIA PIPELINE] frame sended to channel: {}", frame.to_string());
 
                 let encoded_frame = match encoder.encode_frame(&frame) {
                     Ok(f) => f,
                     Err(_) => break,
                 };
-
-                println!("[MEDIA PIPELINE] frame encoded : {}", encoded_frame.to_string());
 
                 if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, &on, &config).is_err() {
                     break;
@@ -156,7 +147,6 @@ fn send_encoded_frame(
             ssrc,
             payload: payload.to_vec(),
         };
-        println!("[MEDIA PIPELINE] rtp packet sended: {}", packet.to_string());
         rtp_tx.send(packet).map_err(|e| Error::SendError(e.to_string()))?;
 
     }
@@ -174,7 +164,6 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
     let (decoded_data, width, height) = match decoder.decode_frame(&data) {
         Ok(data) => data,
         Err(e) => {
-            println!("[MEDIA PIPELINE] failed to generate frame: {e}");
             return None
         }
     };

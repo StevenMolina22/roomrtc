@@ -16,11 +16,15 @@ pub struct Config {
     /// RTCP reporting configuration.
     pub rtcp: RtcpConfig,
 
+    /// RTP configuration
+    pub rtp: RtpConfig,
+    
     /// SDP session-level configuration.
     pub sdp: SdpConfig,
 
     /// ICE candidate configuration.
     pub ice: IceConfig,
+    
 }
 
 #[derive(Debug, Clone)]
@@ -94,9 +98,17 @@ pub struct RtcpConfig {
     /// connection.
     pub retry_limit: usize,
 
-    /// RTP socket read timeout in milliseconds.
-    pub rtp_read_timeout_millis: u64,
 }
+
+#[derive(Debug, Clone)]
+pub struct RtpConfig {
+    /// RtpPacket max size supported
+    pub max_packet_size: usize,
+
+    /// Socket read timeout in milliseconds.
+    pub read_timeout_millis: u64,
+}
+
 
 #[derive(Debug, Clone)]
 /// SDP session-level configuration values.
@@ -180,6 +192,7 @@ impl Config {
         let media_section = conf
             .section(Some("media"))
             .ok_or("Missing [media] section")?;
+        let rtp_section = conf.section(Some("rtp")).ok_or("Missing [rtp] section")?;
         let rtcp_section = conf.section(Some("rtcp")).ok_or("Missing [rtcp] section")?;
         let sdp_section = conf.section(Some("sdp")).ok_or("Missing [sdp] section")?;
         let ice_section = conf.section(Some("ice")).ok_or("Missing [ice] section")?;
@@ -262,9 +275,15 @@ impl Config {
                     .get("retry_limit")
                     .ok_or("Missing retry_limit")?
                     .parse()?,
-                rtp_read_timeout_millis: rtcp_section
-                    .get("rtp_read_timeout_millis")
-                    .ok_or("Missing rtp_read_timeout_millis")?
+            },
+            rtp: RtpConfig {
+                max_packet_size: rtp_section
+                    .get("max_packet_size")
+                    .ok_or("Missing max_packet_size")?
+                    .parse()?,
+                read_timeout_millis: rtp_section
+                    .get("read_timeout_millis")
+                    .ok_or("Missing read_timeout_millis")?
                     .parse()?,
             },
             sdp: SdpConfig {

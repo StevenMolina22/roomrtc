@@ -51,15 +51,15 @@ mod tests {
         let mut decoder = Decoder::new().expect("Failed to create decoder");
 
         // Encode the frame, re-assemble it, and decode it
-        let chunks = encoder
+        let enc_frame = encoder
             .encode_frame(&original_frame)
             .expect("Encoding failed");
 
-        let reassembled_data = chunks.concat();
+        let reassembled_data = enc_frame.chunks.concat();
 
         let decoded_result = decoder.decode_frame(&reassembled_data);
 
-        assert!(!chunks.is_empty(), "Encoder produced no chunks");
+        assert!(!enc_frame.chunks.is_empty(), "Encoder produced no chunks");
         assert!(!reassembled_data.is_empty(), "Re-assembled data is empty");
 
         assert!(

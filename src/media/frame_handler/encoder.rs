@@ -1,6 +1,6 @@
 use crate::config::MediaConfig;
 
-use super::{error::FrameError as Error, frame::Frame};
+use super::{error::FrameError as Error, frame::Frame, EncodedFrame};
 use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
 
@@ -13,8 +13,6 @@ use openh264::formats::{RgbSliceU8, YUVBuffer};
 #[allow(clippy::struct_field_names)]
 pub struct Encoder {
     encoder: H264Encoder,
-    frame_count: usize,
-    idr_interval: usize,
     max_chunk_size: usize,
 }
 
@@ -34,8 +32,6 @@ impl Encoder {
 
         Ok(Self {
             encoder,
-            frame_count: 0,
-            idr_interval: media_config.h264_idr_interval,
             max_chunk_size: media_config.rtp_max_chunk_size,
         })
     }
@@ -50,23 +46,23 @@ impl Encoder {
     /// # Errors
     ///
     /// - [`Error::EncodingError`] — if encoding fails due to invalid frame data.
-    pub fn encode_frame(&mut self, frame: &Frame) -> Result<Vec<Vec<u8>>, Error> {
+    pub fn encode_frame(&mut self, frame: &Frame) -> Result<EncodedFrame, Error> {
         let rgb_source = RgbSliceU8::new(&frame.data, (frame.width, frame.height));
         let yuv = YUVBuffer::from_rgb8_source(rgb_source);
-
-        if self.frame_count.is_multiple_of(self.idr_interval) {
-            self.encoder.force_intra_frame();
-        }
 
         let nalus = self
             .encoder
             .encode(&yuv)
             .map_err(|_| Error::EncodingError)?;
         let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
+        
 
-        self.frame_count += 1;
-
-        Ok(chunks)
+        Ok(EncodedFrame {
+            id: frame.id,
+            chunks,
+            width: frame.width,
+            height: frame.height,
+        })
     }
 }
 

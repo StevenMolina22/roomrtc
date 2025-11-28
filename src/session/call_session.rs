@@ -1,24 +1,20 @@
-mod error;
-
-pub use error::ClientError;
-
-use crate::{
-    config::{IceConfig, MediaConfig, SdpConfig},
-    ice::IceAgent,
-    sdp::{Attribute, MediaDescription, SessionDescriptionProtocol},
-};
+use crate::config::{Config};
 use std::collections::HashSet;
+use std::net::IpAddr;
+use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::Arc;
+use crate::session::error::CallSessionError as Error;
+use crate::session::ice::{CandidatePair, IceAgent};
+use crate::session::sdp::{Attribute, MediaDescription, SessionDescriptionProtocol};
 
-use error::ClientError as Error;
-
-/// High-level client that exposes SDP and ICE operations used by the UI
+/// High-level session that exposes SDP and ICE operations used by the UI
 /// and signaling code.
 ///
-/// `Client` holds a local `SessionDescriptionProtocol` and an `IceAgent`.
+/// `CallSession` holds a local `SessionDescriptionProtocol` and an `IceAgent`.
 /// It can create an SDP offer, process remote offers/answers and drive
 /// ICE connectivity checks.
-pub struct Client {
+pub struct CallSession {
     /// Local SDP state representing current media descriptions.
     pub sdp: SessionDescriptionProtocol,
 
@@ -27,8 +23,8 @@ pub struct Client {
     pub ice_agent: IceAgent,
 }
 
-impl Client {
-    /// Create a new `Client` using the provided media port and codec
+impl CallSession {
+    /// Create a new `CallSession` using the provided media port and codec
     /// configuration.
     /// - `ice_config`: ICE configuration for candidate creation.
     /// - `sdp_config`: SDP session-level configuration values.
@@ -49,47 +45,45 @@ impl Client {
     ///    candidate's IP address.
     ///
     /// # Returns
-    /// Returns a `Client` containing the local SDP and an `IceAgent`
+    /// Returns a `CallSession` containing the local SDP and an `IceAgent`
     /// already configured with (potentially) gathered candidates.
     pub fn new(
         media_port: u16,
-        media_config: &MediaConfig,
-        ice_config: &IceConfig,
-        sdp_config: &SdpConfig,
-    ) -> Result<Self, ClientError> {
+        config: &Arc<Config>
+    ) -> Result<Self, Error> {
         let mut ice_agent = IceAgent::new();
         ice_agent
-            .gather_candidates(media_port, ice_config)
+            .gather_candidates(media_port, &config.ice)
             .map_err(|e| {
-                ClientError::IceConnectionError(format!("Failed to gather ICE candidates: {e}"))
+                Error::IceConnectionError(format!("Failed to gather ICE candidates: {e}"))
             })?;
 
         let mut media_description = MediaDescription::new(
-            media_config.media_type.clone(),
+            config.media.media_type.clone(),
             media_port,
-            media_config.media_protocol.clone(),
-            HashSet::from([media_config.rtp_payload_type]),
+            config.media.media_protocol.clone(),
+            HashSet::from([config.media.rtp_payload_type]),
         );
         media_description
             .add_attribute(Attribute::RTPMap(
-                media_config.rtp_payload_type,
-                media_config.codec_name.clone(),
-                media_config.clock_rate,
+                config.media.rtp_payload_type,
+                config.media.codec_name.clone(),
+                config.media.clock_rate,
                 None,
             ))
             .map_err(|e| {
-                ClientError::SdpCreationError(format!("Failed to add RTPMap attribute: {e}"))
+                Error::SdpCreationError(format!("Failed to add RTPMap attribute: {e}"))
             })?;
 
         if let Some(candidate) = ice_agent.get_local_candidate() {
             media_description
                 .add_attribute(Attribute::Candidate(candidate.clone()))
                 .map_err(|e| {
-                    ClientError::SdpCreationError(format!("Failed to add Candidate attribute: {e}"))
+                    Error::SdpCreationError(format!("Failed to add Candidate attribute: {e}"))
                 })?;
         }
 
-        let mut sdp = SessionDescriptionProtocol::new(vec![media_description], sdp_config);
+        let mut sdp = SessionDescriptionProtocol::new(vec![media_description], &config.sdp);
 
         if let Some(local_candidate) = ice_agent.get_local_candidate() {
             sdp.set_connection_data("IN", "IP4", local_candidate.address.clone().as_str());
@@ -152,5 +146,24 @@ impl Client {
         self.ice_agent
             .start_connectivity_checks()
             .map_err(|e| Error::IceConnectionError(e.to_string()))
+    }
+
+
+
+    pub fn get_remote_address(&self) -> Result<SocketAddr, Error> {
+        let pair = self
+            .ice_agent
+            .get_selected_pair()
+            .map_err(|e| Error::IceConnectionError(e.to_string()))?;
+
+        let ip: IpAddr = pair.remote.address
+            .parse()
+            .map_err(|_| Error::BadAddress)?;
+        
+        Ok(SocketAddr::from((ip, pair.remote.port)))
+    }
+    
+    pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
+        self.ice_agent.get_selected_pair().map_err(|e| Error::IceConnectionError(e.to_string()))
     }
 }

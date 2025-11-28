@@ -1,6 +1,6 @@
 use super::Attribute;
 use super::error::SdpError as Error;
-use crate::ice::Candidate;
+use crate::session::ice::Candidate;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -133,7 +133,7 @@ impl MediaDescription {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sdp::attribute::Attribute;
+    use crate::session::sdp::attribute::Attribute;
 
     #[test]
     fn test_from_str_valid_media_description() -> Result<(), Error> {

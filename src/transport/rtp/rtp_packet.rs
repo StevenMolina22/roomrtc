@@ -1,4 +1,5 @@
 use std::default::Default;
+use std::fmt::{Display, Formatter};
 
 /// RTP packet used by the project transport layer.
 ///
@@ -9,13 +10,13 @@ use std::default::Default;
 #[derive(Debug, Clone, Default)]
 pub struct RtpPacket {
     /// Packet format version.
-    pub(crate) version: u8,
+    pub version: u8,
 
     /// Marker/total-chunks field used by the application.
     pub marker: u16,
 
     /// Payload type.
-    pub(crate) payload_type: u8,
+    pub payload_type: u8,
 
     /// Logical frame identifier for the packet's media frame.
     pub frame_id: u64,
@@ -27,10 +28,36 @@ pub struct RtpPacket {
     pub timestamp: u32,
 
     /// SSRC (synchronization source) identifier.
-    pub(crate) ssrc: u32,
+    pub ssrc: u32,
 
     /// Payload bytes of the packet.
     pub payload: Vec<u8>,
+}
+
+impl Display for RtpPacket {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "RtpPacket {{
+    version: {},
+    marker: {},
+    payload_type: {},
+    frame_id: {},
+    chunk_id: {},
+    timestamp: {},
+    ssrc: {},
+    payload_len: {}
+}}",
+            self.version,
+            self.marker,
+            self.payload_type,
+            self.frame_id,
+            self.chunk_id,
+            self.timestamp,
+            self.ssrc,
+            self.payload.len(),
+        )
+    }
 }
 
 impl RtpPacket {
@@ -49,7 +76,7 @@ impl RtpPacket {
         buf.extend_from_slice(&self.frame_id.to_be_bytes());
         buf.extend_from_slice(&self.chunk_id.to_be_bytes());
         buf.extend_from_slice(&self.timestamp.to_be_bytes());
-        buf.extend_from_slice(&(self.marker).to_be_bytes());
+        buf.extend_from_slice(&self.marker.to_be_bytes());
         buf.extend_from_slice(&self.ssrc.to_be_bytes());
         buf.extend_from_slice(&self.payload);
 

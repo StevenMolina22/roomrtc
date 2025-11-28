@@ -1,5 +1,5 @@
-use crate::ice::candidate::Candidate;
-use crate::ice::connectivity_state::ConnectivityState;
+use crate::session::ice::candidate::Candidate;
+use crate::session::ice::connectivity_state::ConnectivityState;
 
 /// A pair of ICE candidates consisting of a local and a remote candidate.
 ///
@@ -82,8 +82,8 @@ impl std::fmt::Display for CandidatePair {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ice::candidate_type::CandidateType;
-    use crate::ice::connectivity_state::ConnectivityState;
+    use crate::session::ice::candidate_type::CandidateType;
+    use crate::session::ice::connectivity_state::ConnectivityState;
 
     fn build_candidate(priority: u32) -> Candidate {
         Candidate {

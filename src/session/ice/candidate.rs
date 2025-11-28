@@ -1,5 +1,5 @@
 use crate::config::IceConfig;
-use crate::ice::candidate_type::CandidateType;
+use crate::session::ice::candidate_type::CandidateType;
 
 /// An ICE candidate.
 ///
@@ -127,7 +127,7 @@ impl std::fmt::Display for Candidate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ice::candidate_type::CandidateType;
+    use crate::session::ice::candidate_type::CandidateType;
 
     fn test_ice_config() -> IceConfig {
         IceConfig {

@@ -1,6 +1,6 @@
 use super::error::SdpError as Error;
-use crate::ice::Candidate;
-use crate::ice::CandidateType;
+use crate::session::ice::Candidate;
+use crate::session::ice::CandidateType;
 use std::fmt;
 use std::str::FromStr;
 
@@ -144,7 +144,7 @@ fn parse_candidate_attr_values(values: &str) -> Result<Attribute, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ice::{Candidate, CandidateType};
+    use crate::session::ice::{Candidate, CandidateType};
 
     #[test]
     fn test_rtpmap_from_str_valid_basic() -> Result<(), Error> {

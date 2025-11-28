@@ -1,6 +1,7 @@
 use super::FrameError as Error;
 use opencv::imgproc;
 use opencv::prelude::*;
+use std::fmt::{Display, Formatter};
 
 /// An in-memory video frame used by the frame handler.
 ///
@@ -20,6 +21,29 @@ pub struct Frame {
 
     /// Identifier for the frame.
     pub id: u64,
+}
+
+impl Display for Frame {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let preview_len = 16; // bytes para mostrar
+        let preview: Vec<String> = self
+            .data
+            .iter()
+            .take(preview_len)
+            .map(|b| format!("{:02X}", b))
+            .collect();
+
+        write!(
+            f,
+            "Frame {{ id: {}, size: {}x{}, data_len: {}, preview: [{}]{} }}",
+            self.id,
+            self.width,
+            self.height,
+            self.data.len(),
+            preview.join(" "),
+            if self.data.len() > preview_len { " ..." } else { "" }
+        )
+    }
 }
 
 impl Frame {

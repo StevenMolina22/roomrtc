@@ -43,11 +43,11 @@ impl MediaPipeline {
     fn start_remote_frames_pipeline(&self, rtp_rx: Receiver<RtpPacket>) -> Result<Receiver<Frame>, Error> {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
 
-        let mut decoder = Decoder::new().map_err(|e| Error::MapError(e.to_string()))?;
         let on = Arc::clone(&self.on);
-        
+
         thread::spawn({
             move || {
+                let mut decoder = Decoder::new().map_err(|e| Error::MapError(e.to_string())).unwrap();
                 let mut actual_frame = None;
                 let mut chunks = Vec::new();
 
@@ -64,6 +64,8 @@ impl MediaPipeline {
                         },
                     };
 
+                    println!("[MEDIA PIPELINE] rtp packet received: {}", packet.to_string());
+
                     if actual_frame != Some(rtp_packet.frame_id) {
                         chunks = vec![rtp_packet.clone()];
                         actual_frame = Some(rtp_packet.frame_id);
@@ -72,20 +74,15 @@ impl MediaPipeline {
                     }
 
                     let expected_marker = rtp_packet.marker;
-                    let current_chunk_count = match u16::try_from(chunks.len()) {
-                        Ok(count) => count,
-                        Err(e) => {
-                            println!("[MEDIA PIPELINE] parse chunk count err: {e}");
-                            return;
-                        },
-                    };
+                    let current_chunk_count = chunks.len() as u16;
 
                     if current_chunk_count == expected_marker {
-                        if let Some(frame_data) = generate_frame_from_chunks(&mut chunks, &mut decoder)
-                            && let Err(e) = remote_frame_tx.send(frame_data.clone()) {
-
-                            println!("[MEDIA PIPELINE] failed to send frame: {e}");
-                            break;
+                        if let Some(frame_data) = generate_frame_from_chunks(&mut chunks, &mut decoder) {
+                            if let Err(e) = remote_frame_tx.send(frame_data.clone()) {
+                                println!("[MEDIA PIPELINE] failed to send frame: {e}");
+                                break;
+                            }
+                            println!("[MEDIA PIPELINE] frame decoded: {}", frame_data.to_string());
                         }
 
                         actual_frame = None;
@@ -117,11 +114,14 @@ impl MediaPipeline {
                     println!("[MEDIA PIPELINE] local frames send failed: {e}");
                     break;
                 }
+                println!("[MEDIA PIPELINE] frame sended to channel: {}", frame.to_string());
 
                 let encoded_frame = match encoder.encode_frame(&frame) {
                     Ok(f) => f,
                     Err(_) => break,
                 };
+
+                println!("[MEDIA PIPELINE] frame encoded : {}", encoded_frame.to_string());
 
                 if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, &on, &config).is_err() {
                     break;
@@ -146,7 +146,7 @@ fn send_encoded_frame(
 
     let marker = encoded_frame.chunks.len() as u16;
     for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
-        rtp_tx.send(RtpPacket {
+        let packet = RtpPacket {
             version: config.media.rtp_version,
             marker,
             payload_type: config.media.rtp_payload_type,
@@ -155,8 +155,10 @@ fn send_encoded_frame(
             timestamp: Local::now().timestamp_millis() as u32,
             ssrc,
             payload: payload.to_vec(),
-        })
-        .map_err(|e| Error::SendError(e.to_string()))?;
+        };
+        println!("[MEDIA PIPELINE] rtp packet sended: {}", packet.to_string());
+        rtp_tx.send(packet).map_err(|e| Error::SendError(e.to_string()))?;
+
     }
     Ok(())
 }

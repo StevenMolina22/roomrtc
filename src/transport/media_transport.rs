@@ -116,3 +116,71 @@ impl MediaTransport {
         rtp_receiver.start().map_err(|e| Error::MapError(e.to_string()))
     }
 }
+
+#[cfg(test)]
+mod integration_tests {
+    use std::path::Path;
+    use super::*;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    // --- Helpers ---------------------------------------------------------
+
+    fn test_config() -> Arc<Config> {
+        Arc::new(Config::load(Path::new("room_rtc.conf")).unwrap())
+    }
+
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn test_media_transport_rtp_send_receive() {
+        let config = test_config();
+
+        // Transport A y B (dos "pares" RTP)
+        let mut transport_a = MediaTransport::new(&config).expect("Cannot create transport A");
+
+        let a_rtp_addr = transport_a.rtp_address;
+        let a_rtcp_addr = std::net::SocketAddr::new(a_rtp_addr.ip(), a_rtp_addr.port() + 1);
+
+        let (a_tx, a_rx) = transport_a
+            .start(a_rtp_addr, a_rtcp_addr)
+            .expect("Transport A failed to start");
+
+        // ------------------------------
+        // Construimos un paquete RTP real
+        // ------------------------------
+        let packet = RtpPacket {
+            version: 2,
+            marker: 1,
+            payload_type: 111,
+            frame_id: 12345,
+            chunk_id: 0,
+            timestamp: 987654,
+            ssrc: 42,
+            payload: vec![1, 2, 3, 4, 5, 6],
+        };
+
+        // Enviarlo desde A → B
+        a_tx.send(packet.clone()).expect("Failed to send RTP packet");
+
+        // Esperamos recepción
+        let received = a_rx
+            .recv_timeout(Duration::from_millis(3000))
+            .expect("A did not receive A's RTP packet");
+
+        // ------------------------------
+        // VALIDACIONES
+        //------------------------------
+        assert_eq!(received.version, packet.version);
+        assert_eq!(received.marker, packet.marker);
+        assert_eq!(received.payload_type, packet.payload_type);
+        assert_eq!(received.frame_id, packet.frame_id);
+        assert_eq!(received.chunk_id, packet.chunk_id);
+        assert_eq!(received.timestamp, packet.timestamp);
+        assert_eq!(received.ssrc, packet.ssrc);
+        assert_eq!(received.payload, packet.payload);
+
+        // Cleanup
+        transport_a.stop().ok();
+    }
+}

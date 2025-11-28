@@ -1,4 +1,5 @@
 use std::default::Default;
+use std::fmt::{Display, Formatter};
 
 /// RTP packet used by the project transport layer.
 ///
@@ -31,6 +32,32 @@ pub struct RtpPacket {
 
     /// Payload bytes of the packet.
     pub payload: Vec<u8>,
+}
+
+impl Display for RtpPacket {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "RtpPacket {{
+    version: {},
+    marker: {},
+    payload_type: {},
+    frame_id: {},
+    chunk_id: {},
+    timestamp: {},
+    ssrc: {},
+    payload_len: {}
+}}",
+            self.version,
+            self.marker,
+            self.payload_type,
+            self.frame_id,
+            self.chunk_id,
+            self.timestamp,
+            self.ssrc,
+            self.payload.len(),
+        )
+    }
 }
 
 impl RtpPacket {

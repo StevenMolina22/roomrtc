@@ -52,20 +52,17 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         thread::spawn(move || {
             loop {
                 if !connected.load(Ordering::SeqCst) {
-                    println!("RTP sender thread disconnected");
                     break;
                 }
 
                 let packet = match rx.recv() {
                     Ok(p) => p,
                     Err(e) => {
-                        println!("Error rtp sender recv: {e}");
                         break;
                     },
                 };
 
                 if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, packet) {
-                    println!("Error sending rtp packet: {e}");
                     break;
                 }
             }

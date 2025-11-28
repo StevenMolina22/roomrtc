@@ -58,7 +58,7 @@ impl MediaPipeline {
 
                     let rtp_packet = match rtp_rx.recv() {
                         Ok(packet) => packet,
-                        Err(e) => {
+                        Err(_) => {
                             break; 
                         },
                     };
@@ -75,7 +75,7 @@ impl MediaPipeline {
 
                     if current_chunk_count == expected_marker {
                         if let Some(frame_data) = generate_frame_from_chunks(&mut chunks, &mut decoder) {
-                            if let Err(e) = remote_frame_tx.send(frame_data.clone()) {
+                            if let Err(_) = remote_frame_tx.send(frame_data.clone()) {
                                 break;
                             }
                         }
@@ -105,7 +105,7 @@ impl MediaPipeline {
                     break;
                 }
 
-                if let Err(e) = local_frame_tx.send(frame.clone()) {
+                if let Err(_) = local_frame_tx.send(frame.clone()) {
                     break;
                 }
 
@@ -163,9 +163,7 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
     }
     let (decoded_data, width, height) = match decoder.decode_frame(&data) {
         Ok(data) => data,
-        Err(e) => {
-            return None
-        }
+        Err(_) => return None
     };
 
     Some(Frame {

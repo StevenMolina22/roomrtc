@@ -57,7 +57,10 @@ impl MediaPipeline {
 
                     let rtp_packet = match rtp_rx.recv() {
                         Ok(packet) => packet,
-                        Err(_) => break,
+                        Err(e) => { 
+                            println!("[MEDIA PIPELINE] remote frames pipeline: {e}");
+                            break; 
+                        },
                     };
 
                     if actual_frame != Some(rtp_packet.frame_id) {
@@ -70,12 +73,17 @@ impl MediaPipeline {
                     let expected_marker = rtp_packet.marker;
                     let current_chunk_count = match u16::try_from(chunks.len()) {
                         Ok(count) => count,
-                        Err(_) => return,
+                        Err(e) => {
+                            println!("[MEDIA PIPELINE] parse chunk count err: {e}");
+                            return;
+                        },
                     };
 
                     if current_chunk_count == expected_marker {
                         if let Some(frame_data) = generate_frame_from_chunks(&mut chunks, &mut decoder)
-                            && let Err(_) = remote_frame_tx.send(frame_data.clone()) {
+                            && let Err(e) = remote_frame_tx.send(frame_data.clone()) {
+
+                            println!("[MEDIA PIPELINE] failed to send frame: {e}");
                             break;
                         }
 
@@ -104,7 +112,8 @@ impl MediaPipeline {
                     break;
                 }
 
-                if local_frame_tx.send(frame.clone()).is_err() {
+                if let Err(e) = local_frame_tx.send(frame.clone()) {
+                    println!("[MEDIA PIPELINE] local frames send failed: {e}");
                     break;
                 }
 
@@ -160,7 +169,13 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
     for c in chunks.iter() {
         data.extend_from_slice(&c.payload);
     }
-    let (decoded_data, width, height) = decoder.decode_frame(&data).ok()?;
+    let (decoded_data, width, height) = match decoder.decode_frame(&data) {
+        Ok(data) => data,
+        Err(e) => {
+            println!("[MEDIA PIPELINE] failed to generate frame: {e}");
+            return None
+        }
+    };
 
     Some(Frame {
         data: decoded_data,

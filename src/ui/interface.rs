@@ -282,11 +282,16 @@ impl RoomRTCApp {
 
             let join_btn = egui::Button::new("Join Call");
             if ui.add(join_btn).clicked() {
-                if let Err(e) = self.controller.start_call() {
-                    self.error_message = Some(format!("Failed to start call: {e}"));
-                    self.view = View::Error;
-                } else {
-                    self.view = View::Call;
+                match self.controller.start_call() {
+                    Ok((local_frame_rx, remote_frame_rx)) => {
+                        self.local_frame_rx = Some(local_frame_rx);
+                        self.remote_frame_rx = Some(remote_frame_rx);
+                        self.view = View::Call;
+                    },
+                    Err(e) => {
+                        self.error_message = Some(format!("Failed to start call: {e}"));
+                        self.view = View::Error;
+                    }
                 }
             }
         }

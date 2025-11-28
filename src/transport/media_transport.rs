@@ -48,11 +48,6 @@ impl MediaTransport {
         self.rtp_socket.connect(remote_rtp_address).map_err(|e| Error::SocketConnectionError(e.to_string()))?;
         self.rtcp_socket.connect(remote_rtcp_address).map_err(|e| Error::SocketConnectionError(e.to_string()))?;
 
-        println!("RTP binded adrr: {}", self.rtp_socket.local_addr().unwrap());
-        println!("RTP connected adrr: {}\n", remote_rtp_address);
-        println!("RTCP binded adrr: {}", self.rtcp_socket.local_addr().unwrap());
-        println!("RTCP connected adrr: {}\n", remote_rtcp_address);
-
         let rtcp_handler = RtcpReportHandler::new(
             self.rtcp_socket.try_clone().map_err(|e| Error::CloningSocketError(e.to_string()))?,
             Arc::clone(&self.connected),

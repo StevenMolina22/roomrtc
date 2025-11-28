@@ -1,4 +1,3 @@
-use std::net::UdpSocket;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
 use crate::transport::rtp::rtp_packet::RtpPacket;
@@ -68,14 +67,19 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
             move || {
                 loop {
                     if !connected.load(Ordering::SeqCst) {
+                        println!("RTP receiver thread disconnected");
                         break;
                     }
                     let rtp_packet = match receive(&rtp_socket, &connected, &config,&rtcp_handler) {
                         Ok(packet) => packet,
-                        Err(_) => break,
+                        Err(e) => {
+                            println!("RTP receiver receive failed: {e}");
+                            break;
+                        }
                     };
 
-                    if let Err(_) = remote_to_local_rtp_tx.send(rtp_packet) {
+                    if let Err(e) = remote_to_local_rtp_tx.send(rtp_packet) {
+                        println!("RTP receiver send to channel failed: {e}");
                         break;
                     }
                 }

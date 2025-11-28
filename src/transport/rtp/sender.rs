@@ -1,6 +1,6 @@
 use std::sync::{mpsc, Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Sender};
 use std::thread;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
@@ -45,22 +45,27 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
     pub fn start(&self) -> Result<Sender<RtpPacket>, Error> {
         let (tx, rx) = mpsc::channel();
 
-        let rtp_socket = self.rtp_socket.try_clone().map_err(|e| Error::SocketCloneFailed)?;
+        let rtp_socket = self.rtp_socket.try_clone().map_err(|_| Error::SocketCloneFailed)?;
         let report_handler = Arc::clone(&self.report_handler);
         let connected = Arc::clone(&self.connected);
 
         thread::spawn(move || {
             loop {
                 if !connected.load(Ordering::SeqCst) {
+                    println!("RTP sender thread disconnected");
                     break;
                 }
 
                 let packet = match rx.recv() {
                     Ok(p) => p,
-                    Err(_) => break,
+                    Err(e) => {
+                        println!("Error rtp sender recv: {e}");
+                        break;
+                    },
                 };
 
-                if send_packet(&rtp_socket, &report_handler, &connected, packet).is_err() {
+                if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, packet) {
+                    println!("Error sending rtp packet: {e}");
                     break;
                 }
             }

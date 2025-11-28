@@ -159,9 +159,6 @@ impl CallSession {
         let ip: IpAddr = pair.remote.address
             .parse()
             .map_err(|_| Error::BadAddress)?;
-
-        println!("Selected pair local address: {}:{}", pair.local.address, pair.local.port);
-        println!("Selected pair remote address: {}:{}", pair.remote.address, pair.remote.port);
         
         Ok(SocketAddr::from((ip, pair.remote.port)))
     }

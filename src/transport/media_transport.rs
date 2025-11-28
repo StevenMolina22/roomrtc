@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use crate::config::Config;
-use crate::media::frame_handler::EncodedFrame;
 use crate::tools::Socket;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::{RtpPacket, RtpReceiver, RtpSender};
@@ -45,7 +44,7 @@ impl MediaTransport {
         })
     }
 
-    pub fn start(&mut self, remote_rtp_address: SocketAddr, remote_rtcp_address: SocketAddr) -> Result<(Sender<EncodedFrame>, Receiver<RtpPacket>), Error> {
+    pub fn start(&mut self, remote_rtp_address: SocketAddr, remote_rtcp_address: SocketAddr) -> Result<(Sender<RtpPacket>, Receiver<RtpPacket>), Error> {
         self.rtp_socket.connect(remote_rtp_address).map_err(|e| Error::SocketConnectionError(e.to_string()))?;
         self.rtcp_socket.connect(remote_rtcp_address).map_err(|e| Error::SocketConnectionError(e.to_string()))?;
 
@@ -73,7 +72,7 @@ impl MediaTransport {
     }
 
 
-    fn spawn_rtp_threads(&self) -> Result<(Sender<EncodedFrame>, Receiver<RtpPacket>), Error> {
+    fn spawn_rtp_threads(&self) -> Result<(Sender<RtpPacket>, Receiver<RtpPacket>), Error> {
         let rtcp_handler = match &self.rtcp_handler {
             Some(handler_lock) => Arc::clone(handler_lock),
             None => return Err(Error::ConnectionNotStarted),
@@ -85,7 +84,7 @@ impl MediaTransport {
         Ok((local_to_remote_rtp_tx, remote_to_local_rtp_rx))
     }
 
-    fn start_rtp_sender(&self, rtcp_handler: &Arc<Mutex<RtcpReportHandler<UdpSocket>>>) -> Result<Sender<EncodedFrame>, Error> {
+    fn start_rtp_sender(&self, rtcp_handler: &Arc<Mutex<RtcpReportHandler<UdpSocket>>>) -> Result<Sender<RtpPacket>, Error> {
         let rtp_sender_socket = self.rtp_socket
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
@@ -93,8 +92,9 @@ impl MediaTransport {
         let rtp_sender = RtpSender::new(
             rtp_sender_socket,
             rtcp_handler,
+            self.config.media.default_ssrc,
             &self.connected,
-            &self.config
+            self.config.media.rtp_version,
         ).map_err(|e| Error::MapError(e.to_string()))?;
 
         rtp_sender.start().map_err(|e| Error::MapError(e.to_string()))

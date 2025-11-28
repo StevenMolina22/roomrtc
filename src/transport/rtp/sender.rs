@@ -2,13 +2,10 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender};
 use std::thread;
-use crate::config::Config;
-use crate::media::frame_handler::EncodedFrame;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
 use crate::transport::rtp::rtp_packet::RtpPacket;
 use crate::tools::Socket;
-use chrono::Local;
 
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
 ///
@@ -18,8 +15,9 @@ use chrono::Local;
 pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
+    ssrc: u32,
     connected: Arc<AtomicBool>,
-    config: Arc<Config>,
+    rtp_version: u8,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
@@ -31,24 +29,25 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
     pub fn new(
         rtp_socket: S,
         report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
+        ssrc: u32,
         connected: &Arc<AtomicBool>,
-        config: &Arc<Config>,
+        rtp_version: u8,
     ) -> Result<Self, Error> {
         Ok(Self {
             rtp_socket,
             report_handler: Arc::clone(report_handler),
+            ssrc,
             connected: Arc::clone(connected),
-            config: Arc::clone(config),
+            rtp_version,
         })
     }
     
-    pub fn start(&self) -> Result<Sender<EncodedFrame>, Error> {
+    pub fn start(&self) -> Result<Sender<RtpPacket>, Error> {
         let (tx, rx) = mpsc::channel();
 
         let rtp_socket = self.rtp_socket.try_clone().map_err(|_| Error::SocketCloneFailed)?;
         let report_handler = Arc::clone(&self.report_handler);
         let connected = Arc::clone(&self.connected);
-        let config = self.config.clone();
 
         thread::spawn(move || {
             loop {
@@ -57,7 +56,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     break;
                 }
 
-                let enc_frame = match rx.recv() {
+                let packet = match rx.recv() {
                     Ok(p) => p,
                     Err(e) => {
                         println!("Error rtp sender recv: {e}");
@@ -65,7 +64,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     },
                 };
 
-                if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, enc_frame, &config) {
+                if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, packet) {
                     println!("Error sending rtp packet: {e}");
                     break;
                 }
@@ -87,35 +86,20 @@ fn send_packet<S: Socket + Send + Sync + 'static>(
     socket: &S,
     report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
     connected: &AtomicBool,
-    enc_frame: EncodedFrame,
-    config: &Arc<Config>,
+    packet: RtpPacket,
 ) -> Result<(), Error> {
     if !connected.load(Ordering::SeqCst) {
         return Err(Error::ConnectionClosed);
     }
 
-    let marker = enc_frame.chunks.len() as u16;
-    for (chunk_id, payload) in enc_frame.chunks.iter().enumerate() {
-        let packet = RtpPacket {
-            version: config.media.rtp_version,
-            marker,
-            payload_type: config.media.rtp_payload_type,
-            frame_id: enc_frame.id,
-            chunk_id: chunk_id as u64,
-            timestamp: Local::now().timestamp_millis() as u32,
-            ssrc: 12345,
-            payload: payload.to_vec(),
-        };
+    if socket.send(&packet.to_bytes()).is_err() {
+        report_handler
+            .lock()
+            .map_err(|_| Error::PoisonedLock)?
+            .close_connection()
+            .map_err(|e| Error::RTCPError(e.to_string()))?;
 
-        if socket.send(&packet.to_bytes()).is_err() {
-            report_handler
-                .lock()
-                .map_err(|_| Error::PoisonedLock)?
-                .close_connection()
-                .map_err(|e| Error::RTCPError(e.to_string()))?;
-
-            return Err(Error::SendFailed);
-        }
+        return Err(Error::SendFailed);
     }
     Ok(())
 }

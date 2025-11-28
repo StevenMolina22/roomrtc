@@ -1,7 +1,9 @@
+use std::path::Path;
 use std::sync::{mpsc, Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
+use chrono::Local;
 use crate::config::Config;
 use crate::transport::rtp::RtpPacket;
 use crate::media::Camera;
@@ -26,7 +28,7 @@ impl MediaPipeline {
         }
     }
 
-    pub fn start(&mut self, rtp_tx: Sender<EncodedFrame>, rtp_rx: Receiver<RtpPacket>) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
+    pub fn start(&mut self, rtp_tx: Sender<RtpPacket>, rtp_rx: Receiver<RtpPacket>) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         let local_frame_rx = self.start_local_frame_pipeline(rtp_tx)?;
         let remote_frame_rx = self.start_remote_frames_pipeline(rtp_rx)?;
 
@@ -95,7 +97,7 @@ impl MediaPipeline {
         Ok(remote_frame_rx)
     }
 
-    fn start_local_frame_pipeline(&mut self, rtp_tx: Sender<EncodedFrame>) -> Result<Receiver<Frame>, Error> {
+    fn start_local_frame_pipeline(&mut self, rtp_tx: Sender<RtpPacket>) -> Result<Receiver<Frame>, Error> {
         let (local_frame_tx, local_frame_rx) = mpsc::channel();
 
         let camera_frame_rx = self.camera.start().map_err(|e| Error::MapError(e.to_string()))?;
@@ -133,7 +135,7 @@ impl MediaPipeline {
 }
 fn send_encoded_frame(
     encoded_frame: EncodedFrame,
-    rtp_tx: &Sender<EncodedFrame>,
+    rtp_tx: &Sender<RtpPacket>,
     ssrc: u32,
     on: &Arc<AtomicBool>,
     config: &Arc<Config>,
@@ -142,22 +144,20 @@ fn send_encoded_frame(
         return Err(Error::SendError("Media pipeline turned off".into()));
     }
 
-    rtp_tx.send(encoded_frame).unwrap();
-
-    // let marker = encoded_frame.chunks.len() as u16;
-    // for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
-    //     rtp_tx.send(RtpPacket {
-    //         version: config.media.rtp_version,
-    //         marker,
-    //         payload_type: config.media.rtp_payload_type,
-    //         frame_id: encoded_frame.id,
-    //         chunk_id: chunk_id as u64,
-    //         timestamp: Local::now().timestamp_millis() as u32,
-    //         ssrc,
-    //         payload: payload.to_vec(),
-    //     })
-    //     .map_err(|e| Error::SendError(e.to_string()))?;
-    // }
+    let marker = encoded_frame.chunks.len() as u16;
+    for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
+        rtp_tx.send(RtpPacket {
+            version: config.media.rtp_version,
+            marker,
+            payload_type: config.media.rtp_payload_type,
+            frame_id: encoded_frame.id,
+            chunk_id: chunk_id as u64,
+            timestamp: Local::now().timestamp_millis() as u32,
+            ssrc,
+            payload: payload.to_vec(),
+        })
+        .map_err(|e| Error::SendError(e.to_string()))?;
+    }
     Ok(())
 }
 
@@ -188,7 +188,6 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use super::*;
     use std::sync::Arc;
 

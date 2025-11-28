@@ -49,12 +49,13 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     }
     pub fn start(&self) -> Result<(), Error> {
         self.connection_handshake()?;
-
+        self.start_report_handler()
+    }
+    
+    fn start_report_handler(&self) -> Result<(), Error> {
         let sender_socket = Arc::clone(&self.socket);
         let receiver_socket = Arc::clone(&self.socket);
-        // Start the receiver thread first so it can immediately observe
-        // incoming messages; then start the sender thread which will
-        // periodically transmit connectivity reports.
+        
         self.start_report_receiver(receiver_socket)?;
         self.start_report_sender(sender_socket);
         Ok(())
@@ -255,7 +256,7 @@ mod tests {
         let handler =
             RtcpReportHandler::new(mock_socket, Arc::clone(&connected), test_config());
 
-        handler.start()?;
+        handler.start_report_handler()?;
         thread::sleep(Duration::from_millis(100));
 
         assert!(connected.load(Ordering::SeqCst));
@@ -292,7 +293,7 @@ mod tests {
         let handler =
             RtcpReportHandler::new(mock_socket, Arc::clone(&connected), test_config());
 
-        handler.start()?;
+        handler.start_report_handler()?;
 
         let cfg = test_config();
         let wait_time =

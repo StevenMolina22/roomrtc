@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::{mpsc, Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -13,16 +14,16 @@ use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
 pub struct MediaPipeline {
     camera: Camera,
     config: Arc<Config>,
-    src: u32,
+    ssrc: u32,
     on: Arc<AtomicBool>
 }
 
 impl MediaPipeline {
-    pub fn new(config: &Arc<Config>, src: u32) -> Self {
+    pub fn new(config: &Arc<Config>, ssrc: u32) -> Self {
         Self {
             camera: Camera::new(&config),
             config: Arc::clone(config),
-            src,
+            ssrc,
             on: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -103,7 +104,7 @@ impl MediaPipeline {
         let mut encoder = Encoder::new(&self.config.media).map_err(|e| Error::MapError(e.to_string()))?;
 
         let on = Arc::clone(&self.on);
-        let src = self.src;
+        let ssrc = self.ssrc;
         let config = Arc::clone(&self.config);
         
         thread::spawn(move || {
@@ -122,7 +123,7 @@ impl MediaPipeline {
                     Err(_) => break,
                 };
 
-                if send_encoded_frame(encoded_frame, &rtp_tx, src, &on, &config).is_err() {
+                if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, &on, &config).is_err() {
                     break;
                 }
             }
@@ -135,7 +136,7 @@ impl MediaPipeline {
 fn send_encoded_frame(
     encoded_frame: EncodedFrame,
     rtp_tx: &Sender<RtpPacket>,
-    src: u32,
+    ssrc: u32,
     on: &Arc<AtomicBool>,
     config: &Arc<Config>,
 ) -> Result<(), Error> {
@@ -143,8 +144,9 @@ fn send_encoded_frame(
         return Err(Error::SendError("Media pipeline turned off".into()));
     }
 
+    let marker = encoded_frame.chunks.len() as u16;
     for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
-        let marker = encoded_frame.chunks.len() as u16;
+        let payload = payload.to_vec();
 
         rtp_tx.send(RtpPacket {
             version: config.media.rtp_version,
@@ -153,8 +155,8 @@ fn send_encoded_frame(
             frame_id: encoded_frame.id,
             chunk_id: chunk_id as u64,
             timestamp: Local::now().timestamp_millis() as u32,
-            ssrc: src,
-            payload: payload.clone(),
+            ssrc,
+            payload: payload,
         })
         .map_err(|e| Error::SendError(e.to_string()))?;
     }
@@ -183,4 +185,78 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
         height,
         id: fr_id,
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_generate_frame_from_chunks_h264() {
+        // ------- Setup -------
+        let config = Arc::new(Config::load(Path::new("./room_rtc.conf")).unwrap());
+        let mut encoder = Encoder::new(&config.media)
+            .expect("Encoder no pudo inicializarse");
+        let mut decoder = Decoder::new()
+            .expect("Decoder no pudo inicializarse");
+
+        // Creamos un frame crudo sintético RGB 320x240
+        let width = 320;
+        let height = 240;
+        let raw_data = vec![128u8; width * height * 3];
+
+        let raw_frame = Frame {
+            data: raw_data.clone(),
+            width,
+            height,
+            id: 7,
+        };
+
+        // ------- Encode -------
+        let encoded = encoder.encode_frame(&raw_frame)
+            .expect("Fallo encodear el frame");
+
+        assert!(!encoded.chunks.is_empty(), "El encoder debe generar chunks");
+
+        // ------- Construimos los RtpPacket -------
+        let mut rtp_chunks = Vec::new();
+        let marker = encoded.chunks.len() as u16;
+
+        for (i, chunk) in encoded.chunks.iter().enumerate() {
+            rtp_chunks.push(RtpPacket {
+                version: config.media.rtp_version,
+                marker,
+                payload_type: config.media.rtp_payload_type,
+                frame_id: encoded.id,
+                chunk_id: i as u64,
+                timestamp: 1234,
+                ssrc: 55,
+                payload: chunk.clone(),
+            });
+        }
+
+        // ------- Decodificar vía generate_frame_from_chunks -------
+        let decoded = generate_frame_from_chunks(&mut rtp_chunks, &mut decoder)
+            .expect("generate_frame_from_chunks no devolvió frame");
+
+        // ------- Validaciones -------
+        assert_eq!(decoded.width, width);
+        assert_eq!(decoded.height, height);
+        assert_eq!(decoded.id, raw_frame.id);
+
+        // No comparamos byte a byte porque H.264 es con pérdida,
+        // pero verificamos que la salida tenga datos y tamaño correcto
+        assert_eq!(
+            decoded.data.len(),
+            raw_data.len(),
+            "El decoded debe tener mismo tamaño que el raw"
+        );
+
+        assert!(
+            decoded.data.iter().any(|b| *b != 0),
+            "Debe haber datos válidos"
+        );
+    }
 }

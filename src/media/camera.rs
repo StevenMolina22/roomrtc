@@ -1,4 +1,4 @@
-use crate::config::{Config, MediaConfig};
+use crate::config::{Config};
 use crate::controller::ControllerError;
 use crate::media::frame_handler::Frame;
 use opencv::{imgproc, prelude::*, videoio};

@@ -49,7 +49,7 @@ impl RtpPacket {
         buf.extend_from_slice(&self.frame_id.to_be_bytes());
         buf.extend_from_slice(&self.chunk_id.to_be_bytes());
         buf.extend_from_slice(&self.timestamp.to_be_bytes());
-        buf.extend_from_slice(&(self.marker).to_be_bytes());
+        buf.extend_from_slice(&self.marker.to_be_bytes());
         buf.extend_from_slice(&self.ssrc.to_be_bytes());
         buf.extend_from_slice(&self.payload);
 

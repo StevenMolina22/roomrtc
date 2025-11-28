@@ -64,7 +64,7 @@ impl MediaPipeline {
                         },
                     };
 
-                    println!("[MEDIA PIPELINE] rtp packet received: {}", packet.to_string());
+                    println!("[MEDIA PIPELINE] rtp packet received: {}", rtp_packet.to_string());
 
                     if actual_frame != Some(rtp_packet.frame_id) {
                         chunks = vec![rtp_packet.clone()];

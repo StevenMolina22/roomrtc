@@ -103,7 +103,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
 /// Returns `Error::ReceiveFailed` for unexpected socket errors and
 /// `Error::ConnectionClosed` if the session is closed while waiting.
 pub fn receive<S: Socket + Send + Sync + 'static>(rtp_socket: &S, connected: &Arc<AtomicBool>, config: &Arc<Config>, report_handler: &Arc<Mutex<RtcpReportHandler<S>>>) -> Result<RtpPacket, Error> {
-    let mut buf = vec![0u8; config.rtp.max_packet_size];
+    let mut buf = vec![0u8; 65535];
     
     loop {
         match rtp_socket.recv_from(&mut buf) {
@@ -126,6 +126,6 @@ pub fn receive<S: Socket + Send + Sync + 'static>(rtp_socket: &S, connected: &Ar
                 return Err(Error::ReceiveFailed(e.to_string()));
             }
         }
-        buf.clear();
+        //buf.clear();
     }
 }

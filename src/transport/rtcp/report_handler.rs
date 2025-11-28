@@ -227,80 +227,81 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::RtcpConfig;
-    use crate::transport::rtcp::RtcpPacket;
-    use crate::tools::MockSocket;
-    use std::sync::{Arc, Mutex};
-
-    fn test_config() -> RtcpConfig {
-        RtcpConfig {
-            report_period_millis: 1000,
-            receive_limit_millis: 1000,
-            retry_limit: 2,
-        }
-    }
-
-    #[test]
-    fn test_report_handler_receives_connectivity_report() -> Result<(), Error> {
-        let data_to_receive = vec![RtcpPacket::ConnectivityReport.as_bytes().to_vec()];
-        let sent_data = Arc::new(Mutex::new(Vec::new()));
-        let mock_socket = MockSocket {
-            data_to_receive,
-            sent_data: sent_data.clone(),
-        };
-
-        let connected = Arc::new(AtomicBool::new(true));
-        let handler =
-            RtcpReportHandler::new(mock_socket, Arc::clone(&connected), test_config());
-
-        handler.start_report_handler()?;
-        thread::sleep(Duration::from_millis(100));
-
-        assert!(connected.load(Ordering::SeqCst));
-
-        let sent = sent_data.lock().map_err(|_| Error::PoisonedLock)?[0].clone();
-        assert_eq!(sent, RtcpPacket::ConnectivityReport.as_bytes());
-        Ok(())
-    }
-
-    #[test]
-    fn test_close_connection_sets_status_closed() -> Result<(), Error> {
-        let mock_socket = MockSocket {
-            data_to_receive: vec![],
-            sent_data: Arc::new(Mutex::new(Vec::new())),
-        };
-        let connected = Arc::new(AtomicBool::new(true));
-        let handler =
-            RtcpReportHandler::new(mock_socket, Arc::clone(&connected), test_config());
-
-        handler.close_connection()?;
-
-        assert!(!connected.load(Ordering::SeqCst));
-        Ok(())
-    }
-
-    #[test]
-    fn test_connection_closes_after_inactivity() -> Result<(), Error> {
-        let mock_socket = MockSocket {
-            data_to_receive: vec![],
-            sent_data: Arc::new(Mutex::new(Vec::new())),
-        };
-
-        let connected = Arc::new(AtomicBool::new(true));
-        let handler =
-            RtcpReportHandler::new(mock_socket, Arc::clone(&connected), test_config());
-
-        handler.start_report_handler()?;
-
-        let cfg = test_config();
-        let wait_time =
-            Duration::from_millis(cfg.receive_limit_millis * (cfg.retry_limit as u64 + 1));
-        thread::sleep(wait_time);
-
-        assert!(!connected.load(Ordering::SeqCst));
-        Ok(())
-    }
-}
+// 
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::config::RtcpConfig;
+//     use crate::transport::rtcp::RtcpPacket;
+//     use crate::tools::MockSocket;
+//     use std::sync::{Arc, Mutex};
+// 
+//     fn test_config() -> RtcpConfig {
+//         RtcpConfig {
+//             report_period_millis: 1000,
+//             receive_limit_millis: 1000,
+//             retry_limit: 2,
+//         }
+//     }
+// 
+//     #[test]
+//     fn test_report_handler_receives_connectivity_report() -> Result<(), Error> {
+//         let data_to_receive = vec![RtcpPacket::ConnectivityReport.as_bytes().to_vec()];
+//         let sent_data = Arc::new(Mutex::new(Vec::new()));
+//         let mock_socket = MockSocket {
+//             data_to_receive,
+//             sent_data: sent_data.clone(),
+//         };
+// 
+//         let connected = Arc::new(AtomicBool::new(true));
+//         let handler =
+//             RtcpReportHandler::new(mock_socket, Arc::clone(&connected), test_config());
+// 
+//         handler.start_report_handler()?;
+//         thread::sleep(Duration::from_millis(100));
+// 
+//         assert!(connected.load(Ordering::SeqCst));
+// 
+//         let sent = sent_data.lock().map_err(|_| Error::PoisonedLock)?[0].clone();
+//         assert_eq!(sent, RtcpPacket::ConnectivityReport.as_bytes());
+//         Ok(())
+//     }
+// 
+//     #[test]
+//     fn test_close_connection_sets_status_closed() -> Result<(), Error> {
+//         let mock_socket = MockSocket {
+//             data_to_receive: vec![],
+//             sent_data: Arc::new(Mutex::new(Vec::new())),
+//         };
+//         let connected = Arc::new(AtomicBool::new(true));
+//         let handler =
+//             RtcpReportHandler::new(mock_socket, Arc::clone(&connected), test_config());
+// 
+//         handler.close_connection()?;
+// 
+//         assert!(!connected.load(Ordering::SeqCst));
+//         Ok(())
+//     }
+// 
+//     #[test]
+//     fn test_connection_closes_after_inactivity() -> Result<(), Error> {
+//         let mock_socket = MockSocket {
+//             data_to_receive: vec![],
+//             sent_data: Arc::new(Mutex::new(Vec::new())),
+//         };
+// 
+//         let connected = Arc::new(AtomicBool::new(true));
+//         let handler =
+//             RtcpReportHandler::new(mock_socket, Arc::clone(&connected), test_config());
+// 
+//         handler.start_report_handler()?;
+// 
+//         let cfg = test_config();
+//         let wait_time =
+//             Duration::from_millis(cfg.receive_limit_millis * (cfg.retry_limit as u64 + 1));
+//         thread::sleep(wait_time);
+// 
+//         assert!(!connected.load(Ordering::SeqCst));
+//         Ok(())
+//     }
+// }

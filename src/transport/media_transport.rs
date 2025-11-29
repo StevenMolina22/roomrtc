@@ -61,9 +61,13 @@ impl MediaTransport {
     }
 
     pub fn stop(&mut self) -> Result<(), Error> {
+        self.rtp_socket.set_read_timeout(None).map_err(|e| Error::SocketConfigFailed)?;
+        self.rtcp_socket.set_read_timeout(None).map_err(|e| Error::SocketConfigFailed)?;
+        println!("sockets reseteados");
+
         if let Some(rtcp_handler) = &self.rtcp_handler {
             if let Ok(rtcp_handler) = rtcp_handler.lock() {
-                return rtcp_handler.close_connection().map_err(|e| Error::MapError(e.to_string()))
+                rtcp_handler.close_connection().map_err(|e| Error::MapError(e.to_string()))?;
             }
         }
 

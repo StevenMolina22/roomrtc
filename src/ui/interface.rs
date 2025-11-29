@@ -102,7 +102,7 @@ impl eframe::App for RoomRTCApp {
 
             // Esto es momentaneo, despues deberiamos tener un thread de eventos en la gui
             while self.event_rx.try_recv().is_ok() {
-                if let Err(e) = self.controller.hang_down() {
+                if let Err(e) = self.controller.hang_up() {
                     self.error_message = Some(format!("Failed to stop camera: {e}"));
                 } else {
                     self.error_message = Some("Call ended by remote peer".to_string());
@@ -202,7 +202,7 @@ impl RoomRTCApp {
 
             let exit_btn = egui::Button::new("Finalizar llamada").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
-                if let Err(e) = self.controller.hang_down() {
+                if let Err(e) = self.controller.hang_up() {
                     eprintln!("{e}");
                 }
                 self.reset();
@@ -390,15 +390,6 @@ impl RoomRTCApp {
 
         self.local_texture = None;
         self.remote_texture = None;
-
-        self.controller = match Controller::new(self.event_tx.clone(), &self.config) {
-            Ok(c) => c,
-            Err(e) => {
-                self.error_message = Some(format!("Failed to create controller: {e}"));
-                self.view = View::Error;
-                return;
-            },
-        };
     }
 }
 

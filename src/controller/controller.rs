@@ -8,14 +8,13 @@ use crate::session::CallSession;
 use crate::transport::MediaTransport;
 
 pub struct Controller {
-    _config: Arc<Config>,
+    config: Arc<Config>,
     // pub(crate) users_status: Arc<RwLock<HashMap<String, UserStatus>>>,
     // client_server_stream: TcpStream,
 
     transport: MediaTransport,
     call_session: CallSession,
     media_pipeline: MediaPipeline,
-
 }
 
 impl Controller {
@@ -29,7 +28,7 @@ impl Controller {
         let call_session = CallSession::new(transport.rtp_address.port(), config).map_err(|e| Error::MapError(e.to_string()))?;
 
         Ok(Self {
-            _config: Arc::clone(config),
+            config: Arc::clone(config),
             // users_status: Arc::new(RwLock::new(HashMap::new())),
             // client_server_stream,
             transport,
@@ -69,9 +68,13 @@ impl Controller {
         self.media_pipeline.start(local_to_remote_rtp_tx, remote_to_local_rtp_rx).map_err(|e| Error::MapError(e.to_string()))
     }
 
-    pub fn hang_down(&mut self) -> Result<(), Error> {
+    pub fn hang_up(&mut self) -> Result<(), Error> {
         self.media_pipeline.stop();
-        self.transport.stop().map_err(|e| Error::MapError(e.to_string()))
+        self.transport.stop().map_err(|e| Error::MapError(e.to_string()))?;
+
+        self.transport = MediaTransport::new(&self.config).map_err(|e| Error::MapError(e.to_string()))?;
+        self.call_session = CallSession::new(self.transport.rtp_address.port(), &self.config).map_err(|e| Error::MapError(e.to_string()))?;
+        Ok(())
     }
 
     // pub fn sign_up(&self, username: String, password: String) -> Result<(), Error> {

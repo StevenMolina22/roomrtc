@@ -179,7 +179,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// A result indicating success or failure.
     pub fn close_connection(&self) -> Result<(), Error> {
         self.connected.store(false, Ordering::SeqCst);
-        let _ = self.socket.send(RtcpPacket::Goodbye.as_bytes());
+        self.socket.send(RtcpPacket::Goodbye.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
         Ok(())
     }
 }

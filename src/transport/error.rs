@@ -7,6 +7,9 @@ pub enum MediaTransportError {
     MapError(String),
     CloningSocketError(String),
     ConnectionNotStarted,
+
+    /// Failed to configure the socket (timeout, options, etc.).
+    SocketConfigFailed,
 }
 
 impl Display for MediaTransportError {
@@ -17,6 +20,7 @@ impl Display for MediaTransportError {
             Self::MapError(e) => write!(f, "{}", e),
             Self::CloningSocketError(e) => write!(f, "Error: \"Socket clone failed\": {}", e),
             Self::ConnectionNotStarted => write!(f, "Error: \"Connection not started yet\""),
+            Self::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
         }
     }
 }

@@ -5,18 +5,27 @@ use openssl::{
 use std::fmt;
 use udp_dtls::Identity;
 
+/// Default password used to protect the PKCS#12 archive.
 pub const PKCS12_PASSWORD: &str = "roomrtc_pass";
+/// Friendly name assigned to the identity bundle within PKCS#12.
 const FRIENDLY_NAME: &str = "room-rtc-identity";
+/// Common Name (CN) field used in the self-signed X.509 certificate.
 const SUBJECT_CN: &str = "RoomRTC-Peer";
+/// Validity period for the self-signed certificate, in days.
 const VALIDITY_DAYS: u32 = 365;
+/// Constant serial number assigned to the generated certificate.
 const SERIAL_NUMBER: u32 = 1;
 
+
 /// Holds the local cryptographic identity for this session.
+/// Required or the DTLS Handshake
 pub struct LocalCert {
     /// Opaque identity consumed by udp_dtls during the DTLS handshake.
     pub identity: Identity,
     /// The SHA-256 fingerprint string (e.g., "AA:BB:CC") advertised in SDP.
     pub fingerprint: String,
+    /// The entire local cryptographic identity (private key and X.509 certificate)
+    /// bundled into a PKCS#12 archive and serialized using DER encoding.
     pub pkcs12_der: Vec<u8>,
 }
 

@@ -4,9 +4,9 @@ pub use error::ClientError;
 
 use crate::{
     config::{IceConfig, MediaConfig, SdpConfig},
+    dtls::key_manager::{LocalCert, generate_self_signed_cert},
     ice::IceAgent,
     sdp::{Attribute, DtlsSetupRole, Fingerprint, MediaDescription, SessionDescriptionProtocol},
-    tools::{LocalCert, generate_self_signed_cert},
 };
 use std::collections::HashSet;
 use std::str::FromStr;

@@ -1,9 +1,10 @@
-use super::socket::Socket;
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use udp_dtls::{DtlsStream, UdpChannel};
+
+use crate::tools::Socket;
 
 /// Socket implementation backed by a DTLS stream.
 ///

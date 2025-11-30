@@ -52,7 +52,7 @@ impl SrtpContext {
         // Bytes 14-15: SEQ
         block[14..16].copy_from_slice(&seq_bytes);
 
-        // XOR with salt
+        // XOR with salt - IV Calculation (Salt + Counter) for Integer Counter Mode
         for i in 0..16 {
             iv[i] ^= block[i];
         }

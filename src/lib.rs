@@ -1,6 +1,6 @@
 pub mod config;
 pub mod controller;
-mod logger;
+pub mod logger;
 mod media;
 pub mod session;
 pub mod tools;

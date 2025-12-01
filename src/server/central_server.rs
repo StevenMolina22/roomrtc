@@ -107,6 +107,7 @@ impl CentralServer {
         let users_connected = self.users_connected.clone();
         let on = self.on.clone();
         let server_client_socket_addr = self.server_client_socket_addr;
+        let max_users = self.config.server.max_amount_of_users_connected;
 
         let logger = self.logger.clone();
 
@@ -141,11 +142,13 @@ impl CentralServer {
                     let tls_conn = ServerConnection::new(tls_config).unwrap();
                     let tls_stream = StreamOwned::new(tls_conn, stream);
 
+
                     let mut user_handler = UserHandler::new(
                         users,
                         users_connected,
                         config,
                         server_client_socket_addr,
+                        max_users,
                         thread_logger,
                     );
                     if user_handler.handle_client(tls_stream, on).is_err() {}

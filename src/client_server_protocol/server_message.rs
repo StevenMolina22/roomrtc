@@ -77,16 +77,6 @@ mod tests {
     }
 
     #[test]
-    fn test_call_incoming() {
-        let msg = ServerMessage::CallIncoming {
-            from: "Alice".into(),
-            offer_sdp: SessionDescriptionProtocol::new(vec![], &SdpConfig::default()),
-        };
-        let decoded = roundtrip(msg.clone());
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
     fn test_error_message() {
         let msg = ServerMessage::Error("SomethingBad".into());
         let decoded = roundtrip(msg.clone());

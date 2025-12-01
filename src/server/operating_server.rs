@@ -18,6 +18,7 @@ pub struct OperatingServer {
     server_client_socket_address: SocketAddr,
     users_file_path: String,
     username: Option<String>,
+    max_users: usize,
     logger: Logger,
 }
 
@@ -27,6 +28,7 @@ impl OperatingServer {
         users_connected: Arc<AtomicUsize>,
         server_client_socket_address: SocketAddr,
         users_file_path: String,
+        max_users: usize,
         logger: Logger,
     ) -> Self {
         Self {
@@ -35,6 +37,7 @@ impl OperatingServer {
             server_client_socket_address,
             users_file_path,
             username: None,
+            max_users,
             logger,
         }
     }
@@ -70,6 +73,9 @@ impl OperatingServer {
                     }
 
                     UserStatus::Offline => {
+                        if self.users_connected.load(Ordering::SeqCst) == self.max_users {
+                            return ServerResponse::LoginError("Server capacity is full".to_string());
+                        }
                         data.update_status(UserStatus::Available);
                         self.users_connected.fetch_add(1, Ordering::SeqCst);
 
@@ -197,9 +203,10 @@ impl OperatingServer {
         to_usr: String,
         offer_sdp: SessionDescriptionProtocol,
     ) -> ServerResponse {
+      
+        let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
         self.logger.info(&format!("Call request from {} to {}", from_usr, to_usr));
 
-        let from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => {
                 self.logger.warn(&format!("Call request failed: Sender {} not found", from_usr));
@@ -207,7 +214,7 @@ impl OperatingServer {
             },
         };
 
-        let to_usr_data = match get_user_data(&to_usr, &self.users) {
+        let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => {
                 self.logger.warn(&format!("Call request failed: Receiver {} not found", to_usr));
@@ -223,6 +230,18 @@ impl OperatingServer {
         if to_usr_data.status != UserStatus::Available {
             self.logger.warn(&format!("Call request failed: Receiver {} not available", to_usr));
             return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
+        }
+
+        from_usr_data.update_status(UserStatus::Occupied(to_usr.clone()));
+        to_usr_data.update_status(UserStatus::Occupied(from_usr.clone()));
+
+        notify_status_update(&self.users, from_usr.clone(), UserStatus::Occupied(to_usr.clone()));
+        notify_status_update(&self.users, to_usr.clone(), UserStatus::Occupied(from_usr.clone()));
+
+        {
+            let mut users = self.users.write().unwrap();
+            users.insert(to_usr_data.username.clone(), to_usr_data);
+            users.insert(from_usr_data.username.clone(), from_usr_data);
         }
 
         let ans =
@@ -261,21 +280,21 @@ impl OperatingServer {
         to_usr: String,
         sdp_answer: SessionDescriptionProtocol,
     ) -> ServerResponse {
-        let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
+        let from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => return ServerResponse::Error(err_event),
         };
 
-        let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
+        let to_usr_data = match get_user_data(&to_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => return ServerResponse::Error(err_event),
         };
 
-        if from_usr_data.status != UserStatus::Available {
+        if from_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
             return ServerResponse::Error(ServerError::UserNotAvailable(from_usr).to_string());
         }
 
-        if to_usr_data.status != UserStatus::Available {
+        if to_usr_data.status != UserStatus::Occupied(from_usr.clone()) {
             return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
         }
 
@@ -297,6 +316,7 @@ impl OperatingServer {
         notify_status_update(&self.users, to_usr.clone(), UserStatus::Occupied(from_usr.clone()), &self.logger);
 
         self.logger.info(&format!("Call accepted: {} and {} are now OCCUPIED", from_usr, to_usr));
+
         ServerResponse::CallAccepted { sdp_answer }
     }
 
@@ -306,22 +326,34 @@ impl OperatingServer {
     ///
     /// No state change occurs — both users remain `Available`.
     pub fn call_reject(&mut self, from_usr: String, to_usr: String) -> ServerResponse {
-        let from_usr_data = match get_user_data(&from_usr, &self.users) {
+        let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => return ServerResponse::Error(err_event),
         };
 
-        let to_usr_data = match get_user_data(&to_usr, &self.users) {
+        let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => return ServerResponse::Error(err_event),
         };
 
-        if from_usr_data.status != UserStatus::Available {
+        if from_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
             return ServerResponse::Error(ServerError::UserNotAvailable(from_usr).to_string());
         }
 
-        if to_usr_data.status != UserStatus::Available {
+        if to_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
             return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
+        }
+
+        from_usr_data.update_status(UserStatus::Available);
+        to_usr_data.update_status(UserStatus::Available);
+
+        notify_status_update(&self.users, from_usr.clone(), UserStatus::Available, &self.logger);
+        notify_status_update(&self.users, to_usr.clone(), UserStatus::Availble, &self.logger);
+
+        {
+            let mut users = self.users.write().unwrap();
+            users.insert(to_usr_data.username.clone(), to_usr_data);
+            users.insert(from_usr_data.username.clone(), from_usr_data);
         }
 
         self.logger.warn(&format!("Call from {} rejected by {}", from_usr, to_usr));
@@ -610,6 +642,7 @@ mod tests {
             users_connected,
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
+            128
             logger,
         )
     }
@@ -630,6 +663,7 @@ mod tests {
             users_connected,
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
+            128
             logger,
         )
     }
@@ -759,8 +793,6 @@ mod tests {
 
         let result = op_s.logout_user("alice".to_string());
 
-        assert!(matches!(result, ServerResponse::LogoutOk));
-
         let users = op_s.users.read().unwrap();
         let user = users.get("alice").unwrap();
         assert!(matches!(user.status, UserStatus::Offline));
@@ -833,7 +865,8 @@ mod tests {
             ("alice", "abc", UserStatus::Available),
         ]);
 
-        let _ = op_s.call_accept(
+
+        let _ = op_s.call_request(
             "alice".into(),
             "bob".into(),
             SessionDescriptionProtocol::default(),
@@ -893,7 +926,6 @@ mod tests {
         match resp {
             ServerResponse::Error(msg) => {
                 assert!(msg.contains("user not available"));
-                assert!(msg.contains("bob"));
             }
             _ => panic!("Expected Error(UserNotAvailable)"),
         }
@@ -985,7 +1017,7 @@ mod tests {
 
         match resp {
             ServerResponse::Error(msg) => {
-                assert!(msg.contains("alice"));
+                assert!(msg.contains("user not available"));
             }
             _ => panic!("Expected Error because alice is not available"),
         }

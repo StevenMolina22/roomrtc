@@ -33,14 +33,16 @@ impl UserHandler {
         users_connected: Arc<AtomicUsize>,
         config: Arc<Config>,
         server_client_socket_addr: SocketAddr,
-        logger: Logger,
+        max_users: usize,
     ) -> Self {
+   
         Self {
             op_server: OperatingServer::new(
                 users,
                 users_connected,
                 server_client_socket_addr,
                 config.server.users_file.clone(),
+                max_users
                 logger.context("OperatingServer"),
             ),
             logger,

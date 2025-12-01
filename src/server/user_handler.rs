@@ -31,9 +31,14 @@ impl UserHandler {
         users_connected: Arc<AtomicUsize>,
         config: Arc<Config>,
         server_client_socket_addr: SocketAddr,
+        max_users: usize,
     ) -> Self {
         Self {
-            op_server: OperatingServer::new(users, users_connected, server_client_socket_addr, config.server.users_file.clone()),
+            op_server: OperatingServer::new(users, 
+                                            users_connected, 
+                                            server_client_socket_addr, 
+                                            config.server.users_file.clone(),
+                                            max_users),
         }
     }
     /// Handles the lifecycle of a connected client.

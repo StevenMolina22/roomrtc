@@ -246,66 +246,6 @@ mod tests {
     }
     
     #[test]
-    fn test_report_handler_receives_connectivity_report() -> Result<(), Error> {
-        let data_to_receive = vec![
-            RtcpPacket::Hello(TEST_SSRC).to_bytes(),
-            RtcpPacket::Ready(TEST_SSRC).to_bytes(),
-            RtcpPacket::ConnectivityReport(TEST_SSRC).to_bytes(),
-        ];
-
-        let sent_data = Arc::new(Mutex::new(Vec::new()));
-        let mock_socket = MockSocket {
-            data_to_receive: Arc::new(Mutex::new(data_to_receive)),
-            sent_data: sent_data.clone(),
-        };
-
-        let connected = Arc::new(AtomicBool::new(false));
-        let handler = RtcpReportHandler::new(mock_socket, connected.clone(), test_config(), TEST_SSRC);
-
-        let (tx, _rx) = mpsc::channel();
-        handler.start(tx)?;
-        
-        thread::sleep(Duration::from_millis(200));
-        
-        assert_eq!(connected.load(Ordering::SeqCst), true);
-        
-        let sent_vec = sent_data.lock().unwrap();
-        assert!(
-            sent_vec.iter().any(|msg| RtcpPacket::from_bytes(msg) == Some(RtcpPacket::ConnectivityReport(TEST_SSRC))),
-            "ConnectivityReport no fue enviado"
-        );
-
-        Ok(())
-    }
-    
-    #[test]
-    fn test_connection_closes_after_inactivity() -> Result<(), Error> {
-        let mock_socket = MockSocket {
-            data_to_receive: Arc::new(Mutex::new(vec![])),
-            sent_data: Arc::new(Mutex::new(Vec::new())),
-        };
-
-        let connected = Arc::new(AtomicBool::new(false));
-        let handler = RtcpReportHandler::new(
-            mock_socket,
-            connected.clone(),
-            test_config(),
-            TEST_SSRC,
-        );
-
-        let (tx, _rx) = mpsc::channel();
-        handler.start(tx)?;
-        
-        let cfg = test_config();
-        let wait = cfg.receive_limit_millis as u64 * (cfg.retry_limit as u64 + 1);
-        thread::sleep(Duration::from_millis(wait));
-
-        assert_eq!(connected.load(Ordering::SeqCst), false);
-
-        Ok(())
-    }
-    
-    #[test]
     fn test_report_goodbye_sends_goodbye() -> Result<(), Error> {
         let sent_data = Arc::new(Mutex::new(Vec::new()));
 

@@ -16,6 +16,10 @@ pub struct SrtpContext {
 }
 
 impl SrtpContext {
+    /// Creates a new SRTP context from the provided DTLS keying material.
+    ///
+    /// Requires at least 60 bytes of material to derive the write keys and salts
+    /// for both client and server.
     pub fn new(keying_material: &[u8]) -> Result<Self, SrtpError> {
         if keying_material.len() < 60 {
             return Err(SrtpError::KeyDerivationFailed);
@@ -36,6 +40,227 @@ impl SrtpContext {
         })
     }
 
+    /// Encrypts and authenticates an RTP packet using AES-CM and HMAC-SHA1.
+    ///
+    /// This method updates the internal Roll-over Counter (ROC) for the packet's SSRC,
+    /// encrypts the payload, and appends an authentication tag.
+    ///
+    /// # Errors
+    /// Returns `SrtpError::PacketTooShort` if the packet serialization fails or is invalid.
+    pub fn protect(&mut self, packet: &RtpPacket, is_client: bool) -> Result<Vec<u8>, SrtpError> {
+        let seq_num = packet.chunk_id as u16;
+        let roc = packet.frame_id as u32;
+
+        // Update ROC state before deriving keys to avoid borrow checker conflicts
+        self.roc_map.insert(packet.ssrc, roc);
+
+        let (key, salt) = self.get_write_keys(is_client);
+        let packet_bytes = packet.to_bytes();
+
+        // Validate minimum length (Header + minimal payload)
+        if packet_bytes.len() < 28 {
+            return Err(SrtpError::PacketTooShort);
+        }
+
+        let iv = Self::get_iv(salt, packet.ssrc, roc, seq_num);
+
+        // Encrypt payload (skip 28-byte RTP header)
+        let encrypted_payload = Self::apply_aes_ctr(key, &iv, &packet_bytes[28..], true)?;
+
+        // Construct authenticated packet: Header + Encrypted Payload + HMAC
+        let mut out_packet = packet_bytes[..28].to_vec();
+        out_packet.extend_from_slice(&encrypted_payload);
+
+        let tag = self.calculate_srtp_tag(key, &out_packet, roc)?;
+        out_packet.extend_from_slice(&tag);
+
+        Ok(out_packet)
+    }
+
+    /// Verifies and decrypts a raw SRTP packet into a structured `RtpPacket`.
+    ///
+    /// This method parses the header to retrieve the ROC, verifies the HMAC-SHA1
+    /// authentication tag, and decrypts the payload if verification succeeds.
+    ///
+    /// # Errors
+    /// Returns `SrtpError::AuthenticationFailed` if the HMAC tag does not match, or
+    /// `SrtpError::PacketTooShort` if the data is insufficient.
+    pub fn unprotect(
+        &mut self,
+        packet_bytes: &[u8],
+        is_client: bool,
+    ) -> Result<RtpPacket, SrtpError> {
+        // Validation and Extraction
+        if packet_bytes.len() < 38 {
+            return Err(SrtpError::PacketTooShort);
+        } // 28 header + 10 tag
+        let content_len = packet_bytes.len() - 10;
+        let (content, tag) = packet_bytes.split_at(content_len);
+
+        // Parse header to get context for keys and IV
+        let mut temp_packet = RtpPacket::from_bytes(content).ok_or(SrtpError::PacketTooShort)?;
+        let (key, salt) = self.get_read_keys(is_client);
+        let roc = temp_packet.frame_id as u32;
+
+        // Verify HMAC
+        self.verify_srtp_tag(key, content, roc, tag)?;
+
+        // Decrypt Payload
+        let iv = Self::get_iv(salt, temp_packet.ssrc, roc, temp_packet.chunk_id as u16);
+        let decrypted = Self::apply_aes_ctr(key, &iv, &temp_packet.payload, false)?;
+
+        temp_packet.payload = decrypted;
+        Ok(temp_packet)
+    }
+
+    /// Encrypts and authenticates a raw RTCP packet (SRTCP).
+    ///
+    /// This method automatically manages the SRTCP index, appends it with the
+    /// Encryption flag (E-bit) set, and adds the authentication tag.
+    ///
+    /// # Errors
+    /// Returns `SrtpError::KeyDerivationFailed` if the SRTCP index is exhausted,
+    /// or `SrtpError::PacketTooShort` if the input is not a valid RTCP packet.
+    pub fn protect_rtcp(
+        &mut self,
+        packet_data: &[u8],
+        ssrc: u32,
+        is_client: bool,
+    ) -> Result<Vec<u8>, SrtpError> {
+        // Update the SRTCP index state first to avoid mutable/immutable borrow conflicts.
+        let index = self.next_rtcp_index(ssrc)?;
+
+        // Retrieve the session keys after the mutable borrow has concluded.
+        let (key, salt) = self.get_write_keys(is_client);
+
+        // Validate that the packet contains at least a standard RTCP header (8 bytes).
+        if packet_data.len() < 8 {
+            return Err(SrtpError::PacketTooShort);
+        }
+
+        // Generate the Initialization Vector (IV) and encrypt the payload (offset 8).
+        let iv = Self::get_srtcp_iv(salt, ssrc, index);
+        let encrypted_payload = Self::apply_aes_ctr(key, &iv, &packet_data[8..], true)?;
+
+        // Assemble the packet: Header + Encrypted Payload + SRTCP Index (with E-bit set).
+        let mut out_packet = packet_data[..8].to_vec();
+        out_packet.extend_from_slice(&encrypted_payload);
+        out_packet.extend_from_slice(&(index | 0x8000_0000).to_be_bytes());
+
+        // Compute and append the HMAC authentication tag over the entire packet.
+        let tag = Self::calculate_hmac(key, &out_packet)?;
+        out_packet.extend_from_slice(&tag);
+
+        Ok(out_packet)
+    }
+
+    /// Verifies and decrypts a raw SRTCP packet.
+    ///
+    /// This method extracts the SRTCP index and authentication tag from the footer,
+    /// verifies the packet integrity, and decrypts the payload.
+    ///
+    /// # Errors
+    /// Returns `SrtpError::AuthenticationFailed` if the integrity check fails,
+    /// or `SrtpError::PacketTooShort` if the packet is malformed.
+    pub fn unprotect_rtcp(
+        &mut self,
+        packet_bytes: &[u8],
+        is_client: bool,
+    ) -> Result<Vec<u8>, SrtpError> {
+        // Min size: Header(8) + Index(4) + Tag(10) = 22
+        if packet_bytes.len() < 22 {
+            return Err(SrtpError::PacketTooShort);
+        }
+
+        let (key, salt) = self.get_read_keys(is_client);
+
+        // Split 1: Separate Authentication Tag (last 10 bytes)
+        let split_at_tag = packet_bytes.len() - 10;
+        let (auth_input, tag) = packet_bytes.split_at(split_at_tag);
+
+        // Verify HMAC
+        if Self::calculate_hmac(key, auth_input)? != tag {
+            return Err(SrtpError::AuthenticationFailed);
+        }
+
+        // Split 2: Separate Index (last 4 bytes of the auth_input)
+        let split_at_index = auth_input.len() - 4;
+        let (content, index_bytes) = auth_input.split_at(split_at_index);
+
+        // Parse Index (remove E-bit mask 0x7FFFFFFF)
+        let index_val = u32::from_be_bytes(
+            index_bytes
+                .try_into()
+                .map_err(|_| SrtpError::PacketTooShort)?,
+        );
+        let srtcp_index = index_val & 0x7FFF_FFFF;
+
+        // Decrypt Payload (Header is 8 bytes. SSRC is at offset 4)
+        let ssrc_bytes = packet_bytes.get(4..8).ok_or(SrtpError::PacketTooShort)?;
+        let ssrc = u32::from_be_bytes(ssrc_bytes.try_into().unwrap());
+
+        let iv = Self::get_srtcp_iv(salt, ssrc, srtcp_index);
+        let decrypted_payload = Self::apply_aes_ctr(key, &iv, &content[8..], false)?;
+
+        // Reconstruct Packet: Header + Decrypted Payload
+        let mut out_packet = content[..8].to_vec();
+        out_packet.extend_from_slice(&decrypted_payload);
+
+        Ok(out_packet)
+    }
+}
+
+/// Private helpers for SRTP / SRTCP context
+impl SrtpContext {
+    /// Helper to select keys for writing (Sender logic)
+    fn get_write_keys(&self, is_client: bool) -> (&[u8], &[u8]) {
+        if is_client {
+            (&self.client_write_key, &self.client_write_salt)
+        } else {
+            (&self.server_write_key, &self.server_write_salt)
+        }
+    }
+
+    /// Helper to select keys for reading (Receiver logic - swaps roles)
+    fn get_read_keys(&self, is_client: bool) -> (&[u8], &[u8]) {
+        if is_client {
+            (&self.server_write_key, &self.server_write_salt)
+        } else {
+            (&self.client_write_key, &self.client_write_salt)
+        }
+    }
+
+    /// Wrapper for OpenSSL AES-128-CTR to reduce verbosity
+    fn apply_aes_ctr(
+        key: &[u8],
+        iv: &[u8],
+        data: &[u8],
+        encrypting: bool,
+    ) -> Result<Vec<u8>, SrtpError> {
+        let cipher = Cipher::aes_128_ctr();
+        let result = if encrypting {
+            encrypt(cipher, key, Some(iv), data)
+        } else {
+            decrypt(cipher, key, Some(iv), data)
+        };
+        result.map_err(SrtpError::from)
+    }
+
+    /// Generates the HMAC-SHA1 signature and truncates to 10 bytes
+    fn calculate_hmac(key: &[u8], data: &[u8]) -> Result<Vec<u8>, SrtpError> {
+        let pkey = PKey::hmac(key).map_err(SrtpError::from)?;
+        let mut signer = Signer::new(MessageDigest::sha1(), &pkey).map_err(SrtpError::from)?;
+        signer.update(data).map_err(SrtpError::from)?;
+        let full_hmac = signer.sign_to_vec().map_err(SrtpError::from)?;
+
+        // SRTP standard often truncates to 80 bits (10 bytes)
+        Ok(full_hmac[0..10].to_vec())
+    }
+
+    /// Generates the 128-bit Initialization Vector (IV) for AES-CTR.
+    ///
+    /// Computed by XORing the session salt with the SSRC, ROC, and sequence number
+    /// as specified in RFC 3711.
     fn get_iv(salt: &[u8], ssrc: u32, roc: u32, seq_num: u16) -> [u8; 16] {
         let mut iv = [0u8; 16];
         // Pad salt to 16 bytes (it is 14 bytes)
@@ -62,98 +287,46 @@ impl SrtpContext {
         iv
     }
 
-    pub fn protect(&mut self, packet: &RtpPacket, is_client: bool) -> Result<Vec<u8>, SrtpError> {
-        let (key, salt) = if is_client {
-            (&self.client_write_key, &self.client_write_salt)
-        } else {
-            (&self.server_write_key, &self.server_write_salt)
-        };
-
-        let seq_num = packet.chunk_id as u16;
-        let roc = packet.frame_id as u32;
-        self.roc_map.insert(packet.ssrc, roc);
-
-        let iv = Self::get_iv(salt, packet.ssrc, roc, seq_num);
-
-        let mut packet_bytes = packet.to_bytes();
-        let header_len = 28;
-        if packet_bytes.len() < header_len {
-            return Err(SrtpError::PacketTooShort);
-        }
-
-        let payload = &packet_bytes[header_len..];
-        let encrypted_payload =
-            encrypt(Cipher::aes_128_ctr(), key, Some(&iv), payload).map_err(SrtpError::from)?;
-
-        // Replace payload in packet_bytes with encrypted payload
-        packet_bytes.truncate(header_len);
-        packet_bytes.extend_from_slice(&encrypted_payload);
-
-        // Authenticate
-        // HMAC over (Header + Encrypted Payload + ROC)
-        let mut auth_input = packet_bytes.clone();
-        auth_input.extend_from_slice(&roc.to_be_bytes());
-
-        let pkey = PKey::hmac(key).map_err(SrtpError::from)?;
-        let mut signer = Signer::new(MessageDigest::sha1(), &pkey).map_err(SrtpError::from)?;
-        signer.update(&auth_input).map_err(SrtpError::from)?;
-        let hmac = signer.sign_to_vec().map_err(SrtpError::from)?;
-
-        // Append first 10 bytes
-        packet_bytes.extend_from_slice(&hmac[0..10]);
-
-        Ok(packet_bytes)
-    }
-
-    pub fn unprotect(
-        &mut self,
-        packet_bytes: &[u8],
-        is_client: bool,
-    ) -> Result<RtpPacket, SrtpError> {
-        if packet_bytes.len() < 28 + 10 {
-            return Err(SrtpError::PacketTooShort);
-        }
-
-        // Separate content and tag
-        let content_len = packet_bytes.len() - 10;
-        let content = &packet_bytes[..content_len];
-        let tag = &packet_bytes[content_len..];
-
-        // Parse header to get SSRC, ROC (frame_id), SEQ (chunk_id)
-        let mut temp_packet = RtpPacket::from_bytes(content).ok_or(SrtpError::PacketTooShort)?;
-
-        let seq_num = temp_packet.chunk_id as u16;
-        let roc = temp_packet.frame_id as u32;
-
-        let (key, salt) = if is_client {
-            (&self.server_write_key, &self.server_write_salt)
-        } else {
-            (&self.client_write_key, &self.client_write_salt)
-        };
-
-        // Verify HMAC
+    /// Specific logic for SRTP Tag calculation: Content + ROC
+    fn calculate_srtp_tag(
+        &self,
+        key: &[u8],
+        content: &[u8],
+        roc: u32,
+    ) -> Result<Vec<u8>, SrtpError> {
         let mut auth_input = content.to_vec();
         auth_input.extend_from_slice(&roc.to_be_bytes());
+        Self::calculate_hmac(key, &auth_input)
+    }
 
-        let pkey = PKey::hmac(key).map_err(SrtpError::from)?;
-        let mut signer = Signer::new(MessageDigest::sha1(), &pkey).map_err(SrtpError::from)?;
-        signer.update(&auth_input).map_err(SrtpError::from)?;
-        let hmac = signer.sign_to_vec().map_err(SrtpError::from)?;
-
-        if &hmac[0..10] != tag {
+    /// Specific logic for SRTP Tag verification
+    fn verify_srtp_tag(
+        &self,
+        key: &[u8],
+        content: &[u8],
+        roc: u32,
+        expected_tag: &[u8],
+    ) -> Result<(), SrtpError> {
+        let calculated = self.calculate_srtp_tag(key, content, roc)?;
+        if calculated != expected_tag {
             return Err(SrtpError::AuthenticationFailed);
         }
+        Ok(())
+    }
 
-        // Decrypt
-        let iv = Self::get_iv(salt, temp_packet.ssrc, roc, seq_num);
-        let encrypted_payload = &temp_packet.payload;
+    /// Retrieves and increments the 31-bit SRTCP index for the given SSRC.
+    /// Returns an error if the index exceeds `0x7FFF_FFFF`, indicating key exhaustion.
+    fn next_rtcp_index(&mut self, ssrc: u32) -> Result<u32, SrtpError> {
+        let index = self.srtcp_idx_map.entry(ssrc).or_insert(0);
+        let current = *index;
 
-        let decrypted_payload = decrypt(Cipher::aes_128_ctr(), key, Some(&iv), encrypted_payload)
-            .map_err(SrtpError::from)?;
+        // SRTCP index is 31 bits. If it exceeds this, the key is exhausted.
+        if current > 0x7FFF_FFFF {
+            return Err(SrtpError::KeyDerivationFailed);
+        }
 
-        temp_packet.payload = decrypted_payload;
-
-        Ok(temp_packet)
+        *index += 1;
+        Ok(current)
     }
 
     /// Generates the Initialization Vector (IV) for SRTCP.
@@ -184,148 +357,6 @@ impl SrtpContext {
         }
 
         iv
-    }
-
-    pub fn protect_rtcp(
-        &mut self,
-        packet_data: &[u8],
-        ssrc: u32,
-        is_client: bool,
-    ) -> Result<Vec<u8>, SrtpError> {
-        // 1. Get Keys (same as SRTP)
-        let (key, salt) = if is_client {
-            (&self.client_write_key, &self.client_write_salt)
-        } else {
-            (&self.server_write_key, &self.server_write_salt)
-        };
-
-        // 2. Get and Increment SRTCP Index
-        let index = self.srtcp_idx_map.entry(ssrc).or_insert(0);
-        let current_index = *index;
-        *index += 1;
-
-        // Check for wrapping (SRTCP index is 31 bits)
-        if current_index > 0x7FFFFFFF {
-            return Err(SrtpError::KeyDerivationFailed);
-        }
-
-        // 3. Encrypt Payload
-        // RTCP Header is first 8 bytes. Everything after is payload.
-        // We encrypt the whole payload, not just video data.
-        let header_len = 8;
-        if packet_data.len() < header_len {
-            return Err(SrtpError::PacketTooShort);
-        }
-
-        let payload = &packet_data[header_len..];
-
-        // IV Generation for SRTCP: (SSRC << 64) | (Index << 16)
-        let iv = Self::get_srtcp_iv(salt, ssrc, current_index);
-
-        let encrypted_payload =
-            encrypt(Cipher::aes_128_ctr(), key, Some(&iv), payload).map_err(SrtpError::from)?;
-
-        // 4. Construct New Packet
-        let mut out_packet = packet_data[..header_len].to_vec();
-        out_packet.extend_from_slice(&encrypted_payload);
-
-        // 5. Append SRTCP Index (with E-bit set to 1 usually)
-        // Bit 31 is E-bit. 1 = Encrypted.
-        let index_with_e_bit = current_index | 0x80000000;
-        out_packet.extend_from_slice(&index_with_e_bit.to_be_bytes());
-
-        // 6. Authenticate (HMAC)
-        // Input is the whole current packet (Header + Encrypted Payload + Index)
-        let pkey = PKey::hmac(key).map_err(SrtpError::from)?;
-        let mut signer = Signer::new(MessageDigest::sha1(), &pkey).map_err(SrtpError::from)?;
-        signer.update(&out_packet).map_err(SrtpError::from)?;
-        let hmac = signer.sign_to_vec().map_err(SrtpError::from)?;
-
-        // 7. Append Tag
-        out_packet.extend_from_slice(&hmac[0..10]);
-
-        Ok(out_packet)
-    }
-
-    pub fn unprotect_rtcp(
-        &mut self,
-        packet_bytes: &[u8],
-        is_client: bool,
-    ) -> Result<Vec<u8>, SrtpError> {
-        // 8 (Header) + 4 (Index) + 10 (Tag) = 22 bytes min
-        if packet_bytes.len() < 22 {
-            return Err(SrtpError::PacketTooShort);
-        }
-
-        // 1. Separate Tag, Index, and Content
-        let total_len = packet_bytes.len();
-        let tag_len = 10;
-        let index_len = 4;
-
-        let content_len = total_len - tag_len - index_len;
-        let content_and_index_len = total_len - tag_len;
-
-        let content_and_index = &packet_bytes[..content_and_index_len];
-        let tag = &packet_bytes[content_and_index_len..];
-
-        // Extract Index bytes (last 4 bytes before tag)
-        let index_bytes = &packet_bytes[content_len..content_and_index_len];
-        let index_val = u32::from_be_bytes(
-            index_bytes
-                .try_into()
-                .map_err(|_| SrtpError::PacketTooShort)?,
-        );
-        // Check E-bit (MSB)
-        let is_encrypted = (index_val & 0x80000000) != 0;
-        let srtcp_index = index_val & 0x7FFFFFFF;
-
-        // 2. Get Keys (Swap client/server logic compared to protect)
-        let (key, salt) = if is_client {
-            (&self.server_write_key, &self.server_write_salt)
-        } else {
-            (&self.client_write_key, &self.client_write_salt)
-        };
-
-        // 3. Verify HMAC
-        // HMAC covers everything up to the tag
-        let pkey = PKey::hmac(key).map_err(SrtpError::from)?;
-        let mut signer = Signer::new(MessageDigest::sha1(), &pkey).map_err(SrtpError::from)?;
-        signer.update(content_and_index).map_err(SrtpError::from)?;
-        let hmac = signer.sign_to_vec().map_err(SrtpError::from)?;
-
-        if &hmac[0..10] != tag {
-            return Err(SrtpError::AuthenticationFailed);
-        }
-
-        // 4. Decrypt (if E-bit was set)
-        let mut out_packet = packet_bytes[..content_len].to_vec();
-
-        if is_encrypted {
-            // Parse Header to get SSRC (Bytes 4-7)
-            // Note: You need to parse the SSRC from the packet bytes manually here
-            if out_packet.len() < 8 {
-                return Err(SrtpError::PacketTooShort);
-            }
-            let ssrc =
-                u32::from_be_bytes([out_packet[4], out_packet[5], out_packet[6], out_packet[7]]);
-
-            let iv = Self::get_srtcp_iv(salt, ssrc, srtcp_index);
-            let header_len = 8;
-            let encrypted_payload = &out_packet[header_len..];
-
-            let decrypted_payload =
-                decrypt(Cipher::aes_128_ctr(), key, Some(&iv), encrypted_payload)
-                    .map_err(SrtpError::from)?;
-
-            // Reconstruct: Header + Decrypted Payload
-            out_packet.truncate(header_len);
-            out_packet.extend_from_slice(&decrypted_payload);
-        }
-
-        // 5. Update Replay Protection (Optional but recommended)
-        // You should track the highest received index per SSRC to prevent replay attacks.
-
-        Ok(out_packet)
     }
 }
 

@@ -77,11 +77,9 @@ impl MediaTransport {
             .connect(remote_rtcp_address)
             .map_err(|e| Error::SocketConnectionError(e.to_string()))?;
 
-        // Export Keys & Setup Context
         let key_material = rtp_dtls
             .export_keying_material("EXTRACTOR-dtls_srtp", 60)
             .map_err(|e| Error::MapError(format!("Key export failed: {}", e)))?;
-        println!("DTLS-SRTP Key Material: {:?}", key_material);
 
         let srtp_context = SrtpContext::new(&key_material)
             .map_err(|e| Error::MapError(format!("SRTP context creation failed: {}", e)))?;
@@ -96,13 +94,12 @@ impl MediaTransport {
             self.config.rtcp.clone(),
             local_ssrc,
         );
-
         rtcp_handler
             .start(event_tx.clone())
             .map_err(|e| Error::MapError(e.to_string()))?;
         self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
 
-        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.spawn_rtp_threads(event_tx, local_setup_role.clone(), srtp_context)?;
+        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.spawn_rtp_threads(event_tx, local_setup_role, srtp_context)?;
 
         Ok((local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.connected.clone()))
     }
@@ -205,7 +202,6 @@ impl MediaTransport {
         expected_fingerprint: Fingerprint,
         local_cert: &LocalCert
     ) -> Result<DtlsSocket, Error> {
-        // Normalize roles
         let mut role = local_setup_role;
         if matches!(role, DtlsSetupRole::ActPass) {
             role = DtlsSetupRole::Active;
@@ -220,11 +216,9 @@ impl MediaTransport {
 
         let stream = match role {
             DtlsSetupRole::Active => {
-                // Prepare Identity
                 let identity = local_cert.duplicate_identity()
                     .map_err(|e| Error::MapError(e.to_string()))?;
 
-                // Use the crate's builder with Method Chaining
                 let connector = DtlsConnector::builder()
                     .identity(identity)
                     .danger_accept_invalid_certs(true)
@@ -232,7 +226,6 @@ impl MediaTransport {
                     .build()
                     .map_err(|e| Error::SocketConnectionError(e.to_string()))?;
 
-                // Connect
                 connector
                     .connect("roomrtc.local", channel)
                     .map_err(|e| Error::SocketConnectionError(format!("{e:?}")))?
@@ -262,7 +255,6 @@ impl MediaTransport {
                 );
 
                 let ssl_acceptor = acceptor_builder.build();
-                // Wrap manual acceptor in DtlsAcceptor tuple struct
                 let acceptor = DtlsAcceptor(ssl_acceptor);
 
                 acceptor
@@ -272,7 +264,6 @@ impl MediaTransport {
             _ => unreachable!("DTLS role should be normalized before handshake"),
         };
 
-        // Final security check: Verify the certificate matches the signaled fingerprint
         self.verify_peer_fingerprint(&stream, &expected_fingerprint)?;
 
         Ok(DtlsSocket::new(stream, remote_addr))

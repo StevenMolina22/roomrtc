@@ -94,17 +94,14 @@ impl UserHandler {
     fn handle_client_message(&mut self, event: ClientMessage) -> ServerResponse {
         match event {
             ClientMessage::LogIn { username, password } => {
-                println!("Handling login for username: {} password: {}", username, password);
                 self.op_server.login_user(username, password)
             }
 
             ClientMessage::SignUp { username, password } => {
-                println!("Handling singup for username: {} password: {}", username, password);
                 self.op_server.signup_user(username, password)
             }
 
             ClientMessage::LogOut { token } => {
-                println!("Handling logout for username: {}", token);
                 self.op_server.logout_user(token)
             },
 
@@ -113,12 +110,10 @@ impl UserHandler {
                 offer_sdp,
                 to,
             } => {
-                println!("Handling call requested by: {}, with sdp: {}, to: {}", token, offer_sdp, to);
                 self.op_server.call_request(token, to, offer_sdp)
             },
 
             ClientMessage::CallHangup { token } => {
-                println!("Handling hangup for username: {}", token);
                 self.op_server.call_hangup(token)
             },
         }
@@ -129,7 +124,5 @@ impl UserHandler {
 ///
 /// Any I/O error is logged but not returned to the caller.
 fn send_response(stream: &mut StreamOwned<ServerConnection, TcpStream>, response: ServerResponse) {
-    if let Err(e) = stream.write_all(&response.to_bytes()) {
-        eprintln!("Failed to write to stream: {e}");
-    }
+    stream.write_all(&response.to_bytes());
 }

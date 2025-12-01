@@ -70,7 +70,9 @@ impl MediaPipeline {
                     }
 
                     let rtp_packet = match rtp_rx.recv() {
-                        Ok(packet) => packet,
+                        Ok(packet) => {
+                            packet
+                        },
                         Err(_) => {
                             break;
                         }
@@ -93,7 +95,6 @@ impl MediaPipeline {
                         {
                             break;
                         }
-
                         actual_frame = None;
                         chunks.clear();
                     }
@@ -119,7 +120,6 @@ impl MediaPipeline {
             .camera
             .start()
             .map_err(|e| Error::MapError(e.to_string()))?;
-        println!("Start local camera")
         let mut encoder = match Encoder::new(&self.config.media) {
             Ok(d) => d,
             Err(e) => {
@@ -142,7 +142,9 @@ impl MediaPipeline {
 
                 let encoded_frame = match encoder.encode_frame(&frame) {
                     Ok(f) => f,
-                    Err(_) => break,
+                    Err(_) => {
+                        break
+                    },
                 };
 
                 if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, connected.clone(), &config).is_err() {
@@ -211,9 +213,7 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
 }
 
 fn send_message_to_ui(event_tx: Sender<AppEvent>, event: AppEvent) {
-    if let Err(e) = event_tx.send(event) {
-        eprintln!("Error sending event: {:?}", e);
-    }
+    event_tx.send(event);
 }
 
 #[cfg(test)]

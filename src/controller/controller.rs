@@ -15,7 +15,7 @@ use std::io::{BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, RwLock, mpsc, Mutex};
+use std::sync::{Arc, RwLock, mpsc};
 use std::thread;
 
 pub struct Controller {
@@ -160,7 +160,8 @@ impl Controller {
                 .parse()
                 .map_err(Error::ParsingSocketAddressError)?;
 
-        let remote_fingerprint = self.call_session.remote_fingerprint.clone().ok_or(Error::NotLoggedIn)?;
+        let remote_fingerprint = self.call_session.remote_fingerprint.clone().ok_or(Error::NotLoggedInError)?;
+        println!("inicio transport");
         let (local_to_remote_rtp_tx, remote_to_local_rtp_rx, connected) = self
             .transport
             .start(remote_rtp_address,
@@ -171,6 +172,8 @@ impl Controller {
                    &self.call_session.local_cert,
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
+
+        println!("inicio media pipeline");
         self.media_pipeline
             .start(local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.event_tx.clone(), connected)
             .map_err(|e| Error::MapError(e.to_string()))

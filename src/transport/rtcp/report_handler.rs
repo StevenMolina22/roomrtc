@@ -76,9 +76,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// Returns an `Error` when socket operations fail or when an
     /// unexpected message is received during the handshake.
     pub fn connection_handshake(&self) -> Result<(), Error> {
-        if let Err(e) = self.socket.send(&RtcpPacket::Hello(self.local_ssrc).to_bytes()) {
-            eprintln!("{e}");
-        }
+        self.socket.send(&RtcpPacket::Hello(self.local_ssrc).to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
 
         let mut ready = false;
 
@@ -88,28 +86,25 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
             } else {
                 RtcpPacket::Hello(self.local_ssrc)
             };
-            if let Err(e) = self.socket.send(&packet.to_bytes()) {
-                eprintln!("Handshake send error: {e}");
-            }
+
+            self.socket.send(&packet.to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
 
             let mut buff = [0u8; 1024];
             match self.socket.recv_from(&mut buff) {
                 Ok((size, _addr)) => match RtcpPacket::from_bytes(&buff[..size]) {
                     Some(RtcpPacket::Hello(_)) => {
-                        ready = true;
+                        self.socket.send(&RtcpPacket::Ready(self.local_ssrc).to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
                     }
                     Some(RtcpPacket::Ready(_)) => {
                         if ready {
                             break;
                         }
                         ready = true;
-                        self.socket
-                            .send(&RtcpPacket::Ready(self.local_ssrc).to_bytes())
-                            .map_err(|e| Error::SendFailed(e.to_string()))?;
+                        self.socket.send(&RtcpPacket::Ready(self.local_ssrc).to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
                         self.connected.store(true, Ordering::SeqCst);
                     }
                     Some(_) => return Err(Error::UnexpectedMessage),
-                    None => {}
+                    None => {continue}
                 },
                 Err(e) => return Err(Error::ReceiveFailed(e.to_string())),
             }
@@ -131,14 +126,9 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     break;
                 }
 
-                if report_socket
-                    .send(&RtcpPacket::ConnectivityReport(local_ssrc).to_bytes())
-                    .is_err()
-                {
-                    connected.store(false, Ordering::SeqCst);
-                    break;
+                if let Err(e) = report_socket.send(&RtcpPacket::ConnectivityReport(local_ssrc).to_bytes()) {
+                    break
                 }
-
                 thread::sleep(Duration::from_millis(report_period_millis));
             }
 
@@ -219,14 +209,16 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
                     *last_report_time = Local::now();
                     return Ok(())
                 }
-                Some(RtcpPacket::Goodbye(_)) => return Err(Error::GoodbyeReceived),
+                Some(RtcpPacket::Goodbye(_)) => {
+                    return Err(Error::GoodbyeReceived)
+                },
                 _ => continue,
             },
             Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
-                if Local::now() - *last_report_time > receive_limit {
-                    return Err(Error::TimedOut)
+                return if Local::now() - *last_report_time > receive_limit {
+                    Err(Error::TimedOut)
                 } else {
-                    return Ok(())
+                    Ok(())
                 }
             }
             Err(e) => return Err(Error::ReceiveFailed(e.to_string()))

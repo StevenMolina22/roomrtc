@@ -88,8 +88,6 @@ impl eframe::App for RoomRTCApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
-
-            // Esto es momentaneo, despues deberiamos tener un thread de eventos en la gui
             loop {
                 match self.event_rx.try_recv() {
                     Ok(event) => self.handle_event(event),
@@ -259,7 +257,6 @@ impl RoomRTCApp {
                                 self.view = View::Calling(username.clone());
                             }
                         });
-
                         ui.separator();
                     }
                 });

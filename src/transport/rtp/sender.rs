@@ -63,7 +63,9 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                 }
 
                 let rtp_packet = match rx.recv() {
-                    Ok(p) => p,
+                    Ok(p) => {
+                        p
+                    },
                     Err(e) => {
                         break;
                     }
@@ -80,7 +82,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     match ctx.protect(&rtp_packet, is_client) {
                         Ok(data) => data,
                         Err(_) => {
-                            return; 
+                            return;
                         }
                     }
                 };
@@ -122,7 +124,6 @@ fn send_packet<S: Socket + Send + Sync + 'static>(
             .map_err(|_| Error::PoisonedLock)?
             .report_goodbye()
             .map_err(|e| Error::RTCPError(e.to_string()))?;
-
         return Err(Error::SendFailed);
     }
     Ok(())

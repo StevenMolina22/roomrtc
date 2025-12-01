@@ -83,7 +83,9 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                     }
                     let rtp_packet = match receive(&rtp_socket, &connected, &rtcp_handler, &srtp_context, is_client)
                     {
-                        Ok(packet) => packet,
+                        Ok(packet) => {
+                            packet
+                        },
                         Err(_) => {
                             break;
                         }

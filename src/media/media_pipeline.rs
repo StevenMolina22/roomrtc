@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::controller::AppEvent;
 use crate::media::camera::{Camera, FrameSource};
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
@@ -8,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 use std::thread;
-use crate::controller::AppEvent;
 
 pub struct MediaPipeline {
     camera: Camera,
@@ -33,14 +33,18 @@ impl MediaPipeline {
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
     ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
-        let local_frame_rx = self.start_local_frame_pipeline(rtp_tx, event_tx.clone(), connected.clone())?;
-        let remote_frame_rx = self.start_remote_frames_pipeline(rtp_rx, event_tx.clone(), connected.clone())?;
+        let local_frame_rx =
+            self.start_local_frame_pipeline(rtp_tx, event_tx.clone(), connected.clone())?;
+        let remote_frame_rx =
+            self.start_remote_frames_pipeline(rtp_rx, event_tx.clone(), connected.clone())?;
 
         Ok((local_frame_rx, remote_frame_rx))
     }
 
     pub fn stop(&self) -> Result<(), Error> {
-        self.camera.stop().map_err(|e| Error::MapError(e.to_string()))
+        self.camera
+            .stop()
+            .map_err(|e| Error::MapError(e.to_string()))
     }
 
     fn start_remote_frames_pipeline(
@@ -53,11 +57,13 @@ impl MediaPipeline {
 
         thread::spawn({
             move || {
-                let mut decoder = match Decoder::new()
-                    .map_err(|e| Error::MapError(e.to_string())) {
+                let mut decoder = match Decoder::new().map_err(|e| Error::MapError(e.to_string())) {
                     Ok(d) => d,
                     Err(_) => {
-                        send_message_to_ui(event_tx, AppEvent::Error("Failed to create decoder".into()));
+                        send_message_to_ui(
+                            event_tx,
+                            AppEvent::Error("Failed to create decoder".into()),
+                        );
                         return;
                     }
                 };
@@ -70,9 +76,7 @@ impl MediaPipeline {
                     }
 
                     let rtp_packet = match rtp_rx.recv() {
-                        Ok(packet) => {
-                            packet
-                        },
+                        Ok(packet) => packet,
                         Err(_) => {
                             break;
                         }
@@ -142,20 +146,24 @@ impl MediaPipeline {
 
                 let encoded_frame = match encoder.encode_frame(&frame) {
                     Ok(f) => f,
-                    Err(_) => {
-                        break
-                    },
+                    Err(_) => break,
                 };
 
-                if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, connected.clone(), &config).is_err() {
+                if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, connected.clone(), &config)
+                    .is_err()
+                {
                     break;
                 }
             }
 
-            if connected.load(Ordering::SeqCst) {
-                connected.store(false, Ordering::SeqCst);
-                send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
+            while connected.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
+
+            // if connected.load(Ordering::SeqCst) {
+            //     connected.store(false, Ordering::SeqCst);
+            //     send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
+            // }
         });
 
         Ok(local_frame_rx)

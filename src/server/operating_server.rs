@@ -187,7 +187,6 @@ impl OperatingServer {
             return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
         }
 
-        println!("expecting answer from peer");
         let ans =
             match get_answer_from_peer(from_usr.clone(), to_usr.clone(), offer_sdp, &self.users) {
                 Ok(answer) => answer,
@@ -417,9 +416,7 @@ fn get_answer_from_peer(
             offer_sdp,
         },
     );
-
-    println!("call request sent from {} to {}", from_usr.clone(), to_usr.clone());
-
+    
     let mut buff = [0u8; 1024];
 
     let n = match stream.lock().unwrap().read(&mut buff) {
@@ -427,9 +424,7 @@ fn get_answer_from_peer(
         Ok(n) => n,
         Err(err) => return Err(ServerError::MapError(err.to_string())),
     };
-
-    println!("Got answer from {}", to_usr.clone());
-
+    
     match ClientResponse::from_bytes(&buff[..n]) {
         Some(ans) => Ok(ans),
         None => Err(ServerError::MapError(
@@ -491,14 +486,10 @@ fn send_message(
     let mut guard = match stream.lock() {
         Ok(guard) => guard,
         Err(_) => {
-            eprintln!("Failed to get lock for users");
             return;
         }
     };
-
-    if let Err(e) = guard.write_all(&message.to_bytes()) {
-        eprintln!("Failed to write to stream: {e}");
-    }
+    guard.write_all(&message.to_bytes());
 }
 
 fn notify_status_update(
@@ -509,7 +500,6 @@ fn notify_status_update(
     let users = users.clone();
     thread::spawn(move || {
         let mut streams: Vec<Arc<Mutex<StreamOwned<ServerConnection, TcpStream>>>> = Vec::new();
-
         {
             let users_guard = users.read().unwrap();
             for (name, user_data) in users_guard.iter() {
@@ -521,7 +511,6 @@ fn notify_status_update(
                 }
             }
         }
-
         let msg = ServerMessage::UserStatusUpdate(username.clone(), status);
         for stream in streams {
             send_message(&stream, &msg);

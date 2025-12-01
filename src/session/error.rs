@@ -14,6 +14,10 @@ pub enum CallSessionError {
     /// (adding remote candidates, starting connectivity checks, etc.).
     IceConnectionError(String),
     BadAddress,
+
+    /// Error produced while initializing the security context (certificates,
+    /// DTLS identity, etc.).
+    SecurityInitializationError(String),
 }
 
 /// Provide a compact representation for `CallSessionError`.
@@ -25,6 +29,11 @@ impl Display for CallSessionError {
         match self {
             Self::SdpCreationError(e) | Self::IceConnectionError(e) => write!(f, "{e}"),
             Self::BadAddress => write!(f, "Error: \"Bad address\""),
+            Self::SdpCreationError(e)
+            | Self::IceConnectionError(e)
+            | Self::SecurityInitializationError(e) => {
+                write!(f, "{e}")
+            }
         }
     }
 }

@@ -1,8 +1,9 @@
+use std::io::ErrorKind;
 use crate::config::RtcpConfig;
 use crate::tools::Socket;
 use crate::transport::rtcp::RtcpError as Error;
 use crate::transport::rtcp::RtcpPacket;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, TimeDelta};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -19,6 +20,7 @@ pub struct RtcpReportHandler<S: Socket + Send + Sync + 'static> {
     socket: Arc<S>,
     connected: Arc<AtomicBool>,
     config: RtcpConfig,
+    local_ssrc: u32,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
@@ -35,16 +37,20 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     ///   used for sending/receiving RTCP-style messages.
     /// - `connection_status`: shared `Arc<RwLock<ConnectionStatus>>` used
     ///   to publish the session state (Open/Closed) across threads.
+    /// - `local_ssrc`: the Synchronization Source identifier for this peer,
+    ///   used to sign outgoing packets for SRTCP context lookup.
     ///
     /// # Returns
     /// A configured `RtcpReportHandler` that is ready to `start()`.
-    pub fn new(socket: S, connected: Arc<AtomicBool>, config: RtcpConfig) -> Self {
+    pub fn new(socket: S, connected: Arc<AtomicBool>, config: RtcpConfig, local_ssrc: u32) -> Self {
         Self {
             socket: Arc::new(socket),
             connected,
             config,
+            local_ssrc,
         }
     }
+
     pub fn start(&self, event_tx: Sender<AppEvent>) -> Result<(), Error> {
         self.connection_handshake()?;
         self.start_report_handler(event_tx)
@@ -70,33 +76,35 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// Returns an `Error` when socket operations fail or when an
     /// unexpected message is received during the handshake.
     pub fn connection_handshake(&self) -> Result<(), Error> {
-        if let Err(e) = self.socket.send(RtcpPacket::Hello.as_bytes()) {
-            eprintln!("{e}");
-        }
+        self.socket.send(&RtcpPacket::Hello(self.local_ssrc).to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
 
         let mut ready = false;
 
         loop {
+            let packet = if ready {
+                RtcpPacket::Ready(self.local_ssrc)
+            } else {
+                RtcpPacket::Hello(self.local_ssrc)
+            };
+
+            self.socket.send(&packet.to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
+
             let mut buff = [0u8; 1024];
             match self.socket.recv_from(&mut buff) {
                 Ok((size, _addr)) => match RtcpPacket::from_bytes(&buff[..size]) {
-                    Some(RtcpPacket::Hello) => {
-                        self.socket
-                            .send(RtcpPacket::Ready.as_bytes())
-                            .map_err(|e| Error::SendFailed(e.to_string()))?;
+                    Some(RtcpPacket::Hello(_)) => {
+                        self.socket.send(&RtcpPacket::Ready(self.local_ssrc).to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
                     }
-                    Some(RtcpPacket::Ready) => {
+                    Some(RtcpPacket::Ready(_)) => {
                         if ready {
                             break;
                         }
                         ready = true;
-                        self.socket
-                            .send(RtcpPacket::Ready.as_bytes())
-                            .map_err(|e| Error::SendFailed(e.to_string()))?;
+                        self.socket.send(&RtcpPacket::Ready(self.local_ssrc).to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
                         self.connected.store(true, Ordering::SeqCst);
                     }
                     Some(_) => return Err(Error::UnexpectedMessage),
-                    None => {}
+                    None => {continue}
                 },
                 Err(e) => return Err(Error::ReceiveFailed(e.to_string())),
             }
@@ -110,6 +118,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     fn start_report_sender(&self, report_socket: Arc<S>, event_tx: Sender<AppEvent>) {
         let connected = Arc::clone(&self.connected);
         let report_period_millis = self.config.report_period_millis;
+        let local_ssrc = self.local_ssrc;
 
         thread::spawn(move || {
             loop {
@@ -117,14 +126,9 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     break;
                 }
 
-                if report_socket
-                    .send(RtcpPacket::ConnectivityReport.as_bytes())
-                    .is_err()
-                {
-                    connected.store(false, Ordering::SeqCst);
-                    break;
+                if let Err(e) = report_socket.send(&RtcpPacket::ConnectivityReport(local_ssrc).to_bytes()) {
+                    break
                 }
-
                 thread::sleep(Duration::from_millis(report_period_millis));
             }
 
@@ -149,24 +153,23 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
         let connected = Arc::clone(&self.connected);
         let retry_limit = self.config.retry_limit;
-        let receive_limit = Duration::from_millis(self.config.receive_limit_millis);
+        let max_silence_duration = chrono::Duration::milliseconds(self.config.receive_limit_millis as i64);
 
         thread::spawn(move || {
-            let mut last_report_time = Local::now();
-            let mut retries = 0;
+            let mut last_valid_packet_time = Local::now();
+            let mut timeouts_triggered = 0;
 
-            while retries < retry_limit {
+            while timeouts_triggered < retry_limit {
                 if !connected.load(Ordering::SeqCst) {
                     break;
                 }
 
-                match try_receive_report(&*report_socket, &mut last_report_time, receive_limit) {
-                    Ok(()) => retries = 0,
+                match try_receive_report(&*report_socket, &mut last_valid_packet_time, max_silence_duration) {
+                    Ok(()) => timeouts_triggered = 0,
                     Err(Error::GoodbyeReceived) => {
-                        println!("Goodbye recibido!");
-                        retries = retry_limit;
+                        break;
                     }
-                    Err(_) => retries += 1,
+                    Err(_) => timeouts_triggered += 1,
                 }
             }
 
@@ -175,7 +178,6 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                 event_tx.send(AppEvent::CallEnded);
             }
         });
-
         Ok(())
     }
 
@@ -185,7 +187,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     /// # Returns
     /// A result indicating success or failure.
     pub fn report_goodbye(&self) -> Result<(), Error> {
-        self.socket.send(RtcpPacket::Goodbye.as_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
+        self.socket.send(&RtcpPacket::Goodbye(self.local_ssrc).to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
         Ok(())
     }
 }
@@ -197,38 +199,133 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 fn try_receive_report<S: Socket + Send + Sync + 'static>(
     report_socket: &S,
     last_report_time: &mut DateTime<Local>,
-    receive_limit: Duration,
+    receive_limit: TimeDelta,
 ) -> Result<(), Error> {
     let mut buf = [0u8; 1024];
-
-    match report_socket.recv_from(&mut buf) {
-        Ok((size, _src_addr)) => match RtcpPacket::from_bytes(&buf[..size]) {
-            Some(RtcpPacket::ConnectivityReport) => {
-                *last_report_time = Local::now();
-                Ok(())
-            }
-            Some(RtcpPacket::Goodbye) => Err(Error::GoodbyeReceived),
-            Some(_) => Err(Error::UnexpectedMessage),
-            None => {
-                if Local::now() - *last_report_time
-                    > chrono::Duration::from_std(receive_limit)
-                    .unwrap_or_else(|_| chrono::Duration::seconds(30))
-                {
+    loop {
+        match report_socket.recv_from(&mut buf) {
+            Ok((size, _src_addr)) => match RtcpPacket::from_bytes(&buf[..size]) {
+                Some(RtcpPacket::ConnectivityReport(_)) => {
+                    *last_report_time = Local::now();
+                    return Ok(())
+                }
+                Some(RtcpPacket::Goodbye(_)) => {
+                    return Err(Error::GoodbyeReceived)
+                },
+                _ => continue,
+            },
+            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
+                return if Local::now() - *last_report_time > receive_limit {
                     Err(Error::TimedOut)
                 } else {
                     Ok(())
                 }
             }
-        },
-        Err(_) => {
-            if Local::now() - *last_report_time
-                > chrono::Duration::from_std(receive_limit)
-                .map_err(|_| Error::InvalidConfigDuration)?
-            {
-                Err(Error::TimedOut)
-            } else {
-                Ok(())
-            }
+            Err(e) => return Err(Error::ReceiveFailed(e.to_string()))
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::RtcpConfig;
+    use crate::transport::rtcp::RtcpPacket;
+    use crate::tools::MockSocket;
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+
+    const TEST_SSRC: u32 = 0x1234_5678;
+
+    fn test_config() -> RtcpConfig {
+        RtcpConfig {
+            report_period_millis: 50,      
+            receive_limit_millis: 80,
+            retry_limit: 2,
+        }
+    }
+    
+    #[test]
+    fn test_report_handler_receives_connectivity_report() -> Result<(), Error> {
+        let data_to_receive = vec![
+            RtcpPacket::Hello(TEST_SSRC).to_bytes(),
+            RtcpPacket::Ready(TEST_SSRC).to_bytes(),
+            RtcpPacket::ConnectivityReport(TEST_SSRC).to_bytes(),
+        ];
+
+        let sent_data = Arc::new(Mutex::new(Vec::new()));
+        let mock_socket = MockSocket {
+            data_to_receive: Arc::new(Mutex::new(data_to_receive)),
+            sent_data: sent_data.clone(),
+        };
+
+        let connected = Arc::new(AtomicBool::new(false));
+        let handler = RtcpReportHandler::new(mock_socket, connected.clone(), test_config(), TEST_SSRC);
+
+        let (tx, _rx) = mpsc::channel();
+        handler.start(tx)?;
+        
+        thread::sleep(Duration::from_millis(200));
+        
+        assert_eq!(connected.load(Ordering::SeqCst), true);
+        
+        let sent_vec = sent_data.lock().unwrap();
+        assert!(
+            sent_vec.iter().any(|msg| RtcpPacket::from_bytes(msg) == Some(RtcpPacket::ConnectivityReport(TEST_SSRC))),
+            "ConnectivityReport no fue enviado"
+        );
+
+        Ok(())
+    }
+    
+    #[test]
+    fn test_connection_closes_after_inactivity() -> Result<(), Error> {
+        let mock_socket = MockSocket {
+            data_to_receive: Arc::new(Mutex::new(vec![])),
+            sent_data: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        let connected = Arc::new(AtomicBool::new(false));
+        let handler = RtcpReportHandler::new(
+            mock_socket,
+            connected.clone(),
+            test_config(),
+            TEST_SSRC,
+        );
+
+        let (tx, _rx) = mpsc::channel();
+        handler.start(tx)?;
+        
+        let cfg = test_config();
+        let wait = cfg.receive_limit_millis as u64 * (cfg.retry_limit as u64 + 1);
+        thread::sleep(Duration::from_millis(wait));
+
+        assert_eq!(connected.load(Ordering::SeqCst), false);
+
+        Ok(())
+    }
+    
+    #[test]
+    fn test_report_goodbye_sends_goodbye() -> Result<(), Error> {
+        let sent_data = Arc::new(Mutex::new(Vec::new()));
+
+        let mock_socket = MockSocket {
+            data_to_receive: Arc::new(Mutex::new(vec![])),
+            sent_data: sent_data.clone(),
+        };
+
+        let connected = Arc::new(AtomicBool::new(true));
+        let handler = RtcpReportHandler::new(mock_socket, connected.clone(), test_config(), TEST_SSRC);
+
+        handler.report_goodbye()?;
+
+        let sent = sent_data.lock().unwrap();
+        assert!(
+            sent.iter().any(|msg| RtcpPacket::from_bytes(msg) == Some(RtcpPacket::Goodbye(TEST_SSRC))),
+            "No se envió el Goodbye"
+        );
+
+        Ok(())
+    }
+}
+

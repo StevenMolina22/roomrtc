@@ -14,3 +14,5 @@ rust-ini = "0.21.3"
 rand = "0.9.2"
 rustls = "0.23.35"
 rustls-pemfile = "2.2.0"
+udp-dtls = "0.1"
+openssl = { version = "0.10", features = ["v110"] }

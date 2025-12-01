@@ -1,6 +1,6 @@
-use super::Attribute;
 use super::error::SdpError as Error;
 use crate::session::ice::Candidate;
+use super::{Attribute, DtlsSetupRole, Fingerprint};
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -128,6 +128,28 @@ impl MediaDescription {
         }
 
         candidates
+    }
+
+    /// Return the DTLS fingerprint advertised in the media attributes, if any.
+    #[must_use]
+    pub fn get_fingerprint(&self) -> Option<Fingerprint> {
+        for attr in &self.attributes {
+            if let Attribute::Fingerprint(fingerprint) = attr {
+                return Some(fingerprint.clone());
+            }
+        }
+        None
+    }
+
+    /// Return the DTLS setup role advertised in the media attributes, if any.
+    #[must_use]
+    pub fn get_setup_role(&self) -> Option<DtlsSetupRole> {
+        for attr in &self.attributes {
+            if let Attribute::Setup(role) = attr {
+                return Some(*role);
+            }
+        }
+        None
     }
 }
 

@@ -7,6 +7,112 @@ use std::str::FromStr;
 /// SDP attribute keys used by the parser.
 const CANDIDATE_ATTR_KEY: &str = "candidate";
 const RTPMAP_ATTR_KEY: &str = "rtpmap";
+const FINGERPRINT_ATTR_KEY: &str = "fingerprint";
+const SETUP_ATTR_KEY: &str = "setup";
+
+/// DTLS setup role advertised via the SDP `a=setup` attribute.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DtlsSetupRole {
+    ActPass,
+    Active,
+    Passive,
+    HoldConn,
+}
+
+impl fmt::Display for DtlsSetupRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::ActPass => "actpass",
+            Self::Active => "active",
+            Self::Passive => "passive",
+            Self::HoldConn => "holdconn",
+        };
+        write!(f, "{value}")
+    }
+}
+
+impl FromStr for DtlsSetupRole {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "actpass" => Ok(Self::ActPass),
+            "active" => Ok(Self::Active),
+            "passive" => Ok(Self::Passive),
+            "holdconn" => Ok(Self::HoldConn),
+            _ => Err(Error::InvalidSetupRoleError),
+        }
+    }
+}
+
+/// Parsed representation of an SDP `a=fingerprint` attribute.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Fingerprint {
+    algorithm: String,
+    bytes: Vec<u8>,
+}
+
+impl Fingerprint {
+    /// Create a fingerprint from the provided raw bytes.
+    #[must_use]
+    pub fn from_bytes(algorithm: impl Into<String>, bytes: &[u8]) -> Self {
+        Self {
+            algorithm: algorithm.into(),
+            bytes: bytes.to_vec(),
+        }
+    }
+
+    /// Parse a colon-separated fingerprint string.
+    pub fn from_hash_string(algorithm: impl Into<String>, hash: &str) -> Result<Self, Error> {
+        let trimmed_hash = hash.trim();
+        if trimmed_hash.is_empty() {
+            return Err(Error::MissingFingerprintValueError);
+        }
+
+        let mut parsed = Vec::new();
+        for part in trimmed_hash.split(':') {
+            let cleaned = part.trim();
+            if cleaned.is_empty() {
+                return Err(Error::InvalidFingerprintFormatError);
+            }
+
+            let byte = u8::from_str_radix(cleaned, 16)
+                .map_err(|_| Error::InvalidFingerprintFormatError)?;
+            parsed.push(byte);
+        }
+
+        if parsed.is_empty() {
+            return Err(Error::MissingFingerprintValueError);
+        }
+
+        Ok(Self {
+            algorithm: algorithm.into(),
+            bytes: parsed,
+        })
+    }
+
+    /// Return the algorithm string (e.g. `sha-256`).
+    #[must_use]
+    pub fn algorithm(&self) -> &str {
+        &self.algorithm
+    }
+
+    /// Return the raw fingerprint bytes.
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Render the fingerprint as uppercase colon-delimited hex.
+    #[must_use]
+    pub fn hex_value(&self) -> String {
+        self.bytes
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<String>>()
+            .join(":")
+    }
+}
 
 /// SDP attribute representation used by this module.
 ///
@@ -20,13 +126,14 @@ pub enum Attribute {
     Candidate(Candidate),
     // (rtp_payload_type, rtp_codec_name, rtp_clock_rate, rtp_encoding_params)
     RTPMap(u8, String, u32, Option<String>),
+    /// DTLS fingerprint attribute.
+    Fingerprint(Fingerprint),
+    /// DTLS setup attribute.
+    Setup(DtlsSetupRole),
 }
 
 impl fmt::Display for Attribute {
     /// Render the attribute back to SDP attribute line form.
-    ///
-    /// - Candidate: `a=candidate:<foundation> <component> <transport> <priority> <address> <port> typ <type>`
-    /// - `RTPMap`: `a=rtpmap:<fmt> <encoding_name>/<clock_rate>[/<encoding_params>]`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Candidate(candidate) => {
@@ -42,7 +149,6 @@ impl fmt::Display for Attribute {
                     candidate.candidate_type,
                 )
             }
-
             Self::RTPMap(fmt, enc_name, clock_rate, encoding_params) => {
                 if let Some(params) = encoding_params {
                     write!(f, "a=rtpmap:{fmt} {enc_name}/{clock_rate}/{params}")
@@ -50,6 +156,15 @@ impl fmt::Display for Attribute {
                     write!(f, "a=rtpmap:{fmt} {enc_name}/{clock_rate}")
                 }
             }
+            Self::Fingerprint(fingerprint) => {
+                write!(
+                    f,
+                    "a=fingerprint:{} {}",
+                    fingerprint.algorithm(),
+                    fingerprint.hex_value()
+                )
+            }
+            Self::Setup(role) => write!(f, "a=setup:{role}"),
         }
     }
 }
@@ -57,23 +172,21 @@ impl fmt::Display for Attribute {
 impl FromStr for Attribute {
     type Err = Error;
 
-    /// Parse an SDP attribute line (without the leading `a=`) into an
-    /// `Attribute`.
-    ///
-    /// The expected forms are `candidate:...` and `rtpmap:...`. Unknown
-    /// or malformed inputs produce an appropriate `SdpError`.
+    /// Parse an SDP attribute line (without the leading `a=`) into an `Attribute`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once(':') {
             Some((key, value)) if key == CANDIDATE_ATTR_KEY => parse_candidate_attr_values(value),
             Some((key, value)) if key == RTPMAP_ATTR_KEY => parse_rptmap_attr_values(value),
-            _ => Err(Error::InvalidRtpMapFormatError),
+            Some((key, value)) if key == FINGERPRINT_ATTR_KEY => {
+                parse_fingerprint_attr_values(value)
+            }
+            Some((key, value)) if key == SETUP_ATTR_KEY => parse_setup_attr_values(value),
+            _ => Err(Error::InvalidAttributeFormatError),
         }
     }
 }
 
 /// Parse an `rtpmap` attribute value part into `Attribute::RTPMap`.
-///
-/// Expects a form like: `"96 opus/48000/2"`.
 fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
     let parts = values.split_whitespace().collect::<Vec<&str>>();
     if parts.len() < 2 {
@@ -109,9 +222,6 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
 }
 
 /// Parse a `candidate` attribute value into `Attribute::Candidate`.
-///
-/// The expected form follows the ICE candidate attribute grammar used in
-/// SDP: `<foundation> <component> <transport> <priority> <address> <port> typ <type>`.
 fn parse_candidate_attr_values(values: &str) -> Result<Attribute, Error> {
     let parts = values.split_whitespace().collect::<Vec<&str>>();
     if parts.len() < 8 {
@@ -141,6 +251,28 @@ fn parse_candidate_attr_values(values: &str) -> Result<Attribute, Error> {
     )))
 }
 
+/// Parse a fingerprint attribute.
+fn parse_fingerprint_attr_values(values: &str) -> Result<Attribute, Error> {
+    let mut parts = values.split_whitespace();
+    let algorithm = parts
+        .next()
+        .ok_or(Error::InvalidAttributeFormatError)?
+        .trim();
+    let hash = parts
+        .next()
+        .ok_or(Error::MissingFingerprintValueError)?
+        .trim();
+
+    let fingerprint = Fingerprint::from_hash_string(algorithm, hash)?;
+    Ok(Attribute::Fingerprint(fingerprint))
+}
+
+/// Parse a setup attribute.
+fn parse_setup_attr_values(value: &str) -> Result<Attribute, Error> {
+    let role = DtlsSetupRole::from_str(value.trim())?;
+    Ok(Attribute::Setup(role))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,7 +290,7 @@ mod tests {
                 assert_eq!(rate, 48000);
                 assert_eq!(params, Some("2".to_string()));
             }
-            Attribute::Candidate(_) => panic!("Expected Attribute::RTPMap"),
+            _ => panic!("Expected Attribute::RTPMap"),
         }
         Ok(())
     }
@@ -175,7 +307,7 @@ mod tests {
                 assert_eq!(rate, 8000);
                 assert!(params.is_none());
             }
-            Attribute::Candidate(_) => panic!("Expected Attribute::RTPMap"),
+            _ => panic!("Expected Attribute::RTPMap"),
         }
         Ok(())
     }
@@ -206,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_invalid_rtpmap_extra_fields() {
-        let line = "rtpmap:96 opus/48000/2/extra"; // Demasiados campos
+        let line = "rtpmap:96 opus/48000/2/extra";
         let result = Attribute::from_str(line);
 
         assert!(matches!(result, Err(Error::ExtraRtpFieldsError)));
@@ -236,7 +368,7 @@ mod tests {
                 assert_eq!(cand.port, 54400);
                 assert!(matches!(cand.candidate_type, CandidateType::Host));
             }
-            Attribute::RTPMap(..) => panic!("Expected Attribute::Candidate"),
+            _ => panic!("Expected Attribute::Candidate"),
         }
         Ok(())
     }
@@ -317,5 +449,45 @@ mod tests {
         let attr = Attribute::Candidate(candidate);
         let expected = "a=candidate:1 1 udp 2122252543 192.168.1.5 54400 typ host";
         assert_eq!(attr.to_string(), expected);
+    }
+
+    #[test]
+    fn test_fingerprint_attribute_roundtrip() -> Result<(), Error> {
+        let line = "fingerprint:sha-256 AA:BB:CC:DD";
+        let attr = Attribute::from_str(line)?;
+
+        match attr {
+            Attribute::Fingerprint(fp) => {
+                assert_eq!(fp.algorithm(), "sha-256");
+                assert_eq!(fp.hex_value(), "AA:BB:CC:DD");
+            }
+            _ => panic!("Expected fingerprint attribute"),
+        }
+
+        let fp = Fingerprint::from_hash_string("sha-1", "01:02")?;
+        assert_eq!(
+            Attribute::Fingerprint(fp).to_string(),
+            "a=fingerprint:sha-1 01:02"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_setup_attribute_roundtrip() -> Result<(), Error> {
+        let line = "setup:active";
+        let attr = Attribute::from_str(line)?;
+        assert!(matches!(attr, Attribute::Setup(DtlsSetupRole::Active)));
+        assert_eq!(
+            Attribute::Setup(DtlsSetupRole::Passive).to_string(),
+            "a=setup:passive"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_invalid_fingerprint_format() {
+        let line = "fingerprint:sha-256 invalid";
+        let attr = Attribute::from_str(line);
+        assert!(matches!(attr, Err(Error::InvalidFingerprintFormatError)));
     }
 }

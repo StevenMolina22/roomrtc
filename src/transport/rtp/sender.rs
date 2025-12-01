@@ -16,9 +16,7 @@ use crate::controller::AppEvent;
 pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
-    ssrc: u32,
     connected: Arc<AtomicBool>,
-    rtp_version: u8,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
@@ -30,20 +28,16 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
     pub fn new(
         rtp_socket: S,
         report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
-        ssrc: u32,
         connected: &Arc<AtomicBool>,
-        rtp_version: u8,
     ) -> Result<Self, Error> {
         Ok(Self {
             rtp_socket,
             report_handler: Arc::clone(report_handler),
-            ssrc,
             connected: Arc::clone(connected),
-            rtp_version,
         })
     }
 
-    pub fn start(&self, event_tx: Sender<AppEvent>) -> Result<Sender<RtpPacket>, Error> {
+    pub fn start(&self, event_tx: Sender<AppEvent>) -> Result<Sender<Vec<u8>>, Error> {
         let (tx, rx) = mpsc::channel();
 
         let rtp_socket = self
@@ -59,14 +53,17 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     break;
                 }
 
-                let packet = match rx.recv() {
-                    Ok(p) => p,
+                let protected_data = match rx.recv() {
+                    Ok(p) => {
+                        p
+                    },
                     Err(e) => {
                         break;
                     }
                 };
 
-                if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, packet) {
+
+                if let Err(_) = send_packet(&rtp_socket, &report_handler, &connected, protected_data) {
                     break;
                 }
             }
@@ -90,19 +87,18 @@ fn send_packet<S: Socket + Send + Sync + 'static>(
     socket: &S,
     report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
     connected: &AtomicBool,
-    packet: RtpPacket,
+    protected_packet: Vec<u8>,
 ) -> Result<(), Error> {
     if !connected.load(Ordering::SeqCst) {
         return Err(Error::ConnectionClosed);
     }
 
-    if socket.send(&packet.to_bytes()).is_err() {
+    if socket.send(&protected_packet).is_err() {
         report_handler
             .lock()
             .map_err(|_| Error::PoisonedLock)?
             .report_goodbye()
             .map_err(|e| Error::RTCPError(e.to_string()))?;
-
         return Err(Error::SendFailed);
     }
     Ok(())

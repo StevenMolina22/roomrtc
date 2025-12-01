@@ -2,7 +2,6 @@ use crate::config::Config;
 use crate::tools::Socket;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
-use crate::transport::rtp::rtp_packet::RtpPacket;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, mpsc};
@@ -56,7 +55,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         })
     }
 
-    pub fn start(&mut self, event_tx: Sender<AppEvent>) -> Result<Receiver<RtpPacket>, Error> {
+    pub fn start(&mut self, event_tx: Sender<AppEvent>) -> Result<Receiver<Vec<u8>>, Error> {
         let (remote_to_local_rtp_tx, remote_to_local_rtp_rx) = mpsc::channel();
 
         let connected = self.connected.clone();
@@ -64,6 +63,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
             .rtp_socket
             .try_clone()
             .map_err(|_| Error::SocketCloneFailed)?;
+        
         let rtcp_handler = self.report_handler.clone();
 
         thread::spawn({
@@ -72,15 +72,16 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                     if !connected.load(Ordering::SeqCst) {
                         break;
                     }
-                    let rtp_packet = match receive(&rtp_socket, &connected, &rtcp_handler)
-                    {
-                        Ok(packet) => packet,
+                    let protected_data = match receive(&rtp_socket, &connected, &rtcp_handler) {
+                        Ok(protected_data) => {
+                            protected_data
+                        },
                         Err(_) => {
                             break;
                         }
                     };
 
-                    if let Err(e) = remote_to_local_rtp_tx.send(rtp_packet) {
+                    if let Err(e) = remote_to_local_rtp_tx.send(protected_data) {
                         break;
                     }
                 }
@@ -111,14 +112,12 @@ pub fn receive<S: Socket + Send + Sync + 'static>(
     rtp_socket: &S,
     connected: &Arc<AtomicBool>,
     report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
-) -> Result<RtpPacket, Error> {
+) -> Result<Vec<u8>, Error> {
     let mut buf = vec![0u8; 65535];
     loop {
         match rtp_socket.recv_from(&mut buf) {
             Ok((size, _addr)) => {
-                if let Some(packet) = RtpPacket::from_bytes(&buf[..size]) {
-                    return Ok(packet);
-                }
+                return Ok(buf[0..size].to_vec());
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 if !connected.load(Ordering::SeqCst) {

@@ -25,6 +25,8 @@ pub enum RtpError {
     RTCPError(String),
     /// Poisoned lock
     PoisonedLock,
+    /// SRTP Error
+    SrtpError(String),
 }
 
 impl Display for RtpError {
@@ -46,6 +48,7 @@ impl Display for RtpError {
                 write!(f, "Error: \"Failed to acquire connection status lock\"")
             }
             Self::PoisonedLock => write!(f, "Error: \"The mutex was poisoned\""),
+            Self::SrtpError(e) => write!(f, "SRTP Error: \"{e}\""),
         }
     }
 }

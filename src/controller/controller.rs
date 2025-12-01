@@ -12,7 +12,7 @@ use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock, mpsc};
@@ -47,7 +47,6 @@ impl Controller {
             config.server.server_name.clone(),
         )?;
 
-        // Le pongo src 0 pero le podriamos poner un token o algo
         let media_pipeline = MediaPipeline::new(config, 0);
         let transport = MediaTransport::new(config).map_err(|e| Error::MapError(e.to_string()))?;
         let socket_for_stun = transport.rtp_socket
@@ -85,9 +84,11 @@ impl Controller {
         };
         match send_message(msg, &mut self.client_server_stream)? {
             ServerResponse::CallAccepted { sdp_answer } => {
+                println!("proceso la answer");
                 self.call_session
                     .process_answer(&sdp_answer)
                     .map_err(|e| Error::MapError(e.to_string()))?;
+                println!("inicio la call");
                 self.join_call()
             }
             ServerResponse::CallRejected => Err(Error::CallRefused),
@@ -159,13 +160,21 @@ impl Controller {
                 .parse()
                 .map_err(Error::ParsingSocketAddressError)?;
 
-
-        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx, connected) = self
+        let remote_fingerprint = self.call_session.remote_fingerprint.clone().ok_or(Error::NotLoggedInError)?;
+        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx, connected, srtp_ctx) = self
             .transport
-            .start(remote_rtp_address, remote_rtcp_address, self.event_tx.clone())
+            .start(remote_rtp_address,
+                   remote_rtcp_address,
+                   self.event_tx.clone(),
+                   self.call_session.local_setup_role,
+                   remote_fingerprint,
+                   &self.call_session.local_cert,
+            )
             .map_err(|e| Error::MapError(e.to_string()))?;
+        
+            let role = self.call_session.local_setup_role;
         self.media_pipeline
-            .start(local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.event_tx.clone(), connected)
+            .start(local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.event_tx.clone(), connected, srtp_ctx, role)
             .map_err(|e| Error::MapError(e.to_string()))
     }
 

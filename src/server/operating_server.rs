@@ -440,7 +440,7 @@ fn validate_string(s: String) -> Result<(), ServerError> {
         return Err(ServerError::InvalidFormat)
     };
 
-    if trimmed.contains(' ') {
+    if trimmed.contains(' ') || trimmed.contains('\n') || trimmed.contains(':') || trimmed.contains('|') {
         return Err(ServerError::InvalidFormat);
     };
 

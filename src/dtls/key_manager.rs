@@ -1,6 +1,14 @@
 use openssl::{
-    asn1::Asn1Time, bn::BigNum, error::ErrorStack, hash::MessageDigest, pkcs12::Pkcs12, pkey::PKey,
-    rsa::Rsa, x509::X509NameBuilder,
+    asn1::Asn1Time,
+    bn::BigNum,
+    ec::{EcGroup, EcKey},
+    error::ErrorStack,
+    hash::MessageDigest,
+    nid::Nid,
+    pkcs12::Pkcs12,
+    pkey::PKey,
+    rsa::Rsa,
+    x509::X509NameBuilder,
 };
 use std::fmt;
 use udp_dtls::Identity;
@@ -15,7 +23,6 @@ const SUBJECT_CN: &str = "RoomRTC-Peer";
 const VALIDITY_DAYS: u32 = 365;
 /// Constant serial number assigned to the generated certificate.
 const SERIAL_NUMBER: u32 = 1;
-
 
 /// Holds the local cryptographic identity for this session.
 /// Required or the DTLS Handshake
@@ -68,47 +75,50 @@ impl From<ErrorStack> for CertError {
     }
 }
 
-/// Generate a self-signed X.509 certificate, returning the udp_dtls
-/// identity plus the SHA-256 fingerprint string needed by SDP.
+/// Generate a self-signed X.509 certificate using Elliptic Curves (ECDSA).
 pub fn generate_self_signed_cert() -> Result<LocalCert, CertError> {
-    let rsa = Rsa::generate(2048)?; // 2048-bit RSA key
-    let pkey = PKey::from_rsa(rsa)?; // Wrap in OpenSSL PKey
+    // Generate EC Key
+    // We use X9_62_PRIME256V1 (NIST P-256), the standard for WebRTC.
+    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+    let ec_key = EcKey::generate(&group)?;
+    let pkey = PKey::from_ec_key(ec_key)?;
 
+    // Build the X.509 Certificate (Logic remains mostly the same)
     let mut builder = openssl::x509::X509::builder()?;
-    builder.set_version(2)?; // X.509 v3 format (0-indexed)
+    builder.set_version(2)?;
 
-    let serial_bn = BigNum::from_u32(SERIAL_NUMBER)?; // Constant serial: 1
+    let serial_bn = BigNum::from_u32(SERIAL_NUMBER)?;
     let serial = serial_bn.to_asn1_integer()?;
     builder.set_serial_number(&serial)?;
 
     let mut name_builder = X509NameBuilder::new()?;
-    name_builder.append_entry_by_text("CN", SUBJECT_CN)?; // "RoomRTC-Peer"
+    name_builder.append_entry_by_text("CN", SUBJECT_CN)?;
     let name = name_builder.build();
 
     builder.set_subject_name(&name)?;
-    builder.set_issuer_name(&name)?; // Self-signed: issuer == subject
+    builder.set_issuer_name(&name)?;
 
-    let not_before = Asn1Time::days_from_now(0)?; // Valid immediately
+    let not_before = Asn1Time::days_from_now(0)?;
     builder.set_not_before(&not_before)?;
-    let not_after = Asn1Time::days_from_now(VALIDITY_DAYS)?; // 365 days
+    let not_after = Asn1Time::days_from_now(VALIDITY_DAYS)?;
     builder.set_not_after(&not_after)?;
 
-    builder.set_pubkey(&pkey)?; // Attach public key
-    builder.sign(&pkey, MessageDigest::sha256())?; // Self-sign with SHA-256
+    builder.set_pubkey(&pkey)?;
+    // OpenSSL automatically detects the key type (EC) and uses ECDSA-SHA256
+    builder.sign(&pkey, MessageDigest::sha256())?;
 
-    let cert = builder.build(); // Finalize certificate
+    let cert = builder.build();
     let digest = cert.digest(MessageDigest::sha256())?;
     let fingerprint = fingerprint_from_digest(digest.as_ref());
 
-    // Package into PKCS#12 (.p12) archive with password
+    // 3. Package into PKCS#12
     let pkcs12 = Pkcs12::builder()
-        .name(FRIENDLY_NAME) // "room-rtc-identity"
+        .name(FRIENDLY_NAME)
         .pkey(&pkey)
         .cert(&cert)
-        .build2(PKCS12_PASSWORD)?; // Uses constant password
+        .build2(PKCS12_PASSWORD)?;
     let pkcs12_der = pkcs12.to_der()?;
 
-    // Convert to DTLS identity used by udp_dtls crate
     let identity = Identity::from_pkcs12(&pkcs12_der, PKCS12_PASSWORD)
         .map_err(|e| CertError::Identity(format!("DTLS identity creation failed: {e}")))?;
 

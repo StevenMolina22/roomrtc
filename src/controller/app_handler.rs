@@ -182,14 +182,14 @@ impl Controller {
 
         let stream = match role {
             DtlsSetupRole::Active => {
-                // 1. Prepare Identity
+                // Prepare Identity
                 let identity = self
                     .client
                     .local_cert
                     .duplicate_identity()
                     .map_err(|e| Error::MapError(e.to_string()))?;
 
-                // 2. Use the crate's builder with Method Chaining
+                // Use the crate's builder with Method Chaining
                 let connector = DtlsConnector::builder()
                     .identity(identity)
                     .danger_accept_invalid_certs(true)
@@ -197,7 +197,7 @@ impl Controller {
                     .build()
                     .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
 
-                // 3. Connect
+                // Connect
                 connector
                     .connect("roomrtc.local", channel)
                     .map_err(|e| Error::ConnectionSocketError(format!("{e:?}")))?

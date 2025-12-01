@@ -15,20 +15,23 @@ A continuacion se detallan los pasos para compilar y ejecutar el programa.
 ### Compilación
 
 ```bash
-  cargo build --release
+  cargo build
 ```
 
-### Como correr
+## Como correr
 
+### Servidor
 ```bash
-  ./target/release/room-rtc /path/to/file.conf
+  cargo run --bin server /path/to/file.conf
 ```
+### Imprime por salida estandar una address
 
-O, alternativamente con cargo run:
-
+### Cliente
 ```bash
-  cargo run /path/to/file.conf
+  cargo run --bin client /path/to/file.conf address
 ```
+
+### IMPORTANTE CORRER EN EL ORDEN DADO
 
 ## Como testear
 

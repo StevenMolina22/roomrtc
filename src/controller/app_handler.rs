@@ -11,7 +11,7 @@ use crate::sdp::{DtlsSetupRole, Fingerprint};
 use crate::srtp::SrtpContext;
 use chrono::prelude::*;
 use openssl::pkcs12::Pkcs12;
-use openssl::ssl::{SslAcceptor, SslMethod, SslVerifyMode};
+use openssl::ssl::{SslAcceptor, SslConnector, SslMethod, SslVerifyMode};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
@@ -167,6 +167,7 @@ impl Controller {
             .as_ref()
             .ok_or_else(|| Error::MapError("Remote fingerprint missing".to_string()))?;
 
+        // Normalize roles
         let mut role = self.client.local_setup_role;
         if matches!(role, DtlsSetupRole::ActPass) {
             role = DtlsSetupRole::Active;
@@ -178,27 +179,30 @@ impl Controller {
             socket,
             remote_addr,
         };
+
         let stream = match role {
             DtlsSetupRole::Active => {
-                let mut builder = DtlsConnector::builder();
+                // 1. Prepare Identity
                 let identity = self
                     .client
                     .local_cert
                     .duplicate_identity()
                     .map_err(|e| Error::MapError(e.to_string()))?;
-                builder.identity(identity);
-                // ignore standard CA validation (use fingerprint certification instead)
-                builder.danger_accept_invalid_certs(true);
-                builder.danger_accept_invalid_hostnames(true);
-                builder.use_sni(false);
-                builder
+
+                // 2. Use the crate's builder with Method Chaining
+                let connector = DtlsConnector::builder()
+                    .identity(identity)
+                    .danger_accept_invalid_certs(true)
+                    .danger_accept_invalid_hostnames(true)
                     .build()
-                    .map_err(|e| Error::ConnectionSocketError(e.to_string()))?
+                    .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
+
+                // 3. Connect
+                connector
                     .connect("roomrtc.local", channel)
                     .map_err(|e| Error::ConnectionSocketError(format!("{e:?}")))?
             }
             DtlsSetupRole::Passive => {
-                // Configure SslAcceptor manually to enable mTLS (client auth)
                 let pkcs12 = Pkcs12::from_der(&self.client.local_cert.pkcs12_der)
                     .map_err(|e| Error::MapError(e.to_string()))?
                     .parse(PKCS12_PASSWORD)
@@ -206,6 +210,7 @@ impl Controller {
 
                 let mut acceptor_builder = SslAcceptor::mozilla_intermediate(SslMethod::dtls())
                     .map_err(|e| Error::MapError(e.to_string()))?;
+
                 acceptor_builder
                     .set_private_key(&pkcs12.pkey)
                     .map_err(|e| Error::MapError(e.to_string()))?;
@@ -216,15 +221,13 @@ impl Controller {
                     .check_private_key()
                     .map_err(|e| Error::MapError(e.to_string()))?;
 
-                // Use callback to ignore CA validation but require certificate
                 acceptor_builder.set_verify_callback(
                     SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT,
-                    |_, _| true, // Always return true. We verify the fingerprint manually later.
+                    |_, _| true,
                 );
 
                 let ssl_acceptor = acceptor_builder.build();
-
-                // Wrap in DtlsAcceptor (assuming it's a tuple struct based on compiler hint)
+                // Wrap manual acceptor in DtlsAcceptor tuple struct
                 let acceptor = DtlsAcceptor(ssl_acceptor);
 
                 acceptor
@@ -234,7 +237,9 @@ impl Controller {
             _ => unreachable!("DTLS role should be normalized before handshake"),
         };
 
+        // Final security check: Verify the certificate matches the signaled fingerprint
         self.verify_peer_fingerprint(&stream, expected_fingerprint)?;
+
         Ok(DtlsSocket::new(stream, remote_addr))
     }
 

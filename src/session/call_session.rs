@@ -3,6 +3,7 @@ use crate::session::error::CallSessionError as Error;
 use crate::session::ice::{CandidatePair, IceAgent};
 use crate::session::sdp::{Attribute, MediaDescription, SessionDescriptionProtocol};
 use std::collections::HashSet;
+use std::net::UdpSocket;
 use std::sync::Arc;
 
 /// High-level session that exposes SDP and ICE operations used by the UI
@@ -44,17 +45,17 @@ impl CallSession {
     /// # Returns
     /// Returns a `CallSession` containing the local SDP and an `IceAgent`
     /// already configured with (potentially) gathered candidates.
-    pub fn new(media_port: u16, config: &Arc<Config>) -> Result<Self, Error> {
+    pub fn new(stun_socket: UdpSocket, config: &Arc<Config>) -> Result<Self, Error> {
         let mut ice_agent = IceAgent::new();
         ice_agent
-            .gather_candidates(media_port, &config.ice)
+            .gather_candidates(&stun_socket, &config.ice)
             .map_err(|e| {
                 Error::IceConnectionError(format!("Failed to gather ICE candidates: {e}"))
             })?;
 
         let mut media_description = MediaDescription::new(
             config.media.media_type.clone(),
-            media_port,
+            stun_socket.local_addr().map_err(|e| Error::IceConnectionError(e.to_string()))?.port(),
             config.media.media_protocol.clone(),
             HashSet::from([config.media.rtp_payload_type]),
         );

@@ -15,6 +15,8 @@ pub enum View {
     LogIn,
 
     CallHub,
+    
+    PreCall(String),
 
     Calling(String),
 

@@ -108,7 +108,8 @@ impl eframe::App for RoomRTCApp {
                 View::Welcome => self.show_welcome(ui),
                 View::SignUp => self.show_sign_up(ui),
                 View::LogIn => self.show_log_in(ui),
-                View::Calling(peer_username) => self.show_calling(peer_username.clone(), ctx, ui),
+                View::Calling(peer_username) => self.show_calling(peer_username.clone(), ui),
+                View::PreCall(peer_username) => self.show_pre_call(peer_username.clone()),
                 View::CallIncoming(peer_username, sdp_offer) => {
                     self.show_call_incoming(peer_username.clone(), sdp_offer.clone(), ui);
                 }
@@ -265,7 +266,7 @@ impl RoomRTCApp {
         });
     }
 
-    fn show_calling(&mut self, peer_username: String, ctx: &Context, ui: &mut Ui) {
+    fn show_calling(&mut self, peer_username: String, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
             ui.heading(format!("Calling {}", peer_username));
             ui.separator();
@@ -273,6 +274,10 @@ impl RoomRTCApp {
             ui.separator();
         });
 
+        self.view = View::PreCall(peer_username);
+    }
+
+    fn show_pre_call(&mut self, peer_username: String) {
         match self.controller.call(&peer_username) {
             Ok((local_frame_rx, remote_frame_rx)) => {
                 match self.controller.get_username() {

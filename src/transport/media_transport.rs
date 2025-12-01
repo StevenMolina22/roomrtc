@@ -12,7 +12,7 @@ pub struct MediaTransport {
     config: Arc<Config>,
 
     pub rtp_address: SocketAddr,
-    rtp_socket: UdpSocket,
+    pub rtp_socket: UdpSocket,
 
     rtcp_socket: UdpSocket,
     rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<UdpSocket>>>>,

@@ -50,7 +50,10 @@ impl Controller {
         // Le pongo src 0 pero le podriamos poner un token o algo
         let media_pipeline = MediaPipeline::new(config, 0);
         let transport = MediaTransport::new(config).map_err(|e| Error::MapError(e.to_string()))?;
-        let call_session = CallSession::new(transport.rtp_address.port(), config)
+        let socket_for_stun = transport.rtp_socket
+            .try_clone()
+            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
+        let call_session = CallSession::new(socket_for_stun, config)
             .map_err(|e| Error::MapError(e.to_string()))?;
 
         Ok(Self {
@@ -105,7 +108,10 @@ impl Controller {
         self.stop_media_components()?;
 
         self.transport = MediaTransport::new(&self.config).map_err(|e| Error::MapError(e.to_string()))?;
-        self.call_session = CallSession::new(self.transport.rtp_address.port(), &self.config).map_err(|e| Error::MapError(e.to_string()))?;
+        let socket_for_stun = self.transport.rtp_socket
+            .try_clone()
+            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
+        self.call_session = CallSession::new(socket_for_stun, &self.config).map_err(|e| Error::MapError(e.to_string()))?;
 
         Ok(())
     }

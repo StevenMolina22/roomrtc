@@ -4,6 +4,7 @@ use super::connectivity_state::ConnectivityState;
 use super::error::IceError as Error;
 use crate::config::IceConfig;
 use if_addrs;
+use crate::session::ice::stun_client;
 
 /// An ICE agent that gathers local candidates, accepts remote candidates
 /// and forms candidate pairs for connectivity checks.
@@ -42,17 +43,58 @@ impl IceAgent {
     /// Gather local candidates and add them to the agent.
     ///
     /// This implementation performs a minimal gather: it selects a single
-    /// non-loopback IPv4 address from the host and creates a host
-    /// candidate.
-    pub fn gather_candidates(&mut self, port: u16, ice_config: &IceConfig) -> Result<(), Error> {
-        let local_ip = get_local_ip()?;
-        let mut candidate = Candidate::new_host(local_ip, ice_config.component_id, ice_config);
-        candidate.port = port;
-        self.local_candidates.push(candidate);
-
-        // In a real ICE implementation, here would be STUN/TURN interaction (final delivery)
-        Ok(())
+    /// non-loopback IPv4 address from the host and creates a host candidate.
+    /// Additionally, it attempts STUN discovery using the provided `socket`.
+    /// On successful STUN response a server-reflexive (srflx) candidate will
+    /// be created and added to the agent's local candidates.
+    ///
+    /// # Arguments
+    ///
+    /// - `socket`: a bound UDP socket that will be used for STUN discovery and
+    ///   from which the local host candidate's port is taken.
+    /// - `ice_config`: configuration used to build candidates (priorities,
+    ///   foundation, transport, component id, etc.).
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` on success (local candidates added, STUN may succeed or fail
+    ///   silently).
+    /// - `Err(Error)` if a fatal error occurred (e.g., network interface
+    ///   enumeration failure). STUN discovery failures are logged
+    pub fn gather_candidates(&mut self, socket: &std::net::UdpSocket, ice_config: &IceConfig) -> Result<(), Error> {
+    if let Ok(local_ip) = get_local_ip() {
+        let port = socket.local_addr().map(|a| a.port()).unwrap_or(0);
+        let mut host = Candidate::new_host(local_ip, ice_config.component_id, ice_config);
+        host.port = port;
+        self.local_candidates.push(host);
     }
+
+    println!("[ICE] STUN: Starting discovery on existing socket...");
+
+    match stun_client::get_public_ip_and_port(socket) {
+        Ok(addr) => {
+            if let Some((ip, port_str)) = addr.split_once(':')
+                && let Ok(stun_port) = port_str.parse::<u16>() {
+                    println!("[ICE] STUN OK: {}:{}", ip, stun_port);
+
+                    let srflx = Candidate::new(
+                        crate::session::ice::candidate_type::CandidateType::ServerReflexive,
+                        ice_config.srflx_priority_preference * 1000,
+                        ip.to_string(),
+                        stun_port,
+                        ice_config.component_id,
+                        ice_config.foundation.clone(),
+                        ice_config.transport.clone(),
+                    );
+                    self.local_candidates.push(srflx);
+                }
+
+        },
+        Err(e) => println!("[ICE] STUN failed: {}", e),
+    }
+
+    Ok(())
+}
 
     /// Add a single remote candidate and create candidate pairs.
     ///
@@ -75,6 +117,10 @@ impl IceAgent {
     ///
     /// Validates that both local and remote candidate lists are non-empty
     /// and constructs `CandidatePair` instances for every combination.
+    ///
+    /// Note: server-reflexive (srflx) candidates discovered via STUN are
+    /// skipped when forming Host-Host pairs in this implementation.
+
     fn create_candidate_pair(&mut self) -> Result<(), Error> {
         if self.local_candidates.is_empty() {
             return Err(Error::NoLocalCandidates);
@@ -86,10 +132,28 @@ impl IceAgent {
 
         for local in &self.local_candidates {
             for remote in &self.remote_candidates {
+                let is_local_stun = local.candidate_type == crate::session::ice::candidate_type::CandidateType::ServerReflexive;
+                let is_remote_stun = remote.candidate_type == crate::session::ice::candidate_type::CandidateType::ServerReflexive;
+
+                if is_local_stun || is_remote_stun {
+                    println!(
+                        "[ICE] Skipping STUN pair: {} <-> {}",
+                        local.address, remote.address
+                    );
+                    continue;
+                }
+                // -------------------------------------------------------------
+
                 let pair = CandidatePair::new(local.clone(), remote.clone());
                 self.candidate_pairs.push(pair);
             }
         }
+
+        if self.candidate_pairs.is_empty() {
+            println!("[ICE] Error: No viable Host-Host pairs (are hosts on different networks?)");
+            return Err(Error::NoCandidatePairs);
+        }
+
         Ok(())
     }
 
@@ -133,6 +197,10 @@ impl IceAgent {
         self.local_candidates.first()
     }
 
+    pub fn get_local_candidates(&self) -> &[Candidate] {
+        &self.local_candidates
+    }
+
     /// Return the selected candidate pair or an error if none was selected.
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
@@ -160,6 +228,7 @@ fn get_local_ip() -> Result<String, Error> {
             return Ok(ipv4.to_string());
         }
     }
+
     Err(Error::NoNetworkInterfaceFound)
 }
 
@@ -168,6 +237,7 @@ mod tests {
     use super::*;
     use crate::session::ice::candidate::Candidate;
     use crate::session::ice::candidate_type::CandidateType;
+    use std::net::UdpSocket;
 
     fn make_ice_config() -> IceConfig {
         IceConfig {
@@ -206,7 +276,11 @@ mod tests {
     fn test_gather_candidates_adds_local_candidate() {
         let mut agent = IceAgent::new();
 
-        let result = agent.gather_candidates(3478, &make_ice_config());
+        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind test socket");
+        let assigned_port = socket.local_addr().unwrap().port();
+
+        let result = agent.gather_candidates(&socket, &make_ice_config());
+
         if matches!(
             result,
             Err(Error::NetworkInterfaceError | Error::NoNetworkInterfaceFound)
@@ -216,18 +290,21 @@ mod tests {
         }
         assert!(result.is_ok());
 
-        assert_eq!(agent.local_candidates.len(), 1);
-        assert_eq!(agent.local_candidates[0].port, 3478);
-        assert_eq!(
-            agent.local_candidates[0].candidate_type,
-            CandidateType::Host
-        );
+        assert!(!agent.local_candidates.is_empty());
+
+        let host_candidate = agent.local_candidates.iter()
+            .find(|c| c.candidate_type == CandidateType::Host)
+            .expect("Host candidate missing");
+
+        assert_eq!(host_candidate.port, assigned_port);
     }
 
     #[test]
     fn test_add_remote_candidate_creates_pairs() -> Result<(), Error> {
         let mut agent = IceAgent::new();
-        agent.gather_candidates(4000, &make_ice_config())?;
+
+        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind test socket");
+        agent.gather_candidates(&socket, &make_ice_config())?;
 
         let remote = sample_remote_candidate();
 
@@ -235,7 +312,8 @@ mod tests {
         assert!(result.is_ok());
 
         assert_eq!(agent.remote_candidates.len(), 1);
-        assert_eq!(agent.candidate_pairs.len(), 1);
+
+        assert!(!agent.candidate_pairs.is_empty());
 
         let pair = &agent.candidate_pairs[0];
         assert_eq!(pair.local.address, agent.local_candidates[0].address);
@@ -246,7 +324,9 @@ mod tests {
     #[test]
     fn test_start_connectivity_checks_selects_pair() -> Result<(), Error> {
         let mut agent = IceAgent::new();
-        agent.gather_candidates(5000, &make_ice_config())?;
+
+        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind test socket");
+        agent.gather_candidates(&socket, &make_ice_config())?;
 
         let remote = sample_remote_candidate();
         agent.add_remote_candidate(remote)?;

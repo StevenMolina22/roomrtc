@@ -1,6 +1,7 @@
 use crate::{
     config::{IceConfig, MediaConfig, SdpConfig},
     ice::IceAgent,
+    sdp::{Attribute, MediaDescription, SessionDescriptionProtocol},
 };
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -48,25 +49,25 @@ impl Session {
     /// Returns a `Session` containing the local SDP and an `IceAgent`
     /// already configured with (potentially) gathered candidates.
     pub fn new(
-        media_port: u16,
+        socket: std::net::UdpSocket,
         media_config: &MediaConfig,
         ice_config: &IceConfig,
         sdp_config: &SdpConfig,
     ) -> Result<Self, Error> {
         let mut ice_agent = IceAgent::new();
         ice_agent
-            .gather_candidates(media_port, ice_config)
+            .gather_candidates(&socket, ice_config)
             .map_err(|e| {
                 Error::IceConnectionError(format!("Failed to gather ICE candidates: {e}"))
             })?;
 
         let mut media_description = MediaDescription::new(
             media_config.media_type.clone(),
-            media_port,
+            socket.local_addr().map_err(|e| ClientError::IceConnectionError(format!("Failed to get local socket address: {e}")))?.port(),
             media_config.media_protocol.clone(),
             HashSet::from([media_config.rtp_payload_type]),
         );
-        
+
         media_description
             .add_attribute(Attribute::RTPMap(
                 media_config.rtp_payload_type,
@@ -78,7 +79,7 @@ impl Session {
                 Error::SdpCreationError(format!("Failed to add RTPMap attribute: {e}"))
             })?;
 
-        if let Some(candidate) = ice_agent.get_local_candidate() {
+        for candidate in ice_agent.get_local_candidates() {
             media_description
                 .add_attribute(Attribute::Candidate(candidate.clone()))
                 .map_err(|e| {
@@ -149,5 +150,51 @@ impl Session {
         self.ice_agent
             .start_connectivity_checks()
             .map_err(|e| Error::IceConnectionError(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::config::{MediaConfig, IceConfig, SdpConfig};
+    use std::net::UdpSocket;
+
+    fn get_configs() -> (MediaConfig, IceConfig, SdpConfig) {
+        let media = MediaConfig {
+            camera_index: 0, frame_width: 640.0, frame_height: 480.0, frame_rate: 30,
+            h264_idr_interval: 30, rtp_max_chunk_size: 1200, default_ssrc: 1234,
+            rtp_payload_type: 96, codec_name: "H264".into(), clock_rate: 90000,
+            rtp_version: 2, media_type: "video".into(), media_protocol: "RTP/AVP".into()
+        };
+        let ice = IceConfig {
+            foundation: "1".into(), transport: "UDP".into(), component_id: 1,
+            host_priority_preference: 126, srflx_priority_preference: 100, host_local_preference: 65535
+        };
+        let sdp = SdpConfig {
+            version: 0, origin_id: 123, session_name: "Test".into(), timing: "0 0".into(),
+            connection_data_net_type: "IN".into(), connection_data_addr_type: "IP4".into(), connection_data_address: "0.0.0.0".into()
+        };
+        (media, ice, sdp)
+    }
+
+    #[test]
+    fn test_full_negotiation_cycle() {
+        let (media, ice, sdp_conf) = get_configs();
+
+        let socket_alice = UdpSocket::bind("0.0.0.0:0").unwrap();
+        let socket_bob = UdpSocket::bind("0.0.0.0:0").unwrap();
+
+        let mut alice = Client::new(socket_alice, &media, &ice, &sdp_conf).unwrap();
+        let mut bob = Client::new(socket_bob, &media, &ice, &sdp_conf).unwrap();
+
+        let offer = alice.get_offer();
+        assert!(!offer.is_empty(), "La oferta no debería estar vacía");
+        assert!(offer.contains("a=candidate"), "La oferta debe tener candidatos ICE");
+
+        let answer = bob.process_offer(&offer).expect("Bob falló al procesar la oferta");
+        assert!(!answer.is_empty(), "La respuesta no debería estar vacía");
+
+        let result = alice.process_answer(&answer);
+        assert!(result.is_ok(), "Alice debería aceptar la respuesta de Bob");
     }
 }

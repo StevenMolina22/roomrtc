@@ -41,8 +41,6 @@ pub struct Controller {
     //Sockets
     rtp_udp_socket: UdpSocket,
     rtcp_udp_socket: UdpSocket,
-    rtp_socket: Option<DtlsSocket>,
-    rtcp_socket: Option<DtlsSocket>,
     srtp_context: Option<Arc<Mutex<SrtpContext>>>,
 }
 
@@ -82,8 +80,6 @@ impl Controller {
             rtcp_handler: None,
             rtp_udp_socket: rtp_socket,
             rtcp_udp_socket: rtcp_socket,
-            rtp_socket: None,
-            rtcp_socket: None,
             config,
             srtp_context: None,
         })
@@ -159,8 +155,6 @@ impl Controller {
             .map_err(|e| Error::MapError(e.to_string()))?;
 
         self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
-        self.rtp_socket = Some(rtp_dtls);
-        self.rtcp_socket = Some(rtcp_dtls);
         Ok(())
     }
 

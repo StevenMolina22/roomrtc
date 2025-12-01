@@ -12,7 +12,7 @@ use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock, mpsc};
@@ -244,22 +244,26 @@ impl Controller {
             let mut buff = [0u8; 65535];
             loop {
                 if !logged_in.load(Ordering::SeqCst) {
+                    println!("log out");
                     break;
                 }
 
                 let server_msg = match stream.read(&mut buff) {
+                    Ok(0) => {
+                        break;
+                    }
                     Ok(size) => match ServerMessage::from_bytes(&buff[..size]) {
-                        Some(server_msg) => {
-                            server_msg
-                        },
+                        Some(server_msg) => server_msg,
                         None => continue,
                     },
                     Err(e) => {
-                        send_event_or_log_out(
-                            &event_tx,
-                            AppEvent::Error(e.to_string()),
-                            &logged_in,
-                        );
+                        if logged_in.load(Ordering::SeqCst) {
+                            send_event_or_log_out(
+                                &event_tx,
+                                AppEvent::Error(e.to_string()),
+                                &logged_in,
+                            );
+                        }
                         break;
                     }
                 };

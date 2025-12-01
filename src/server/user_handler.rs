@@ -70,11 +70,13 @@ impl UserHandler {
             }
             let client_event = match stream.read(&mut buff) {
                 Ok(0) => {
+                    self.logger.info("Client disconnected (EOF)");
                     self.op_server.make_user_offline()?;
                     return Ok(());
                 }
                 Ok(n) => ClientMessage::from_bytes(&buff[0..n]),
                 Err(e) => {
+                    self.logger.error(&format!("Connection error: {}", e));
                     self.op_server.make_user_offline()?;
                     return Err(Error::ConnectionError(e.to_string()));
                 }

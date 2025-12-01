@@ -9,6 +9,8 @@ use crate::dtls::key_manager::{LocalCert, generate_self_signed_cert};
 use crate::session::sdp::{Fingerprint, DtlsSetupRole};
 
 
+use crate::logger::Logger;
+
 /// High-level session that exposes SDP and ICE operations used by the UI
 /// and signaling code.
 ///
@@ -34,6 +36,8 @@ pub struct CallSession {
 
     /// Local DTLS setup role negotiated from signaling.
     pub local_setup_role: DtlsSetupRole,
+
+    logger: Logger,
 }
 
 #[derive(Clone, Copy)]
@@ -66,8 +70,8 @@ impl CallSession {
     /// # Returns
     /// Returns a `CallSession` containing the local SDP and an `IceAgent`
     /// already configured with (potentially) gathered candidates.
-    pub fn new(stun_socket: UdpSocket, config: &Arc<Config>) -> Result<Self, Error> {
-        let mut ice_agent = IceAgent::new();
+    pub fn new(stun_socket: UdpSocket, config: &Arc<Config>, logger: Logger) -> Result<Self, Error> {
+        let mut ice_agent = IceAgent::new(logger.context("IceAgent"));
         ice_agent
             .gather_candidates(&stun_socket, &config.ice)
             .map_err(|e| {
@@ -129,6 +133,7 @@ impl CallSession {
             remote_fingerprint: None,
             remote_setup_role: None,
             local_setup_role,
+            logger,
         })
     }
 

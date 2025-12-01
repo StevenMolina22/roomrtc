@@ -86,4 +86,13 @@ impl Socket for DtlsSocket {
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "DTLS stream poisoned"))?;
         guard.get_ref().socket.set_read_timeout(dur)
     }
+
+    /// Returns a new handle pointing to the same DTLS stream.
+    /// The underlying DTLS session is shared via `Arc<Mutex<...>>`.
+    fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            stream: Arc::clone(&self.stream),
+            remote_addr: self.remote_addr,
+        })
+    }
 }

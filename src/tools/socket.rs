@@ -20,6 +20,10 @@ pub trait Socket {
     /// Passing `None` clears the timeout. Returns an `std::io::Error` on
     /// failure.
     fn set_read_timeout(&self, dur: Option<Duration>) -> Result<(), std::io::Error>;
+
+    fn try_clone(&self) -> Result<Self, std::io::Error>
+    where
+        Self: Sized;
 }
 
 /// Provide the `Socket` trait for the standard library `UdpSocket` so
@@ -36,5 +40,9 @@ impl Socket for UdpSocket {
 
     fn set_read_timeout(&self, dur: Option<Duration>) -> Result<(), std::io::Error> {
         Self::set_read_timeout(self, dur)
+    }
+
+    fn try_clone(&self) -> Result<Self, std::io::Error> {
+        Self::try_clone(self)
     }
 }

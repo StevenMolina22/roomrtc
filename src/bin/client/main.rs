@@ -1,4 +1,5 @@
 use room_rtc::config::Config;
+use room_rtc::logger::Logger;
 use room_rtc::ui::interface::RoomRTCApp;
 use std::env;
 use std::net::SocketAddr;
@@ -30,10 +31,22 @@ fn main() -> Result<(), eframe::Error> {
         }
     };
 
+    let log_path = "room_rtc.log";
+    let logger = match Logger::new(log_path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Failed to initialize logger: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    logger.info("Application starting...");
+
     let options = eframe::NativeOptions::default();
+    // TODO! Pass the logger into the app
     eframe::run_native(
         "RoomRTC App",
         options,
-        Box::new(|_cc| Ok(Box::new(RoomRTCApp::new(config, server_addr)))),
+        Box::new(|_cc| Ok(Box::new(RoomRTCApp::new(config, server_addr, logger)))),
     )
 }

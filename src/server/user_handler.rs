@@ -1,6 +1,7 @@
 use super::{ServerError as Error, operating_server::OperatingServer};
 use crate::client_server_protocol::{ClientMessage, ServerResponse};
 use crate::config::Config;
+use crate::logger::Logger;
 use crate::user::UserData;
 use rustls::{ServerConnection, StreamOwned};
 use std::collections::HashMap;
@@ -11,6 +12,7 @@ use std::sync::{Arc, RwLock};
 
 pub struct UserHandler {
     op_server: OperatingServer,
+    logger: Logger,
 }
 /// Handles the lifecycle of a connected client.
 ///
@@ -33,12 +35,17 @@ impl UserHandler {
         server_client_socket_addr: SocketAddr,
         max_users: usize,
     ) -> Self {
+   
         Self {
-            op_server: OperatingServer::new(users, 
-                                            users_connected, 
-                                            server_client_socket_addr, 
-                                            config.server.users_file.clone(),
-                                            max_users),
+            op_server: OperatingServer::new(
+                users,
+                users_connected,
+                server_client_socket_addr,
+                config.server.users_file.clone(),
+                max_users
+                logger.context("OperatingServer"),
+            ),
+            logger,
         }
     }
     /// Handles the lifecycle of a connected client.
@@ -65,22 +72,23 @@ impl UserHandler {
             }
             let client_event = match stream.read(&mut buff) {
                 Ok(0) => {
+                    self.logger.info("Client disconnected (EOF)");
                     self.op_server.make_user_offline()?;
-                    return Ok(()) },
+                    return Ok(());
+                }
                 Ok(n) => ClientMessage::from_bytes(&buff[0..n]),
                 Err(e) => {
+                    self.logger.error(&format!("Connection error: {}", e));
                     self.op_server.make_user_offline()?;
-                    return Err(Error::ConnectionError(e.to_string()))
-                },
+                    return Err(Error::ConnectionError(e.to_string()));
+                }
             };
-            
+
             let sv_response = match client_event {
-                Some(event) => {
-                    self.handle_client_message(event)
-                },
-                None => ServerResponse::BadMessage
+                Some(event) => self.handle_client_message(event),
+                None => ServerResponse::BadMessage,
             };
-            
+
             send_response(&mut stream, sv_response);
         }
     }
@@ -106,21 +114,15 @@ impl UserHandler {
                 self.op_server.signup_user(username, password)
             }
 
-            ClientMessage::LogOut { token } => {
-                self.op_server.logout_user(token)
-            },
+            ClientMessage::LogOut { token } => self.op_server.logout_user(token),
 
             ClientMessage::CallRequest {
                 token,
                 offer_sdp,
                 to,
-            } => {
-                self.op_server.call_request(token, to, offer_sdp)
-            },
+            } => self.op_server.call_request(token, to, offer_sdp),
 
-            ClientMessage::CallHangup { token } => {
-                self.op_server.call_hangup(token)
-            },
+            ClientMessage::CallHangup { token } => self.op_server.call_hangup(token),
         }
     }
 }

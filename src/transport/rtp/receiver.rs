@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 use crate::controller::AppEvent;
+use crate::logger::Logger;
 
 /// RTP receiver that reads `RtpPacket` instances from a socket and
 /// manages RTCP reporting through a `RtcpReportHandler`.
@@ -20,6 +21,7 @@ pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     connected: Arc<AtomicBool>,
+    logger: Logger,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
@@ -42,6 +44,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         rtp_socket: S,
         report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
         connected: &Arc<AtomicBool>,
+        logger: Logger,
     ) -> Result<Self, Error> {
         rtp_socket
             .set_read_timeout(Some(Duration::from_millis(config.rtp.read_timeout_millis)))
@@ -52,6 +55,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
             rtp_socket,
             report_handler: Arc::clone(report_handler),
             connected: Arc::clone(connected),
+            logger,
         })
     }
 
@@ -63,8 +67,9 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
             .rtp_socket
             .try_clone()
             .map_err(|_| Error::SocketCloneFailed)?;
-        
+
         let rtcp_handler = self.report_handler.clone();
+        let logger = self.logger.clone();
 
         thread::spawn({
             move || {
@@ -76,12 +81,14 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                         Ok(protected_data) => {
                             protected_data
                         },
-                        Err(_) => {
+                        Err(e) => {
+                            logger.error(&format!("RtpReceiver error: {}", e));
                             break;
                         }
                     };
 
                     if let Err(e) = remote_to_local_rtp_tx.send(protected_data) {
+                        logger.error(&format!("Failed to send received packet to channel: {}", e));
                         break;
                     }
                 }
@@ -90,6 +97,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                     connected.store(false, Ordering::SeqCst);
                     event_tx.send(AppEvent::CallEnded);
                 }
+                logger.info("RtpReceiver thread terminated");
             }
         });
 

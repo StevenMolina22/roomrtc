@@ -7,6 +7,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use crate::controller::AppEvent;
+use crate::logger::Logger;
 
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
 ///
@@ -17,6 +18,7 @@ pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     connected: Arc<AtomicBool>,
+    logger: Logger,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
@@ -29,11 +31,13 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         rtp_socket: S,
         report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
         connected: &Arc<AtomicBool>,
+        logger: Logger,
     ) -> Result<Self, Error> {
         Ok(Self {
             rtp_socket,
             report_handler: Arc::clone(report_handler),
             connected: Arc::clone(connected),
+            logger,
         })
     }
 
@@ -46,6 +50,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
             .map_err(|_| Error::SocketCloneFailed)?;
         let report_handler = Arc::clone(&self.report_handler);
         let connected = Arc::clone(&self.connected);
+        let logger = self.logger.clone();
 
         thread::spawn(move || {
             loop {
@@ -63,15 +68,17 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                 };
 
 
-                if let Err(_) = send_packet(&rtp_socket, &report_handler, &connected, protected_data) {
+                if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, protected_data) {
+                    logger.error(&format!("RtpSender error: {}", e));
                     break;
                 }
             }
-            
+
             if connected.load(Ordering::SeqCst) {
                 connected.store(false, Ordering::SeqCst);
                 event_tx.send(AppEvent::CallEnded);
             }
+            logger.info("RtpSender thread terminated");
         });
 
         Ok(tx)

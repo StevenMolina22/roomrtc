@@ -61,6 +61,7 @@ impl ServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SdpConfig;
 
     // Helper: crea un ServerMessage -> bytes -> ServerMessage nuevamente
     fn roundtrip(msg: ServerMessage) -> ServerMessage {

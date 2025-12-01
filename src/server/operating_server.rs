@@ -6,7 +6,7 @@ use rustls::{ServerConnection, StreamOwned};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -122,6 +122,20 @@ impl OperatingServer {
             let mut users = self.users.write().unwrap();
             if let Some(user_data) = users.get_mut(&username) {
                 user_data.update_status(UserStatus::Offline);
+                let stream = match user_data.server_client_stream {
+                    Some(ref stream) => stream,
+                    None => return ServerResponse::Error("User not found".to_string()),
+                };
+
+                let mut stream = match stream.lock() {
+                    Ok(stream) => stream,
+                    Err(e) => return ServerResponse::Error(e.to_string()),
+                };
+
+                stream.conn.send_close_notify();
+                stream.flush();
+                stream.sock.shutdown(Shutdown::Both);
+
                 self.users_connected
                     .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
                         if v == 0 { Some(0) } else { Some(v - 1) }

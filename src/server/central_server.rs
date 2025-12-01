@@ -2,6 +2,7 @@ use super::UserHandler;
 use super::error::ServerError as Error;
 use crate::client_server_protocol::{ClientResponse, ServerMessage};
 use crate::config::Config;
+use crate::logger::Logger;
 use crate::user::{UserData, UserStatus};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
@@ -23,6 +24,8 @@ pub struct CentralServer {
     users_connected: Arc<AtomicUsize>,
     on: Arc<AtomicBool>,
     server_client_socket_addr: SocketAddr,
+
+    logger: Logger,
 }
 
 impl CentralServer {
@@ -30,7 +33,7 @@ impl CentralServer {
     ///
     /// # Errors
     /// Returns an error if the user file cannot be opened or parsed.
-    pub fn new(config: Arc<Config>) -> Result<Self, Error> {
+    pub fn new(config: Arc<Config>, logger: Logger) -> Result<Self, Error> {
         let (certs, key) = generate_certs_and_key(config.clone())?;
         let users = load_users_from_mem(&config.server.users_file)?;
 
@@ -60,6 +63,7 @@ impl CentralServer {
             users_connected: Arc::new(AtomicUsize::new(0)),
             on: Arc::new(AtomicBool::new(false)),
             server_client_socket_addr,
+            logger,
         })
     }
 
@@ -104,8 +108,12 @@ impl CentralServer {
         let on = self.on.clone();
         let server_client_socket_addr = self.server_client_socket_addr;
 
+        let logger = self.logger.clone();
+
         thread::spawn(move || {
-            let cs_listener = if let Ok(l) = TcpListener::bind(&config.server.client_server_addr) { l } else {
+            let cs_listener = if let Ok(l) = TcpListener::bind(&config.server.client_server_addr) {
+                l
+            } else {
                 on.store(false, Ordering::SeqCst);
                 return;
             };
@@ -127,14 +135,20 @@ impl CentralServer {
                 let on = on.clone();
                 let server_client_socket_addr = server_client_socket_addr;
 
+                let thread_logger = logger.context("UserHandler");
+
                 thread::spawn(move || {
                     let tls_conn = ServerConnection::new(tls_config).unwrap();
                     let tls_stream = StreamOwned::new(tls_conn, stream);
 
-                    let mut user_handler =
-                        UserHandler::new(users, users_connected, config, server_client_socket_addr);
-                    if user_handler.handle_client(tls_stream, on).is_err() {
-                    }
+                    let mut user_handler = UserHandler::new(
+                        users,
+                        users_connected,
+                        config,
+                        server_client_socket_addr,
+                        thread_logger,
+                    );
+                    if user_handler.handle_client(tls_stream, on).is_err() {}
                 });
             }
         });

@@ -1,5 +1,6 @@
 use super::ServerError;
 use crate::client_server_protocol::{ClientResponse, ServerMessage, ServerResponse};
+use crate::logger::Logger;
 use crate::session::sdp::SessionDescriptionProtocol;
 use crate::user::{UserData, UserStatus};
 use rustls::{ServerConnection, StreamOwned};
@@ -17,6 +18,7 @@ pub struct OperatingServer {
     server_client_socket_address: SocketAddr,
     users_file_path: String,
     username: Option<String>,
+    logger: Logger,
 }
 
 impl OperatingServer {
@@ -24,7 +26,8 @@ impl OperatingServer {
         users: Arc<RwLock<HashMap<String, UserData>>>,
         users_connected: Arc<AtomicUsize>,
         server_client_socket_address: SocketAddr,
-        users_file_path: String
+        users_file_path: String,
+        logger: Logger,
     ) -> Self {
         Self {
             users,
@@ -32,6 +35,7 @@ impl OperatingServer {
             server_client_socket_address,
             users_file_path,
             username: None,
+            logger,
         }
     }
     /// Handles user login logic.
@@ -357,7 +361,9 @@ impl OperatingServer {
 
         {
             let mut users = self.users.write().unwrap();
-            let user_data = users.get_mut(username).ok_or(ServerError::UserNotAvailable(username.to_string()))?;
+            let user_data = users
+                .get_mut(username)
+                .ok_or(ServerError::UserNotAvailable(username.to_string()))?;
             user_data.update_status(UserStatus::Offline);
         }
 
@@ -416,7 +422,7 @@ fn get_answer_from_peer(
             offer_sdp,
         },
     );
-    
+
     let mut buff = [0u8; 1024];
 
     let n = match stream.lock().unwrap().read(&mut buff) {
@@ -424,7 +430,7 @@ fn get_answer_from_peer(
         Ok(n) => n,
         Err(err) => return Err(ServerError::MapError(err.to_string())),
     };
-    
+
     match ClientResponse::from_bytes(&buff[..n]) {
         Some(ans) => Ok(ans),
         None => Err(ServerError::MapError(
@@ -437,7 +443,7 @@ fn validate_string(s: String) -> Result<(), ServerError> {
     let trimmed = s.trim();
 
     if trimmed.is_empty() {
-        return Err(ServerError::InvalidFormat)
+        return Err(ServerError::InvalidFormat);
     };
 
     if trimmed.contains(' ') {
@@ -518,6 +524,14 @@ fn notify_status_update(
     });
 }
 
+fn setup_logger() -> Logger {
+    // We use unwrap here because panicking is acceptable in a test environment
+    // We must pass a file path, even if we don't care about the output.
+    Logger::new("test_server.log")
+        .expect("Failed to create logger for test")
+        .context("TestServer")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,11 +539,13 @@ mod tests {
     fn setup() -> OperatingServer {
         let users = setup_users();
         let users_connected = setup_users_connected(0);
+        let logger = setup_logger();
         OperatingServer::new(
             users,
             users_connected,
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
+            logger,
         )
     }
 
@@ -541,11 +557,15 @@ mod tests {
             users.insert(name.to_string(), data);
         }
         let users_connected = setup_users_connected(amount);
+
+        let logger = setup_logger();
+
         OperatingServer::new(
             Arc::new(RwLock::new(users)),
             users_connected,
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
+            logger,
         )
     }
 

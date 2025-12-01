@@ -1,7 +1,10 @@
 use std::{
     fs::OpenOptions,
     io::Write,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, Sender},
+    },
     thread,
 };
 
@@ -56,6 +59,7 @@ pub struct Logger {
     message_tx: Sender<LogMessage>,
     /// The specific context/name for this logger instance (e.g., "IceAgent").
     context: String,
+    file_path: Arc<String>,
 }
 
 impl Logger {
@@ -70,28 +74,48 @@ impl Logger {
     /// # Errors
     /// Returns an `std::io::Error` if the log file cannot be created or opened.
     pub fn new(file_path: &str) -> Result<Self, std::io::Error> {
-        let file = OpenOptions::new()
+        OpenOptions::new()
             .create(true)
             .append(true)
             .open(file_path)?;
 
         let (tx, rx): (Sender<LogMessage>, Receiver<LogMessage>) = mpsc::channel();
+        let file_path_arc = Arc::new(file_path.to_string());
+        let writer_path = Arc::clone(&file_path_arc);
 
         thread::spawn(move || {
-            let mut writer = file;
             for msg in rx {
                 let log_line = format!(
                     "[{}] [{}] [{}] {}\n",
                     msg.timestamp, msg.level, msg.context, msg.message
                 );
-                let _ = writer.write_all(log_line.as_bytes());
+
+                // Open file in append mode.
+                match OpenOptions::new().append(true).open(writer_path.as_str()) {
+                    Ok(mut writer) => {
+                        let _ = writer.write_all(log_line.as_bytes());
+                    }
+                    Err(e) => {
+                        // Logging failure: print to stderr
+                        eprintln!("FATAL: Failed to open log file for write: {e}");
+                    }
+                }
             }
         });
 
         Ok(Logger {
             message_tx: tx,
             context: String::new(),
+            file_path: file_path_arc,
         })
+    }
+
+    pub fn context(&self, context: impl Into<String>) -> Self {
+        Self {
+            message_tx: self.message_tx.clone(),
+            context: context.into(),
+            file_path: Arc::clone(&self.file_path),
+        }
     }
 
     /// Sends a log message with the 'Info' severity level.

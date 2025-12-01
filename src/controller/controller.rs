@@ -161,8 +161,7 @@ impl Controller {
                 .map_err(Error::ParsingSocketAddressError)?;
 
         let remote_fingerprint = self.call_session.remote_fingerprint.clone().ok_or(Error::NotLoggedInError)?;
-        println!("inicio transport");
-        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx, connected) = self
+        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx, connected, srtp_ctx) = self
             .transport
             .start(remote_rtp_address,
                    remote_rtcp_address,
@@ -172,10 +171,10 @@ impl Controller {
                    &self.call_session.local_cert,
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
-
-        println!("inicio media pipeline");
+        
+            let role = self.call_session.local_setup_role;
         self.media_pipeline
-            .start(local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.event_tx.clone(), connected)
+            .start(local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.event_tx.clone(), connected, srtp_ctx, role)
             .map_err(|e| Error::MapError(e.to_string()))
     }
 

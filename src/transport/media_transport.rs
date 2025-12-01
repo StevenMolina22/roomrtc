@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::transport::MediaTransportError as Error;
 use crate::transport::rtcp::RtcpReportHandler;
-use crate::transport::rtp::{RtpPacket, RtpReceiver, RtpSender};
+use crate::transport::rtp::{RtpReceiver, RtpSender};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -59,7 +59,7 @@ impl MediaTransport {
         local_setup_role: DtlsSetupRole,
         expected_fingerprint: Fingerprint,
         local_cert: &LocalCert
-    ) -> Result<(Sender<RtpPacket>, Receiver<RtpPacket>, Arc<AtomicBool>), Error> {
+    ) -> Result<(Sender<Vec<u8>>, Receiver<Vec<u8>>, Arc<AtomicBool>, SrtpContext), Error> {
         let rtp_dtls = self.create_dtls_socket(
             self.rtp_socket
                 .try_clone()
@@ -99,9 +99,9 @@ impl MediaTransport {
             .map_err(|e| Error::MapError(e.to_string()))?;
         self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
 
-        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.spawn_rtp_threads(event_tx, local_setup_role, srtp_context)?;
+        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.spawn_rtp_threads(event_tx)?;
 
-        Ok((local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.connected.clone()))
+        Ok((local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.connected.clone(), srtp_context))
     }
 
 
@@ -124,19 +124,14 @@ impl MediaTransport {
     fn spawn_rtp_threads(
         &self,
         event_tx: Sender<AppEvent>,
-        role: DtlsSetupRole,
-        srtp_context: SrtpContext,
-    ) -> Result<(Sender<RtpPacket>, Receiver<RtpPacket>), Error> {
+    ) -> Result<(Sender<Vec<u8>>, Receiver<Vec<u8>>), Error> {
         let rtcp_handler = match &self.rtcp_handler {
             Some(handler_lock) => Arc::clone(handler_lock),
             None => return Err(Error::ConnectionNotStarted),
         };
 
-        let is_client = matches!(role, DtlsSetupRole::Active);
-        let srtp_context = Arc::new(Mutex::new(srtp_context));
-
-        let local_to_remote_rtp_tx = self.start_rtp_sender(&rtcp_handler, event_tx.clone(), srtp_context.clone(), is_client)?;
-        let remote_to_local_rtp_rx = self.start_rtp_receiver(&rtcp_handler, event_tx, srtp_context.clone(), is_client)?;
+        let local_to_remote_rtp_tx = self.start_rtp_sender(&rtcp_handler, event_tx.clone())?;
+        let remote_to_local_rtp_rx = self.start_rtp_receiver(&rtcp_handler, event_tx)?;
 
         Ok((local_to_remote_rtp_tx, remote_to_local_rtp_rx))
     }
@@ -145,24 +140,20 @@ impl MediaTransport {
         &self,
         rtcp_handler: &Arc<Mutex<RtcpReportHandler<UdpSocket>>>,
         event_tx: Sender<AppEvent>,
-        srtp_context: Arc<Mutex<SrtpContext>>,
-        is_client: bool,
-    ) -> Result<Sender<RtpPacket>, Error> {
-        let rtp_sender_socket = self
+    ) -> Result<Sender<Vec<u8>>, Error> {
+        let srtp_sender_socket = self
             .rtp_socket
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
 
-        let rtp_sender = RtpSender::new(
-            rtp_sender_socket,
+        let srtp_sender = RtpSender::new(
+            srtp_sender_socket,
             rtcp_handler,
             &self.connected,
-            srtp_context,
-            is_client,
         )
         .map_err(|e| Error::MapError(e.to_string()))?;
 
-        rtp_sender
+        srtp_sender
             .start(event_tx)
             .map_err(|e| Error::MapError(e.to_string()))
     }
@@ -171,25 +162,22 @@ impl MediaTransport {
         &self,
         rtcp_handler: &Arc<Mutex<RtcpReportHandler<UdpSocket>>>,
         event_tx: Sender<AppEvent>,
-        srtp_context: Arc<Mutex<SrtpContext>>,
-        is_client: bool,
-    ) -> Result<Receiver<RtpPacket>, Error> {
-        let rtp_receiver_socket = self
+
+    ) -> Result<Receiver<Vec<u8>>, Error> {
+        let srtp_receiver_socket = self
             .rtp_socket
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
 
-        let mut rtp_receiver = RtpReceiver::new(
+        let mut srtp_receiver = RtpReceiver::new(
             &self.config,
-            rtp_receiver_socket,
+            srtp_receiver_socket,
             rtcp_handler,
             &self.connected,
-            srtp_context,
-            is_client
         )
         .map_err(|e| Error::MapError(e.to_string()))?;
 
-        rtp_receiver
+        srtp_receiver
             .start(event_tx)
             .map_err(|e| Error::MapError(e.to_string()))
     }

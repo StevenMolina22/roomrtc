@@ -5,6 +5,8 @@ pub enum MediaPipelineError {
     MapError(String),
     ParsingError(String),
     SendError(String),
+    ProtectionError(String),
+    PoisonedLock,
 }
 
 impl Display for MediaPipelineError {
@@ -13,6 +15,8 @@ impl Display for MediaPipelineError {
             Self::MapError(e) => write!(f, "{e}"),
             Self::ParsingError(e) => write!(f, "Error: \"Parsing failed\": {e}"),
             Self::SendError(e) => write!(f, "Error: \"Send failed\": {e}"),
+            Self::ProtectionError(e) => write!(f, "Error: \"Failed to protect RTP packet ({e})"),
+            Self::PoisonedLock => write!(f, "Error: \"Poisoned lock\""),
         }
     }
 }

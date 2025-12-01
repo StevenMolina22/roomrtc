@@ -6,12 +6,18 @@ use openssl::sign::Signer;
 use openssl::symm::{Cipher, decrypt, encrypt};
 use std::collections::HashMap;
 
+/// SRTP context for encrypting and authenticating RTP/RTCP packets.
+///
+/// Manages encryption keys, salts, and sequence counters for secure RTP communication.
+/// Supports both client and server perspectives with automatic key selection.
 pub struct SrtpContext {
     client_write_key: Vec<u8>,
     server_write_key: Vec<u8>,
     client_write_salt: Vec<u8>,
     server_write_salt: Vec<u8>,
+    /// Roll-over counter tracking per SSRC for RTP packets
     roc_map: HashMap<u32, u32>,
+    /// Index counter tracking per SSRC for RTCP packets
     srtcp_idx_map: HashMap<u32, u32>,
 }
 

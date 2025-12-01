@@ -92,10 +92,14 @@ impl MediaPipeline {
                                     Ok(mut ctx) => {
                                         match ctx.unprotect(&protected_data, is_client) {
                                             Ok(unprotected_packet) => unprotected_packet,
-                                            Err(e) => break
+                                            Err(e) => {
+                                                break
+                                            }
                                         }
                                     }
-                                    Err(e) => break,
+                                    Err(e) => {
+                                        break
+                                    },
                                 }
                             } else {
                                 continue

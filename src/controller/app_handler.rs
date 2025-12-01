@@ -36,7 +36,7 @@ pub struct Controller {
 
     //Components
     pub camera: Arc<Mutex<Box<dyn FrameSource + Send>>>,
-    pub rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<DtlsSocket>>>>,
+    pub rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<UdpSocket>>>>,
 
     //Sockets
     rtp_udp_socket: UdpSocket,
@@ -133,10 +133,19 @@ impl Controller {
             .map_err(|e| Error::MapError(format!("SRTP context creation failed: {}", e)))?;
         self.srtp_context = Some(Arc::new(Mutex::new(srtp_context)));
 
+        let rtcp_socket_for_handler = self
+            .rtcp_udp_socket
+            .try_clone()
+            .map_err(|e| Error::CloningSocketError(e.to_string()))?;
+
+        // Get the local SSRC from config
+        let local_ssrc = self.config.media.default_ssrc;
+
         let rtcp_handler = RtcpReportHandler::new(
-            rtcp_dtls.clone(),
+            rtcp_socket_for_handler,
             Arc::clone(&self.connection_status),
             self.config.rtcp.clone(),
+            local_ssrc,
         );
         rtcp_handler
             .init_connection()

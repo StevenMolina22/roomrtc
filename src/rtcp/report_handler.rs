@@ -17,6 +17,7 @@ pub struct RtcpReportHandler<S: Socket + Send + Sync + 'static> {
     socket: Arc<S>,
     connection_status: Arc<RwLock<ConnectionStatus>>,
     config: RtcpConfig,
+    local_ssrc: u32,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
@@ -33,6 +34,8 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     ///   used for sending/receiving RTCP-style messages.
     /// - `connection_status`: shared `Arc<RwLock<ConnectionStatus>>` used
     ///   to publish the session state (Open/Closed) across threads.
+    /// - `local_ssrc`: the Synchronization Source identifier for this peer,
+    ///   used to sign outgoing packets for SRTCP context lookup.
     ///
     /// # Returns
     /// A configured `RtcpReportHandler` that is ready to `start()`.
@@ -40,11 +43,13 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         socket: S,
         connection_status: Arc<RwLock<ConnectionStatus>>,
         config: RtcpConfig,
+        local_ssrc: u32,
     ) -> Self {
         Self {
             socket: Arc::new(socket),
             connection_status,
             config,
+            local_ssrc,
         }
     }
 
@@ -67,21 +72,21 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
         loop {
             let packet = if ready {
-                RtcpPacket::Ready
+                RtcpPacket::Ready(self.local_ssrc)
             } else {
-                RtcpPacket::Hello
+                RtcpPacket::Hello(self.local_ssrc)
             };
-            if let Err(e) = self.socket.send(packet.as_bytes()) {
+            if let Err(e) = self.socket.send(&packet.as_bytes()) {
                 eprintln!("Handshake send error: {e}");
             }
 
             let mut buff = [0u8; 1024];
             match self.socket.recv_from(&mut buff) {
                 Ok((size, _addr)) => match RtcpPacket::from_bytes(&buff[..size]) {
-                    Some(RtcpPacket::Hello) => {
+                    Some(RtcpPacket::Hello(_)) => {
                         ready = true;
                     }
-                    Some(RtcpPacket::Ready) => {
+                    Some(RtcpPacket::Ready(_)) => {
                         if ready {
                             let mut conn = self
                                 .connection_status
@@ -92,7 +97,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                         }
                         ready = true;
                     }
-                    Some(RtcpPacket::ConnectivityReport) => {
+                    Some(RtcpPacket::ConnectivityReport(_)) => {
                         // Peer is already connected, transition to Open.
                         let mut conn = self
                             .connection_status
@@ -134,6 +139,8 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     fn start_report_sender(&self, report_socket: Arc<S>) {
         let shared_connection_status = Arc::clone(&self.connection_status);
         let report_period_millis = self.config.report_period_millis;
+        let local_ssrc = self.local_ssrc;
+
         thread::spawn(move || {
             loop {
                 if let Ok(conn) = shared_connection_status.read()
@@ -143,7 +150,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                 }
 
                 if report_socket
-                    .send(RtcpPacket::ConnectivityReport.as_bytes())
+                    .send(&RtcpPacket::ConnectivityReport(local_ssrc).as_bytes())
                     .is_err()
                 {
                     if let Ok(mut conn) = shared_connection_status.write() {
@@ -192,11 +199,11 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     Ok((size, _)) => {
                         // On valid packet (ConnectivityReport), reset timers
                         match RtcpPacket::from_bytes(&buf[..size]) {
-                            Some(RtcpPacket::ConnectivityReport) => {
+                            Some(RtcpPacket::ConnectivityReport(_)) => {
                                 last_valid_packet_time = Local::now();
                                 timeouts_triggered = 0;
                             }
-                            Some(RtcpPacket::Goodbye) => {
+                            Some(RtcpPacket::Goodbye(_)) => {
                                 break;
                             }
                             _ => {}
@@ -239,8 +246,10 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
             *conn = ConnectionStatus::Closed;
         }
 
-        println!("envio goodbye");
-        let _ = self.socket.send(RtcpPacket::Goodbye.as_bytes());
+        println!("sending goodbye");
+        let _ = self
+            .socket
+            .send(&RtcpPacket::Goodbye(self.local_ssrc).as_bytes());
         Ok(())
     }
 }
@@ -258,11 +267,11 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
 
     match report_socket.recv_from(&mut buf) {
         Ok((size, _src_addr)) => match RtcpPacket::from_bytes(&buf[..size]) {
-            Some(RtcpPacket::ConnectivityReport) => {
+            Some(RtcpPacket::ConnectivityReport(_)) => {
                 *last_report_time = Local::now();
                 Ok(())
             }
-            Some(RtcpPacket::Goodbye) => Err(Error::GoodbyeReceived),
+            Some(RtcpPacket::Goodbye(_)) => Err(Error::GoodbyeReceived),
             Some(_) => Err(Error::UnexpectedMessage),
             None => {
                 if Local::now() - *last_report_time
@@ -297,6 +306,8 @@ mod tests {
     use crate::tools::MockSocket;
     use std::sync::{Arc, Mutex, RwLock};
 
+    const TEST_SSRC: u32 = 0x1234_5678;
+
     fn test_config() -> RtcpConfig {
         RtcpConfig {
             report_period_millis: 1000,
@@ -308,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_report_handler_receives_connectivity_report() -> Result<(), Error> {
-        let data_to_receive = vec![RtcpPacket::ConnectivityReport.as_bytes().to_vec()];
+        let data_to_receive = vec![RtcpPacket::ConnectivityReport(TEST_SSRC).as_bytes()];
         let sent_data = Arc::new(Mutex::new(Vec::new()));
         let mock_socket = MockSocket {
             data_to_receive,
@@ -316,8 +327,12 @@ mod tests {
         };
 
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
-        let handler =
-            RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status), test_config());
+        let handler = RtcpReportHandler::new(
+            mock_socket,
+            Arc::clone(&connection_status),
+            test_config(),
+            TEST_SSRC,
+        );
 
         handler.start()?;
         thread::sleep(Duration::from_millis(100));
@@ -328,7 +343,7 @@ mod tests {
         assert_eq!(status, ConnectionStatus::Open);
 
         let sent = sent_data.lock().map_err(|_| Error::PoisonedLock)?[0].clone();
-        assert_eq!(sent, RtcpPacket::ConnectivityReport.as_bytes());
+        assert_eq!(sent, RtcpPacket::ConnectivityReport(TEST_SSRC).as_bytes());
         Ok(())
     }
 
@@ -339,8 +354,12 @@ mod tests {
             sent_data: Arc::new(Mutex::new(Vec::new())),
         };
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
-        let handler =
-            RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status), test_config());
+        let handler = RtcpReportHandler::new(
+            mock_socket,
+            Arc::clone(&connection_status),
+            test_config(),
+            TEST_SSRC,
+        );
 
         handler.close_connection()?;
 
@@ -359,8 +378,12 @@ mod tests {
         };
 
         let connection_status = Arc::new(RwLock::new(ConnectionStatus::Open));
-        let handler =
-            RtcpReportHandler::new(mock_socket, Arc::clone(&connection_status), test_config());
+        let handler = RtcpReportHandler::new(
+            mock_socket,
+            Arc::clone(&connection_status),
+            test_config(),
+            TEST_SSRC,
+        );
 
         handler.start()?;
 

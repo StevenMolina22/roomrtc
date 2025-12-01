@@ -1,9 +1,8 @@
-mod media_pipeline;
-mod camera;
 mod error;
+mod media_pipeline;
 
+pub mod camera;
 pub mod frame_handler;
+
 pub use error::MediaPipelineError;
-pub use camera::Camera;
-pub use camera::FrameSource;
 pub use media_pipeline::MediaPipeline;

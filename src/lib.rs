@@ -1,7 +1,10 @@
-pub mod session;
+pub mod client_server_protocol;
 pub mod config;
 pub mod controller;
+pub mod media;
+pub mod server;
+pub mod session;
 pub mod tools;
-pub mod ui;
 pub mod transport;
-mod media;
+pub mod ui;
+pub mod user;

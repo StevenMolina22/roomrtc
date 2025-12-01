@@ -26,19 +26,25 @@ impl Display for EncodedFrame {
         let preview_len = 16;
 
         // tamaños de cada chunk
-        let chunk_sizes: Vec<usize> =
-            self.chunks.iter().map(|c| c.len()).collect();
+        let chunk_sizes: Vec<usize> = self.chunks.iter().map(std::vec::Vec::len).collect();
 
         // preview del primer chunk (si existe)
         let preview = if let Some(first_chunk) = self.chunks.first() {
             let hex_bytes: Vec<String> = first_chunk
                 .iter()
                 .take(preview_len)
-                .map(|b| format!("{:02X}", b))
+                .map(|b| format!("{b:02X}"))
                 .collect();
 
-            format!("[{}]{}", hex_bytes.join(" "),
-                    if first_chunk.len() > preview_len { " ..." } else { "" })
+            format!(
+                "[{}]{}",
+                hex_bytes.join(" "),
+                if first_chunk.len() > preview_len {
+                    " ..."
+                } else {
+                    ""
+                }
+            )
         } else {
             "[]".to_string()
         };

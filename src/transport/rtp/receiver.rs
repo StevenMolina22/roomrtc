@@ -1,13 +1,14 @@
+use crate::config::Config;
+use crate::tools::Socket;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
 use crate::transport::rtp::rtp_packet::RtpPacket;
-use crate::tools::Socket;
-use std::sync::{mpsc, Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
-use crate::config::Config;
+use crate::controller::AppEvent;
 
 /// RTP receiver that reads `RtpPacket` instances from a socket and
 /// manages RTCP reporting through a `RtcpReportHandler`.
@@ -55,40 +56,44 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         })
     }
 
-    pub fn start(&mut self) -> Result<Receiver<RtpPacket>, Error> {
+    pub fn start(&mut self, event_tx: Sender<AppEvent>) -> Result<Receiver<RtpPacket>, Error> {
         let (remote_to_local_rtp_tx, remote_to_local_rtp_rx) = mpsc::channel();
-        
+
         let connected = self.connected.clone();
-        let rtp_socket = self.rtp_socket.try_clone().map_err(|_| Error::SocketCloneFailed)?;
+        let rtp_socket = self
+            .rtp_socket
+            .try_clone()
+            .map_err(|_| Error::SocketCloneFailed)?;
         let rtcp_handler = self.report_handler.clone();
-        let config = self.config.clone();
-        
+
         thread::spawn({
             move || {
                 loop {
                     if !connected.load(Ordering::SeqCst) {
-                        println!("RTP receiver thread disconnected");
                         break;
                     }
-                    let rtp_packet = match receive(&rtp_socket, &connected, &config,&rtcp_handler) {
+                    let rtp_packet = match receive(&rtp_socket, &connected, &rtcp_handler)
+                    {
                         Ok(packet) => packet,
-                        Err(e) => {
-                            println!("RTP receiver receive failed: {e}");
+                        Err(_) => {
                             break;
                         }
                     };
 
                     if let Err(e) = remote_to_local_rtp_tx.send(rtp_packet) {
-                        println!("RTP receiver send to channel failed: {e}");
                         break;
                     }
+                }
+
+                if connected.load(Ordering::SeqCst) {
+                    connected.store(false, Ordering::SeqCst);
+                    event_tx.send(AppEvent::CallEnded);
                 }
             }
         });
 
         Ok(remote_to_local_rtp_rx)
     }
-
 }
 /// Wait for and return the next decoded `RtpPacket`.
 ///
@@ -102,7 +107,11 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
 /// # Errors
 /// Returns `Error::ReceiveFailed` for unexpected socket errors and
 /// `Error::ConnectionClosed` if the session is closed while waiting.
-pub fn receive<S: Socket + Send + Sync + 'static>(rtp_socket: &S, connected: &Arc<AtomicBool>, config: &Arc<Config>, report_handler: &Arc<Mutex<RtcpReportHandler<S>>>) -> Result<RtpPacket, Error> {
+pub fn receive<S: Socket + Send + Sync + 'static>(
+    rtp_socket: &S,
+    connected: &Arc<AtomicBool>,
+    report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
+) -> Result<RtpPacket, Error> {
     let mut buf = vec![0u8; 65535];
     loop {
         match rtp_socket.recv_from(&mut buf) {
@@ -120,7 +129,7 @@ pub fn receive<S: Socket + Send + Sync + 'static>(rtp_socket: &S, connected: &Ar
                 report_handler
                     .lock()
                     .map_err(|_| Error::PoisonedLock)?
-                    .close_connection()
+                    .report_goodbye()
                     .map_err(|e| Error::RTCPError(e.to_string()))?;
                 return Err(Error::ReceiveFailed(e.to_string()));
             }

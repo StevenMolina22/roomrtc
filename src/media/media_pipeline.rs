@@ -1,111 +1,141 @@
-use std::path::Path;
-use std::sync::{mpsc, Arc};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
-use std::thread;
-use chrono::Local;
 use crate::config::Config;
-use crate::transport::rtp::RtpPacket;
-use crate::media::Camera;
-use crate::media::camera::FrameSource;
+use crate::media::camera::{Camera, FrameSource};
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
+use crate::transport::rtp::RtpPacket;
+use chrono::Local;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, mpsc};
+use std::thread;
+use crate::controller::AppEvent;
 
 pub struct MediaPipeline {
     camera: Camera,
     config: Arc<Config>,
     ssrc: u32,
-    on: Arc<AtomicBool>
 }
 
 impl MediaPipeline {
+    #[must_use]
     pub fn new(config: &Arc<Config>, ssrc: u32) -> Self {
         Self {
-            camera: Camera::new(&config),
+            camera: Camera::new(config),
             config: Arc::clone(config),
             ssrc,
-            on: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    pub fn start(&mut self, rtp_tx: Sender<RtpPacket>, rtp_rx: Receiver<RtpPacket>) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
-        let local_frame_rx = self.start_local_frame_pipeline(rtp_tx)?;
-        let remote_frame_rx = self.start_remote_frames_pipeline(rtp_rx)?;
+    pub fn start(
+        &mut self,
+        rtp_tx: Sender<RtpPacket>,
+        rtp_rx: Receiver<RtpPacket>,
+        event_tx: Sender<AppEvent>,
+        connected: Arc<AtomicBool>,
+    ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
+        let local_frame_rx = self.start_local_frame_pipeline(rtp_tx, event_tx.clone(), connected.clone())?;
+        let remote_frame_rx = self.start_remote_frames_pipeline(rtp_rx, event_tx.clone(), connected.clone())?;
 
-        self.on.store(true, Ordering::SeqCst);
         Ok((local_frame_rx, remote_frame_rx))
     }
 
-    pub fn stop(&self) {
-        self.on.store(false, Ordering::SeqCst)
+    pub fn stop(&self) -> Result<(), Error> {
+        self.camera.stop().map_err(|e| Error::MapError(e.to_string()))
     }
 
-    fn start_remote_frames_pipeline(&self, rtp_rx: Receiver<RtpPacket>) -> Result<Receiver<Frame>, Error> {
+    fn start_remote_frames_pipeline(
+        &self,
+        rtp_rx: Receiver<RtpPacket>,
+        event_tx: Sender<AppEvent>,
+        connected: Arc<AtomicBool>,
+    ) -> Result<Receiver<Frame>, Error> {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
-
-        let on = Arc::clone(&self.on);
 
         thread::spawn({
             move || {
-                let mut decoder = Decoder::new().map_err(|e| Error::MapError(e.to_string())).unwrap();
+                let mut decoder = match Decoder::new()
+                    .map_err(|e| Error::MapError(e.to_string())) {
+                    Ok(d) => d,
+                    Err(_) => {
+                        send_message_to_ui(event_tx, AppEvent::Error("Failed to create decoder".into()));
+                        return;
+                    }
+                };
                 let mut actual_frame = None;
                 let mut chunks = Vec::new();
 
                 loop {
-                    if !on.load(Ordering::SeqCst) {
+                    if !connected.load(Ordering::SeqCst) {
                         break;
                     }
 
                     let rtp_packet = match rtp_rx.recv() {
                         Ok(packet) => packet,
                         Err(_) => {
-                            break; 
-                        },
+                            break;
+                        }
                     };
 
-                    if actual_frame != Some(rtp_packet.frame_id) {
+                    if actual_frame == Some(rtp_packet.frame_id) {
+                        chunks.push(rtp_packet.clone());
+                    } else {
                         chunks = vec![rtp_packet.clone()];
                         actual_frame = Some(rtp_packet.frame_id);
-                    } else {
-                        chunks.push(rtp_packet.clone());
                     }
 
                     let expected_marker = rtp_packet.marker;
                     let current_chunk_count = chunks.len() as u16;
 
                     if current_chunk_count == expected_marker {
-                        if let Some(frame_data) = generate_frame_from_chunks(&mut chunks, &mut decoder) {
-                            if let Err(_) = remote_frame_tx.send(frame_data.clone()) {
-                                break;
-                            }
+                        if let Some(frame_data) =
+                            generate_frame_from_chunks(&mut chunks, &mut decoder)
+                            && remote_frame_tx.send(frame_data.clone()).is_err()
+                        {
+                            break;
                         }
 
                         actual_frame = None;
                         chunks.clear();
                     }
                 }
+                if connected.load(Ordering::SeqCst) {
+                    connected.store(false, Ordering::SeqCst);
+                    send_message_to_ui(event_tx.clone(), AppEvent::CallEnded)
+                };
             }
         });
         Ok(remote_frame_rx)
     }
 
-    fn start_local_frame_pipeline(&mut self, rtp_tx: Sender<RtpPacket>) -> Result<Receiver<Frame>, Error> {
+    fn start_local_frame_pipeline(
+        &mut self,
+        rtp_tx: Sender<RtpPacket>,
+        event_tx: Sender<AppEvent>,
+        connected: Arc<AtomicBool>,
+    ) -> Result<Receiver<Frame>, Error> {
         let (local_frame_tx, local_frame_rx) = mpsc::channel();
 
-        let camera_frame_rx = self.camera.start().map_err(|e| Error::MapError(e.to_string()))?;
-        let mut encoder = Encoder::new(&self.config.media).map_err(|e| Error::MapError(e.to_string()))?;
+        let camera_frame_rx = self
+            .camera
+            .start()
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        let mut encoder = match Encoder::new(&self.config.media) {
+            Ok(d) => d,
+            Err(e) => {
+                send_message_to_ui(event_tx.clone(), AppEvent::Error(e.to_string()));
+                return Err(Error::MapError(e.to_string()));
+            }
+        };
 
-        let on = Arc::clone(&self.on);
         let ssrc = self.ssrc;
         let config = Arc::clone(&self.config);
-        
         thread::spawn(move || {
             for frame in camera_frame_rx {
-                if !on.load(Ordering::SeqCst) {
+                if !connected.load(Ordering::SeqCst) {
                     break;
                 }
 
-                if let Err(_) = local_frame_tx.send(frame.clone()) {
+                if local_frame_tx.send(frame.clone()).is_err() {
                     break;
                 }
 
@@ -114,24 +144,28 @@ impl MediaPipeline {
                     Err(_) => break,
                 };
 
-                if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, &on, &config).is_err() {
+                if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, connected.clone(), &config).is_err() {
                     break;
                 }
+            }
+
+            if connected.load(Ordering::SeqCst) {
+                connected.store(false, Ordering::SeqCst);
+                send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
             }
         });
 
         Ok(local_frame_rx)
     }
-
 }
 fn send_encoded_frame(
     encoded_frame: EncodedFrame,
     rtp_tx: &Sender<RtpPacket>,
     ssrc: u32,
-    on: &Arc<AtomicBool>,
+    connected: Arc<AtomicBool>,
     config: &Arc<Config>,
 ) -> Result<(), Error> {
-    if !on.load(Ordering::SeqCst) {
+    if !connected.load(Ordering::SeqCst) {
         return Err(Error::SendError("Media pipeline turned off".into()));
     }
 
@@ -145,10 +179,11 @@ fn send_encoded_frame(
             chunk_id: chunk_id as u64,
             timestamp: Local::now().timestamp_millis() as u32,
             ssrc,
-            payload: payload.to_vec(),
+            payload: payload.clone(),
         };
-        rtp_tx.send(packet).map_err(|e| Error::SendError(e.to_string()))?;
-
+        rtp_tx
+            .send(packet)
+            .map_err(|e| Error::SendError(e.to_string()))?;
     }
     Ok(())
 }
@@ -163,7 +198,7 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
     }
     let (decoded_data, width, height) = match decoder.decode_frame(&data) {
         Ok(data) => data,
-        Err(_) => return None
+        Err(_) => return None,
     };
 
     Some(Frame {
@@ -174,20 +209,24 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
     })
 }
 
+fn send_message_to_ui(event_tx: Sender<AppEvent>, event: AppEvent) {
+    if let Err(e) = event_tx.send(event) {
+        eprintln!("Error sending event: {:?}", e);
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use std::sync::Arc;
 
     #[test]
     fn test_generate_frame_from_chunks_h264() {
         // ------- Setup -------
         let config = Arc::new(Config::load(Path::new("./room_rtc.conf")).unwrap());
-        let mut encoder = Encoder::new(&config.media)
-            .expect("Encoder no pudo inicializarse");
-        let mut decoder = Decoder::new()
-            .expect("Decoder no pudo inicializarse");
+        let mut encoder = Encoder::new(&config.media).expect("Encoder no pudo inicializarse");
+        let mut decoder = Decoder::new().expect("Decoder no pudo inicializarse");
 
         // Creamos un frame crudo sintético RGB 320x240
         let width = 320;
@@ -202,7 +241,8 @@ mod tests {
         };
 
         // ------- Encode -------
-        let encoded = encoder.encode_frame(&raw_frame)
+        let encoded = encoder
+            .encode_frame(&raw_frame)
             .expect("Fallo encodear el frame");
 
         assert!(!encoded.chunks.is_empty(), "El encoder debe generar chunks");

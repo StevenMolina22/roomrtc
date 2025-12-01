@@ -160,7 +160,6 @@ fn get_local_ip() -> Result<String, Error> {
             return Ok(ipv4.to_string());
         }
     }
-
     Err(Error::NoNetworkInterfaceFound)
 }
 

@@ -12,6 +12,7 @@ use std::str::FromStr;
 /// transport protocol, the set of payload format
 /// identifiers advertised on the line, and the parsed attribute lines
 /// associated with the media section.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MediaDescription {
     /// Media type token.
     pub media_type: String,

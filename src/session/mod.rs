@@ -1,9 +1,8 @@
-mod error;
 mod call_session;
+mod error;
 
-pub mod sdp;
 pub mod ice;
-
-pub use error::CallSessionError;
+pub mod sdp;
 
 pub use call_session::CallSession;
+pub use error::CallSessionError;

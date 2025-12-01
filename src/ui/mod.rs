@@ -1,5 +1,7 @@
+mod error;
 pub mod interface;
 pub mod views;
-mod error;
 
 pub use error::GUIError;
+pub use interface::RoomRTCApp;
+pub use views::View;

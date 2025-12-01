@@ -14,7 +14,7 @@ const RTPMAP_ATTR_KEY: &str = "rtpmap";
 /// project needs to parse and emit: ICE candidates (`candidate`) and
 /// payload mapping (`rtpmap`). Each variant contains the parsed data for
 /// that attribute.
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Attribute {
     /// An ICE candidate attribute containing a full `Candidate`.
     Candidate(Candidate),

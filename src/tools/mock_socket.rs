@@ -9,6 +9,7 @@ pub struct MockSocket {
 }
 
 impl MockSocket {
+    #[must_use]
     pub fn new(data: Vec<Vec<u8>>) -> Self {
         Self {
             data_to_receive: Arc::new(Mutex::new(data)),
@@ -43,10 +44,7 @@ impl Socket for MockSocket {
         let len = packet.len().min(buf.len());
         buf[..len].copy_from_slice(&packet[..len]);
 
-        Ok((
-            len,
-            "127.0.0.1:1234".parse().unwrap(),
-        ))
+        Ok((len, "127.0.0.1:1234".parse().unwrap()))
     }
 
     fn set_read_timeout(&self, _dur: Option<Duration>) -> Result<(), std::io::Error> {

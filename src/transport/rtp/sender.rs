@@ -1,11 +1,12 @@
-use std::sync::{mpsc, Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Sender};
-use std::thread;
+use crate::tools::Socket;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
 use crate::transport::rtp::rtp_packet::RtpPacket;
-use crate::tools::Socket;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
+use crate::controller::AppEvent;
 
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
 ///
@@ -41,11 +42,14 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
             rtp_version,
         })
     }
-    
-    pub fn start(&self) -> Result<Sender<RtpPacket>, Error> {
+
+    pub fn start(&self, event_tx: Sender<AppEvent>) -> Result<Sender<RtpPacket>, Error> {
         let (tx, rx) = mpsc::channel();
 
-        let rtp_socket = self.rtp_socket.try_clone().map_err(|_| Error::SocketCloneFailed)?;
+        let rtp_socket = self
+            .rtp_socket
+            .try_clone()
+            .map_err(|_| Error::SocketCloneFailed)?;
         let report_handler = Arc::clone(&self.report_handler);
         let connected = Arc::clone(&self.connected);
 
@@ -59,19 +63,22 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     Ok(p) => p,
                     Err(e) => {
                         break;
-                    },
+                    }
                 };
 
                 if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, packet) {
                     break;
                 }
             }
+            
+            if connected.load(Ordering::SeqCst) {
+                connected.store(false, Ordering::SeqCst);
+                event_tx.send(AppEvent::CallEnded);
+            }
         });
 
         Ok(tx)
     }
-
-
 }
 
 /// Send an RTP packet created from the provided payload and metadata.
@@ -93,11 +100,10 @@ fn send_packet<S: Socket + Send + Sync + 'static>(
         report_handler
             .lock()
             .map_err(|_| Error::PoisonedLock)?
-            .close_connection()
+            .report_goodbye()
             .map_err(|e| Error::RTCPError(e.to_string()))?;
 
         return Err(Error::SendFailed);
     }
     Ok(())
 }
-

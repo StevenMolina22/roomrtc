@@ -30,7 +30,7 @@ impl Display for Frame {
             .data
             .iter()
             .take(preview_len)
-            .map(|b| format!("{:02X}", b))
+            .map(|b| format!("{b:02X}"))
             .collect();
 
         write!(
@@ -41,7 +41,11 @@ impl Display for Frame {
             self.height,
             self.data.len(),
             preview.join(" "),
-            if self.data.len() > preview_len { " ..." } else { "" }
+            if self.data.len() > preview_len {
+                " ..."
+            } else {
+                ""
+            }
         )
     }
 }

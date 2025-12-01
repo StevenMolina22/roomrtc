@@ -25,6 +25,7 @@ const ATTRIBUTE_KEY: &str = "a";
 /// session-level connection data (c=). Only `media_descriptions` is
 /// publicly exposed; other fields are initialized with sensible
 /// defaults when creating or parsing an SDP.
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct SessionDescriptionProtocol {
     /// SDP version (`v=`). Defaults to 0 in created instances.
     version: u8,

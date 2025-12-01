@@ -1,5 +1,5 @@
-use crate::config::{Config};
-use crate::controller::ControllerError;
+use crate::config::Config;
+use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
 use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
@@ -10,10 +10,10 @@ use std::time::Duration;
 pub trait FrameSource: Send {
     /// Start the capture thread.
     /// Returns a Receiver to get frames from.
-    fn start(&mut self) -> Result<Receiver<Frame>, ControllerError>;
+    fn start(&mut self) -> Result<Receiver<Frame>, Error>;
 
     /// Signal the capture thread to stop.
-    fn stop(&self) -> Result<(), ControllerError>;
+    fn stop(&self) -> Result<(), Error>;
 }
 
 /// A camera that runs a capture thread and produces
@@ -55,10 +55,10 @@ impl Camera {
     /// spawns a background thread that captures frames from `OpenCV`'s
     /// `VideoCapture` and converts them to RGB `Frame`s at the
     /// configured frame rate.
-    fn start_internal(&mut self) -> Result<Receiver<Frame>, ControllerError> {
+    fn start_internal(&mut self) -> Result<Receiver<Frame>, Error> {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
-        *running.write().map_err(|_| ControllerError::PoisonedLock)? = true;
+        *running.write().map_err(|_| Error::PoisonedLock)? = true;
         let frame_id = self.frame_id.clone();
 
         let config = self.config.clone();
@@ -140,6 +140,7 @@ impl Camera {
                     id
                 };
 
+                #[allow(clippy::cast_sign_loss)]
                 let frame = Frame {
                     data,
                     width: rgb.cols() as usize,
@@ -160,22 +161,19 @@ impl Camera {
 
     /// Stop the capture thread by clearing the running flag. The
     /// capture thread will observe this and exit shortly.
-    fn stop_internal(&self) -> Result<(), ControllerError> {
-        let mut run = self
-            .running
-            .write()
-            .map_err(|_| ControllerError::PoisonedLock)?;
+    fn stop_internal(&self) -> Result<(), Error> {
+        let mut run = self.running.write().map_err(|_| Error::PoisonedLock)?;
         *run = false;
         Ok(())
     }
 }
 
 impl FrameSource for Camera {
-    fn start(&mut self) -> Result<Receiver<Frame>, ControllerError> {
+    fn start(&mut self) -> Result<Receiver<Frame>, Error> {
         self.start_internal()
     }
 
-    fn stop(&self) -> Result<(), ControllerError> {
+    fn stop(&self) -> Result<(), Error> {
         self.stop_internal()
     }
 }

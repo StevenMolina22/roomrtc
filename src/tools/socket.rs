@@ -21,7 +21,9 @@ pub trait Socket {
     /// failure.
     fn set_read_timeout(&self, dur: Option<Duration>) -> Result<(), std::io::Error>;
 
-    fn try_clone(&self) -> Result<Self, std::io::Error> where Self: Sized;
+    fn try_clone(&self) -> Result<Self, std::io::Error>
+    where
+        Self: Sized;
 }
 
 /// Provide the `Socket` trait for the standard library `UdpSocket` so

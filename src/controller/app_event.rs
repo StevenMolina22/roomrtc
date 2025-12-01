@@ -1,3 +1,8 @@
+use crate::session::sdp::SessionDescriptionProtocol;
+
 pub enum AppEvent {
-    Error(String)
+    CallIncoming(String, SessionDescriptionProtocol),
+    CallEnded,
+    Error(String),
+    FatalError(String),
 }

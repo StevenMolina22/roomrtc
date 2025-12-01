@@ -1,14 +1,13 @@
+use room_rtc::config::Config;
+use room_rtc::server::CentralServer;
 use std::env;
 use std::path::Path;
+use std::sync::Arc;
 
-use room_rtc::config::Config;
-use room_rtc::ui::interface::RoomRTCApp;
-
-fn main() -> Result<(), eframe::Error> {
+fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() != 2 {
-        eprintln!("Usage: {} /path/to/room_rtc.conf", args[0]);
         std::process::exit(1);
     }
 
@@ -26,10 +25,14 @@ fn main() -> Result<(), eframe::Error> {
         }
     };
 
-    let options = eframe::NativeOptions::default();
-    eframe::run_native(
-        "RoomRTC App",
-        options,
-        Box::new(|_cc| Ok(Box::new(RoomRTCApp::new(config)))),
-    )
+    let mut sv = match CentralServer::new(Arc::new(config)) {
+        Ok(sv) => sv,
+        Err(e) => {
+            eprintln!("Failed to start server: {e}");
+            std::process::exit(1);
+        }
+    };
+    if sv.start().is_err() {
+        std::process::exit(1);
+    }
 }

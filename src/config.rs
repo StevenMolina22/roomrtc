@@ -18,13 +18,14 @@ pub struct Config {
 
     /// RTP configuration
     pub rtp: RtpConfig,
-    
+
     /// SDP session-level configuration.
     pub sdp: SdpConfig,
 
     /// ICE candidate configuration.
     pub ice: IceConfig,
-    
+
+    pub server: ServerConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -97,18 +98,16 @@ pub struct RtcpConfig {
     /// Number of consecutive receive timeouts before closing the
     /// connection.
     pub retry_limit: usize,
-
 }
 
 #[derive(Debug, Clone)]
 pub struct RtpConfig {
-    /// RtpPacket max size supported
+    /// `RtpPacket` max size supported
     pub max_packet_size: usize,
 
     /// Socket read timeout in milliseconds.
     pub read_timeout_millis: u64,
 }
-
 
 #[derive(Debug, Clone)]
 /// SDP session-level configuration values.
@@ -171,6 +170,19 @@ impl Default for SdpConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+///Configuration for Central Server
+pub struct ServerConfig {
+    ///Path to clients data file
+    pub users_file: String,
+    pub client_server_addr: String,
+    pub server_client_addr: String,
+    pub server_private_key_file: String,
+    pub server_certification_file: String,
+    pub server_name: String,
+    pub max_amount_of_users_connected: usize,
+}
+
 impl Config {
     /// Load configuration from the given INI file path.
     ///
@@ -196,6 +208,9 @@ impl Config {
         let rtcp_section = conf.section(Some("rtcp")).ok_or("Missing [rtcp] section")?;
         let sdp_section = conf.section(Some("sdp")).ok_or("Missing [sdp] section")?;
         let ice_section = conf.section(Some("ice")).ok_or("Missing [ice] section")?;
+        let server_section = conf
+            .section(Some("server"))
+            .ok_or("Missing [server] section")?;
 
         Ok(Self {
             network: NetworkConfig {
@@ -342,6 +357,71 @@ impl Config {
                     .ok_or("Missing host_local_preference")?
                     .parse()?,
             },
+            server: ServerConfig {
+                users_file: server_section
+                    .get("users_file")
+                    .ok_or("Missing path to users file")?
+                    .parse()?,
+                client_server_addr: server_section
+                    .get("client_server_addr")
+                    .ok_or("Missing client-server address")?
+                    .parse()?,
+                server_client_addr: server_section
+                    .get("server_client_addr")
+                    .ok_or("Missing server-client address")?
+                    .parse()?,
+                server_private_key_file: server_section
+                    .get("server_private_key_file")
+                    .ok_or("Missing key file address")?
+                    .parse()?,
+                server_certification_file: server_section
+                    .get("server_certification_file")
+                    .ok_or("Missing certification file address")?
+                    .parse()?,
+                server_name: server_section
+                    .get("server_name")
+                    .ok_or("Missing server_name")?
+                    .parse()?,
+                max_amount_of_users_connected: server_section
+                    .get("max_amount_of_users_connected")
+                    .ok_or("Missing max amount of users connected")?
+                    .parse()?,
+            },
         })
+    }
+
+    #[must_use]
+    pub fn network_only(&self) -> NetworkConfig {
+        self.network.clone()
+    }
+
+    #[must_use]
+    pub fn media_only(&self) -> MediaConfig {
+        self.media.clone()
+    }
+
+    #[must_use]
+    pub fn rtp_only(&self) -> RtpConfig {
+        self.rtp.clone()
+    }
+
+    #[must_use]
+    pub fn rtcp_only(&self) -> RtcpConfig {
+        self.rtcp.clone()
+    }
+
+    #[must_use]
+    pub fn sdp_only(&self) -> SdpConfig {
+        self.sdp.clone()
+    }
+
+    #[must_use]
+    pub fn ice_only(&self) -> IceConfig {
+        self.ice.clone()
+    }
+
+    #[must_use]
+    pub fn server_only(&self) -> ServerConfig {
+        self.server.clone()
     }
 }

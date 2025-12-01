@@ -1,8 +1,8 @@
 mod media_transport;
 
+mod error;
 pub mod rtcp;
 pub mod rtp;
-mod error;
 
-pub use media_transport::MediaTransport;
 pub use error::MediaTransportError;
+pub use media_transport::MediaTransport;

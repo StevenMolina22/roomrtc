@@ -7,7 +7,7 @@ use crate::session::ice::candidate_type::CandidateType;
 /// It contains the candidate type (host, server-reflexive, etc.), the
 /// computed priority and the addressing information required to perform
 /// connectivity checks (address, port, transport, component id).
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Candidate {
     /// The type/category of the candidate (e.g. host, srflx).
     pub candidate_type: CandidateType,

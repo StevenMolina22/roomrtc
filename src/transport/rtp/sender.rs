@@ -7,7 +7,6 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use crate::controller::AppEvent;
-use crate::srtp::SrtpContext;
 
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
 ///
@@ -18,8 +17,6 @@ pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     connected: Arc<AtomicBool>,
-    srtp_context: Arc<Mutex<SrtpContext>>,
-    is_client: bool,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
@@ -32,19 +29,15 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         rtp_socket: S,
         report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
         connected: &Arc<AtomicBool>,
-        srtp_context: Arc<Mutex<SrtpContext>>,
-        is_client: bool,
     ) -> Result<Self, Error> {
         Ok(Self {
             rtp_socket,
             report_handler: Arc::clone(report_handler),
             connected: Arc::clone(connected),
-            srtp_context,
-            is_client,
         })
     }
 
-    pub fn start(&self, event_tx: Sender<AppEvent>) -> Result<Sender<RtpPacket>, Error> {
+    pub fn start(&self, event_tx: Sender<AppEvent>) -> Result<Sender<Vec<u8>>, Error> {
         let (tx, rx) = mpsc::channel();
 
         let rtp_socket = self
@@ -53,8 +46,6 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
             .map_err(|_| Error::SocketCloneFailed)?;
         let report_handler = Arc::clone(&self.report_handler);
         let connected = Arc::clone(&self.connected);
-        let is_client = self.is_client.clone();
-        let srtp_context = self.srtp_context.clone();
 
         thread::spawn(move || {
             loop {
@@ -62,28 +53,12 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     break;
                 }
 
-                let rtp_packet = match rx.recv() {
+                let protected_data = match rx.recv() {
                     Ok(p) => {
                         p
                     },
                     Err(e) => {
                         break;
-                    }
-                };
-
-                let protected_data = {
-                    let mut ctx = match srtp_context.lock() {
-                        Ok(c) => c,
-                        Err(_) => {
-                            return;
-                        }
-                    };
-
-                    match ctx.protect(&rtp_packet, is_client) {
-                        Ok(data) => data,
-                        Err(_) => {
-                            return;
-                        }
                     }
                 };
 

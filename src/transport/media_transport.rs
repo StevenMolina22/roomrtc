@@ -1,20 +1,20 @@
 use crate::config::Config;
+use crate::controller::AppEvent;
+use crate::dtls::dtls_socket::DtlsSocket;
+use crate::dtls::key_manager::{LocalCert, PKCS12_PASSWORD};
+use crate::logger::Logger;
+use crate::session::sdp::{DtlsSetupRole, Fingerprint};
+use crate::srtp::context::SrtpContext;
 use crate::transport::MediaTransportError as Error;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::{RtpReceiver, RtpSender};
+use openssl::pkcs12::Pkcs12;
+use openssl::ssl::{SslAcceptor, SslMethod, SslVerifyMode};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use crate::controller::AppEvent;
-use crate::srtp::context::SrtpContext;
-use crate::dtls::dtls_socket::DtlsSocket;
 use udp_dtls::{DtlsAcceptor, DtlsConnector, DtlsStream, SignatureAlgorithm, UdpChannel};
-use crate::session::sdp::{DtlsSetupRole, Fingerprint};
-use openssl::pkcs12::Pkcs12;
-use crate::dtls::key_manager::{LocalCert, PKCS12_PASSWORD};
-use openssl::ssl::{SslAcceptor, SslMethod, SslVerifyMode};
-use crate::logger::Logger;
 
 pub struct MediaTransport {
     config: Arc<Config>,
@@ -43,7 +43,9 @@ impl MediaTransport {
         let rtcp_socket =
             UdpSocket::bind(rtcp_address).map_err(|e| Error::BindingError(e.to_string()))?;
 
-        logger.info(&format!("MediaTransport bound to RTP: {}, RTCP: {}", rtp_address, rtcp_address));
+        logger.info(&format!(
+            "MediaTransport bound to RTP: {rtp_address}, RTCP: {rtcp_address}"
+        ));
 
         Ok(Self {
             config: Arc::clone(config),
@@ -63,18 +65,28 @@ impl MediaTransport {
         event_tx: Sender<AppEvent>,
         local_setup_role: DtlsSetupRole,
         expected_fingerprint: Fingerprint,
-        local_cert: &LocalCert
-    ) -> Result<(Sender<Vec<u8>>, Receiver<Vec<u8>>, Arc<AtomicBool>, SrtpContext), Error> {
-        self.logger.info(&format!("Starting MediaTransport. Remote RTP: {}, Remote RTCP: {}", remote_rtp_address, remote_rtcp_address));
+        local_cert: &LocalCert,
+    ) -> Result<
+        (
+            Sender<Vec<u8>>,
+            Receiver<Vec<u8>>,
+            Arc<AtomicBool>,
+            SrtpContext,
+        ),
+        Error,
+    > {
+        self.logger.info(&format!(
+            "Starting MediaTransport. Remote RTP: {remote_rtp_address}, Remote RTCP: {remote_rtcp_address}"
+        ));
 
         let rtp_dtls = self.create_dtls_socket(
             self.rtp_socket
                 .try_clone()
                 .map_err(|e| Error::CloningSocketError(e.to_string()))?,
             remote_rtp_address,
-            local_setup_role.clone(),
-            expected_fingerprint.clone(),
-            local_cert
+            local_setup_role,
+            expected_fingerprint,
+            local_cert,
         )?;
 
         self.rtp_socket
@@ -88,10 +100,10 @@ impl MediaTransport {
 
         let key_material = rtp_dtls
             .export_keying_material("EXTRACTOR-dtls_srtp", 60)
-            .map_err(|e| Error::MapError(format!("Key export failed: {}", e)))?;
+            .map_err(|e| Error::MapError(format!("Key export failed: {e}")))?;
 
         let srtp_context = SrtpContext::new(&key_material)
-            .map_err(|e| Error::MapError(format!("SRTP context creation failed: {}", e)))?;
+            .map_err(|e| Error::MapError(format!("SRTP context creation failed: {e}")))?;
 
         let local_ssrc = self.config.media.default_ssrc;
 
@@ -110,22 +122,30 @@ impl MediaTransport {
 
         let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.spawn_rtp_threads(event_tx)?;
 
-        Ok((local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.connected.clone(), srtp_context))
+        Ok((
+            local_to_remote_rtp_tx,
+            remote_to_local_rtp_rx,
+            self.connected.clone(),
+            srtp_context,
+        ))
     }
-
-
 
     pub fn stop(&mut self) -> Result<(), Error> {
         self.logger.info("Stopping MediaTransport...");
         self.connected.store(false, Ordering::SeqCst);
-        self.rtp_socket.set_read_timeout(None).map_err(|e| Error::SocketConfigFailed)?;
-        self.rtcp_socket.set_read_timeout(None).map_err(|e| Error::SocketConfigFailed)?;
+        self.rtp_socket
+            .set_read_timeout(None)
+            .map_err(|e| Error::SocketConfigFailed)?;
+        self.rtcp_socket
+            .set_read_timeout(None)
+            .map_err(|e| Error::SocketConfigFailed)?;
 
         if let Some(rtcp_handler) = &self.rtcp_handler
-            && let Ok(rtcp_handler) = rtcp_handler.lock() {
-                return rtcp_handler
-                    .report_goodbye()
-                    .map_err(|e| Error::MapError(e.to_string()));
+            && let Ok(rtcp_handler) = rtcp_handler.lock()
+        {
+            return rtcp_handler
+                .report_goodbye()
+                .map_err(|e| Error::MapError(e.to_string()));
         }
 
         Ok(())
@@ -173,7 +193,6 @@ impl MediaTransport {
         &self,
         rtcp_handler: &Arc<Mutex<RtcpReportHandler<UdpSocket>>>,
         event_tx: Sender<AppEvent>,
-
     ) -> Result<Receiver<Vec<u8>>, Error> {
         let srtp_receiver_socket = self
             .rtp_socket
@@ -200,7 +219,7 @@ impl MediaTransport {
         remote_addr: SocketAddr,
         local_setup_role: DtlsSetupRole,
         expected_fingerprint: Fingerprint,
-        local_cert: &LocalCert
+        local_cert: &LocalCert,
     ) -> Result<DtlsSocket, Error> {
         let mut role = local_setup_role;
         if matches!(role, DtlsSetupRole::ActPass) {
@@ -216,7 +235,8 @@ impl MediaTransport {
 
         let stream = match role {
             DtlsSetupRole::Active => {
-                let identity = local_cert.duplicate_identity()
+                let identity = local_cert
+                    .duplicate_identity()
                     .map_err(|e| Error::MapError(e.to_string()))?;
 
                 let connector = DtlsConnector::builder()

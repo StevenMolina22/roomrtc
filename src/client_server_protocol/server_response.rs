@@ -23,7 +23,7 @@ pub enum ServerResponse {
     },
 
     CallRejected,
-    
+
     BadMessage,
 
     Error(String),
@@ -60,7 +60,7 @@ impl ServerResponse {
             Self::CallAccepted { sdp_answer } => format!("CALLACCEPTED|{sdp_answer}"),
 
             Self::CallRejected => "CALLREJECTED".to_string(),
-            
+
             Self::BadMessage => "BADMSG".to_string(),
 
             Self::Error(msg) => format!("ERROR|{msg}"),
@@ -114,15 +114,14 @@ impl ServerResponse {
 
             "CALLHANGUPOK" => Some(Self::CallHangUpOk),
 
-            "CALLHANGUPERROR" if parts.len() == 2 =>
-                Some(Self::CallHangUpError(parts[1].into())),
+            "CALLHANGUPERROR" if parts.len() == 2 => Some(Self::CallHangUpError(parts[1].into())),
 
             "CALLACCEPTED" if parts.len() == 2 => Some(Self::CallAccepted {
                 sdp_answer: parts[1].parse().ok()?,
             }),
 
             "CALLREJECTED" if parts.len() == 1 => Some(Self::CallRejected),
-            
+
             "BADMSG" if parts.len() == 1 => Some(Self::BadMessage),
 
             "ERROR" if parts.len() == 2 => Some(Self::Error(parts[1].into())),

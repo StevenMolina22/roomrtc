@@ -12,7 +12,7 @@ pub enum ServerError {
     FailedToBindAddress,
     ConnectionError(String),
     ServerOff,
-    InvalidFormat
+    InvalidFormat,
 }
 
 impl Display for ServerError {

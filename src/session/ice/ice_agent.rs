@@ -3,9 +3,9 @@ use super::candidate_pair::CandidatePair;
 use super::connectivity_state::ConnectivityState;
 use super::error::IceError as Error;
 use crate::config::IceConfig;
-use if_addrs;
-use crate::session::ice::stun_client;
 use crate::logger::Logger;
+use crate::session::ice::stun_client;
+use if_addrs;
 
 /// An ICE agent that gathers local candidates, accepts remote candidates
 /// and forms candidate pairs for connectivity checks.
@@ -27,7 +27,7 @@ impl IceAgent {
     ///
     /// The agent starts with no local or remote candidates and no pairs.
     #[must_use]
-    pub fn new(logger: Logger) -> Self {
+    pub const fn new(logger: Logger) -> Self {
         Self {
             local_candidates: Vec::new(),
             remote_candidates: Vec::new(),
@@ -58,21 +58,27 @@ impl IceAgent {
     ///   silently).
     /// - `Err(Error)` if a fatal error occurred (e.g., network interface
     ///   enumeration failure). STUN discovery failures are logged
-    pub fn gather_candidates(&mut self, socket: &std::net::UdpSocket, ice_config: &IceConfig) -> Result<(), Error> {
-    if let Ok(local_ip) = get_local_ip() {
-        let port = socket.local_addr().map(|a| a.port()).unwrap_or(0);
-        let mut host = Candidate::new_host(local_ip, ice_config.component_id, ice_config);
-        host.port = port;
-        self.local_candidates.push(host);
-    }
+    pub fn gather_candidates(
+        &mut self,
+        socket: &std::net::UdpSocket,
+        ice_config: &IceConfig,
+    ) -> Result<(), Error> {
+        if let Ok(local_ip) = get_local_ip() {
+            let port = socket.local_addr().map(|a| a.port()).unwrap_or(0);
+            let mut host = Candidate::new_host(local_ip, ice_config.component_id, ice_config);
+            host.port = port;
+            self.local_candidates.push(host);
+        }
 
-    self.logger.info("STUN: Starting discovery on existing socket...");
+        self.logger
+            .info("STUN: Starting discovery on existing socket...");
 
-    match stun_client::get_public_ip_and_port(socket) {
-        Ok(addr) => {
-            if let Some((ip, port_str)) = addr.split_once(':')
-                && let Ok(stun_port) = port_str.parse::<u16>() {
-                    self.logger.info(&format!("STUN OK: {}:{}", ip, stun_port));
+        match stun_client::get_public_ip_and_port(socket) {
+            Ok(addr) => {
+                if let Some((ip, port_str)) = addr.split_once(':')
+                    && let Ok(stun_port) = port_str.parse::<u16>()
+                {
+                    self.logger.info(&format!("STUN OK: {ip}:{stun_port}"));
 
                     let srflx = Candidate::new(
                         crate::session::ice::candidate_type::CandidateType::ServerReflexive,
@@ -85,13 +91,12 @@ impl IceAgent {
                     );
                     self.local_candidates.push(srflx);
                 }
+            }
+            Err(e) => self.logger.warn(&format!("STUN failed: {e}")),
+        }
 
-        },
-        Err(e) => self.logger.warn(&format!("STUN failed: {}", e)),
+        Ok(())
     }
-
-    Ok(())
-}
 
     /// Add a single remote candidate and create candidate pairs.
     ///
@@ -129,8 +134,10 @@ impl IceAgent {
 
         for local in &self.local_candidates {
             for remote in &self.remote_candidates {
-                let is_local_stun = local.candidate_type == crate::session::ice::candidate_type::CandidateType::ServerReflexive;
-                let is_remote_stun = remote.candidate_type == crate::session::ice::candidate_type::CandidateType::ServerReflexive;
+                let is_local_stun = local.candidate_type
+                    == crate::session::ice::candidate_type::CandidateType::ServerReflexive;
+                let is_remote_stun = remote.candidate_type
+                    == crate::session::ice::candidate_type::CandidateType::ServerReflexive;
 
                 if is_local_stun || is_remote_stun {
                     self.logger.debug(&format!(
@@ -147,7 +154,8 @@ impl IceAgent {
         }
 
         if self.candidate_pairs.is_empty() {
-            self.logger.error("Error: No viable Host-Host pairs (are hosts on different networks?)");
+            self.logger
+                .error("Error: No viable Host-Host pairs (are hosts on different networks?)");
             return Err(Error::NoCandidatePairs);
         }
 
@@ -171,7 +179,8 @@ impl IceAgent {
         self.selected_pair = Some(selected_pair.clone());
 
         // Display handshake completion message
-        self.logger.info("Handshake complete! A direct connection can be established.");
+        self.logger
+            .info("Handshake complete! A direct connection can be established.");
         self.logger.info(&format!(
             "   - My Address: {}:{}",
             selected_pair.local.address, selected_pair.local.port
@@ -194,7 +203,7 @@ impl IceAgent {
         self.local_candidates.first()
     }
 
-    pub fn get_local_candidates(&self) -> &[Candidate] {
+    #[must_use] pub fn get_local_candidates(&self) -> &[Candidate] {
         &self.local_candidates
     }
 
@@ -299,7 +308,9 @@ mod tests {
 
         assert!(!agent.local_candidates.is_empty());
 
-        let host_candidate = agent.local_candidates.iter()
+        let host_candidate = agent
+            .local_candidates
+            .iter()
             .find(|c| c.candidate_type == CandidateType::Host)
             .expect("Host candidate missing");
 

@@ -142,7 +142,6 @@ impl CentralServer {
                     let tls_conn = ServerConnection::new(tls_config).unwrap();
                     let tls_stream = StreamOwned::new(tls_conn, stream);
 
-
                     let mut user_handler = UserHandler::new(
                         users,
                         users_connected,

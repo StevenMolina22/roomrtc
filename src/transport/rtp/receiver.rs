@@ -1,4 +1,6 @@
 use crate::config::Config;
+use crate::controller::AppEvent;
+use crate::logger::Logger;
 use crate::tools::Socket;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
@@ -7,8 +9,6 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
-use crate::controller::AppEvent;
-use crate::logger::Logger;
 
 /// RTP receiver that reads `RtpPacket` instances from a socket and
 /// manages RTCP reporting through a `RtcpReportHandler`.
@@ -78,17 +78,15 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
                         break;
                     }
                     let protected_data = match receive(&rtp_socket, &connected, &rtcp_handler) {
-                        Ok(protected_data) => {
-                            protected_data
-                        },
+                        Ok(protected_data) => protected_data,
                         Err(e) => {
-                            logger.error(&format!("RtpReceiver error: {}", e));
+                            logger.error(&format!("RtpReceiver error: {e}"));
                             break;
                         }
                     };
 
                     if let Err(e) = remote_to_local_rtp_tx.send(protected_data) {
-                        logger.error(&format!("Failed to send received packet to channel: {}", e));
+                        logger.error(&format!("Failed to send received packet to channel: {e}"));
                         break;
                     }
                 }

@@ -21,7 +21,7 @@ impl ServerMessage {
         let s = match self {
             Self::UsernameRequest => "USERNAMEREQUEST".to_string(),
             Self::CallIncoming { from, offer_sdp } => {
-                format!("CALLINCOMING|{}|{}", from, offer_sdp)
+                format!("CALLINCOMING|{from}|{offer_sdp}")
             }
             Self::Error(msg) => format!("ERROR|{msg}"),
             Self::UserStatusUpdate(user, status) => {
@@ -61,7 +61,7 @@ impl ServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::SdpConfig;
+    
 
     // Helper: crea un ServerMessage -> bytes -> ServerMessage nuevamente
     fn roundtrip(msg: ServerMessage) -> ServerMessage {

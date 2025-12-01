@@ -1,13 +1,12 @@
 use crate::config::Config;
+use crate::dtls::key_manager::{LocalCert, generate_self_signed_cert};
 use crate::session::error::CallSessionError as Error;
 use crate::session::ice::{CandidatePair, IceAgent};
 use crate::session::sdp::{Attribute, MediaDescription, SessionDescriptionProtocol};
+use crate::session::sdp::{DtlsSetupRole, Fingerprint};
 use std::collections::HashSet;
 use std::net::UdpSocket;
 use std::sync::Arc;
-use crate::dtls::key_manager::{LocalCert, generate_self_signed_cert};
-use crate::session::sdp::{Fingerprint, DtlsSetupRole};
-
 
 use crate::logger::Logger;
 
@@ -70,7 +69,11 @@ impl CallSession {
     /// # Returns
     /// Returns a `CallSession` containing the local SDP and an `IceAgent`
     /// already configured with (potentially) gathered candidates.
-    pub fn new(stun_socket: UdpSocket, config: &Arc<Config>, logger: Logger) -> Result<Self, Error> {
+    pub fn new(
+        stun_socket: UdpSocket,
+        config: &Arc<Config>,
+        logger: Logger,
+    ) -> Result<Self, Error> {
         let mut ice_agent = IceAgent::new(logger.context("IceAgent"));
         ice_agent
             .gather_candidates(&stun_socket, &config.ice)
@@ -80,7 +83,10 @@ impl CallSession {
 
         let mut media_description = MediaDescription::new(
             config.media.media_type.clone(),
-            stun_socket.local_addr().map_err(|e| Error::IceConnectionError(e.to_string()))?.port(),
+            stun_socket
+                .local_addr()
+                .map_err(|e| Error::IceConnectionError(e.to_string()))?
+                .port(),
             config.media.media_protocol.clone(),
             HashSet::from([config.media.rtp_payload_type]),
         );
@@ -102,23 +108,26 @@ impl CallSession {
         }
 
         let local_cert = generate_self_signed_cert().map_err(|e| {
-            Error::SecurityInitializationError(format!(
-                "Failed to generate local certificate: {e}"
-            ))
+            Error::SecurityInitializationError(format!("Failed to generate local certificate: {e}"))
         })?;
 
         let fingerprint = Fingerprint::from_hash_string("sha-256", &local_cert.fingerprint)
-            .map_err(|e| { Error::SdpCreationError(format!("Failed to encode local fingerprint attribute: {e}"))})?;
+            .map_err(|e| {
+                Error::SdpCreationError(format!(
+                    "Failed to encode local fingerprint attribute: {e}"
+                ))
+            })?;
 
         media_description
             .add_attribute(Attribute::Fingerprint(fingerprint))
-            .map_err(|e| { Error::SdpCreationError(format!("Failed to add fingerprint attribute: {e}")) })?;
+            .map_err(|e| {
+                Error::SdpCreationError(format!("Failed to add fingerprint attribute: {e}"))
+            })?;
 
         let local_setup_role = DtlsSetupRole::ActPass;
         media_description
             .add_attribute(Attribute::Setup(local_setup_role))
-            .map_err(|e| { Error::SdpCreationError(format!("Failed to add setup attribute: {e}")) })?;
-
+            .map_err(|e| Error::SdpCreationError(format!("Failed to add setup attribute: {e}")))?;
 
         let mut sdp = SessionDescriptionProtocol::new(vec![media_description], &config.sdp);
 
@@ -146,7 +155,6 @@ impl CallSession {
         &mut self,
         offer_sdp: &SessionDescriptionProtocol,
     ) -> Result<SessionDescriptionProtocol, Error> {
-
         let desired_role = self.determine_local_role(offer_sdp, RemoteSdpType::Offer);
         self.set_local_setup_role(desired_role)?;
 
@@ -229,7 +237,7 @@ impl CallSession {
         }
     }
 
-    fn determine_complementary_role(
+    const fn determine_complementary_role(
         &self,
         remote_role: DtlsSetupRole,
         remote_type: RemoteSdpType,

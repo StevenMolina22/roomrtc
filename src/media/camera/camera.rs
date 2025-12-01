@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
-use opencv::{imgproc, prelude::*, videoio, core};
+use opencv::{core, imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -117,7 +117,15 @@ impl Camera {
                     continue;
                 }
 
-                if imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT).is_err() {
+                if imgproc::cvt_color(
+                    &mat,
+                    &mut rgb,
+                    imgproc::COLOR_BGR2RGB,
+                    0,
+                    core::AlgorithmHint::ALGO_HINT_DEFAULT,
+                )
+                .is_err()
+                {
                     eprintln!("Failed to convert frame color.");
                     continue;
                 }

@@ -1,6 +1,6 @@
 use super::FrameError as Error;
-use opencv::{imgproc, core};
 use opencv::prelude::*;
+use opencv::{core, imgproc};
 use std::fmt::{Display, Formatter};
 
 /// An in-memory video frame used by the frame handler.
@@ -71,8 +71,14 @@ impl Frame {
 
         let mut rgb_mat = Mat::default();
 
-        imgproc::cvt_color(&yuv_mat, &mut rgb_mat, imgproc::COLOR_YUV2RGB_I420, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT)
-            .map_err(|_| Error::TypeConversionError)?;
+        imgproc::cvt_color(
+            &yuv_mat,
+            &mut rgb_mat,
+            imgproc::COLOR_YUV2RGB_I420,
+            0,
+            core::AlgorithmHint::ALGO_HINT_DEFAULT,
+        )
+        .map_err(|_| Error::TypeConversionError)?;
 
         Ok(Self {
             data: rgb_mat

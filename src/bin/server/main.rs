@@ -31,7 +31,7 @@ fn main() {
     let logger = match Logger::new(log_path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("Failed to initialize logger: {}", e);
+            eprintln!("Failed to initialize logger: {e}");
             std::process::exit(1);
         }
     };
@@ -39,7 +39,7 @@ fn main() {
 
     let sv_config = Arc::new(config);
 
-    let mut sv = match CentralServer::new(sv_config.clone(), logger.context("CentralServer")) {
+    let mut sv = match CentralServer::new(sv_config, logger.context("CentralServer")) {
         Ok(sv) => sv,
         Err(e) => {
             eprintln!("Failed to start server: {e}");

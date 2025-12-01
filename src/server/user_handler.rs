@@ -34,15 +34,15 @@ impl UserHandler {
         config: Arc<Config>,
         server_client_socket_addr: SocketAddr,
         max_users: usize,
+        logger: Logger,
     ) -> Self {
-   
         Self {
             op_server: OperatingServer::new(
                 users,
                 users_connected,
                 server_client_socket_addr,
                 config.server.users_file.clone(),
-                max_users
+                max_users,
                 logger.context("OperatingServer"),
             ),
             logger,
@@ -78,7 +78,7 @@ impl UserHandler {
                 }
                 Ok(n) => ClientMessage::from_bytes(&buff[0..n]),
                 Err(e) => {
-                    self.logger.error(&format!("Connection error: {}", e));
+                    self.logger.error(&format!("Connection error: {e}"));
                     self.op_server.make_user_offline()?;
                     return Err(Error::ConnectionError(e.to_string()));
                 }

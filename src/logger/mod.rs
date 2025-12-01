@@ -30,22 +30,22 @@ pub struct LogMessage {
     level: LogLevel,
     /// The body text of the log entry.
     message: String,
-    /// The component or context generating the message (e.g., "IceAgent", "Controller").
+    /// The component or context generating the message (e.g., "`IceAgent`", "Controller").
     context: String,
     /// The timestamp when the message was generated.
     timestamp: String,
 }
 
 impl std::fmt::Display for LogLevel {
-    /// Formats the LogLevel variant as its canonical uppercase string representation.
+    /// Formats the `LogLevel` variant as its canonical uppercase string representation.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            LogLevel::Info => "INFO",
-            LogLevel::Warn => "WARN",
-            LogLevel::Error => "ERROR",
-            LogLevel::Debug => "DEBUG",
+            Self::Info => "INFO",
+            Self::Warn => "WARN",
+            Self::Error => "ERROR",
+            Self::Debug => "DEBUG",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -55,9 +55,9 @@ impl std::fmt::Display for LogLevel {
 /// log calls to a single background thread responsible for file I/O.
 #[derive(Clone)]
 pub struct Logger {
-    /// The Sender side of the channel, used to dispatch LogMessage instances.
+    /// The Sender side of the channel, used to dispatch `LogMessage` instances.
     message_tx: Sender<LogMessage>,
-    /// The specific context/name for this logger instance (e.g., "IceAgent").
+    /// The specific context/name for this logger instance (e.g., "`IceAgent`").
     context: String,
     file_path: Arc<String>,
 }
@@ -103,7 +103,7 @@ impl Logger {
             }
         });
 
-        Ok(Logger {
+        Ok(Self {
             message_tx: tx,
             context: String::new(),
             file_path: file_path_arc,

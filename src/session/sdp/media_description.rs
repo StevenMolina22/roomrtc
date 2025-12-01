@@ -1,6 +1,6 @@
 use super::error::SdpError as Error;
-use crate::session::ice::Candidate;
 use super::{Attribute, DtlsSetupRole, Fingerprint};
+use crate::session::ice::Candidate;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;

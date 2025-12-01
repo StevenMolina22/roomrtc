@@ -1,6 +1,7 @@
 use crate::client_server_protocol::{ClientMessage, ClientResponse, ServerMessage, ServerResponse};
 use crate::config::Config;
 use crate::controller::{AppEvent, ControllerError as Error};
+use crate::logger::Logger;
 use crate::media::MediaPipeline;
 use crate::media::frame_handler::Frame;
 use crate::session::CallSession;
@@ -17,7 +18,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock, mpsc};
 use std::thread;
-use crate::logger::Logger;
 
 pub struct Controller {
     config: Arc<Config>,
@@ -51,8 +51,10 @@ impl Controller {
         )?;
 
         let media_pipeline = MediaPipeline::new(config, 0, logger.context("MediaPipeline"));
-        let transport = MediaTransport::new(config, logger.context("MediaTransport")).map_err(|e| Error::MapError(e.to_string()))?;
-        let socket_for_stun = transport.rtp_socket
+        let transport = MediaTransport::new(config, logger.context("MediaTransport"))
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        let socket_for_stun = transport
+            .rtp_socket
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
         let call_session = CallSession::new(socket_for_stun, config, logger.context("CallSession"))
@@ -102,21 +104,31 @@ impl Controller {
     }
 
     pub fn hang_up(&mut self) -> Result<(), Error> {
-        let msg = ClientMessage::CallHangup {token: self.get_token()?};
+        let msg = ClientMessage::CallHangup {
+            token: self.get_token()?,
+        };
 
         match send_message(msg, &mut self.client_server_stream)? {
-            ServerResponse::CallHangUpOk => {},
+            ServerResponse::CallHangUpOk => {}
             ServerResponse::CallHangUpError(e) => return Err(Error::CallError(e)),
             _ => return Err(Error::BadResponse),
-        };
+        }
 
         self.stop_media_components()?;
 
-        self.transport = MediaTransport::new(&self.config, self.logger.context("MediaTransport")).map_err(|e| Error::MapError(e.to_string()))?;
-        let socket_for_stun = self.transport.rtp_socket
+        self.transport = MediaTransport::new(&self.config, self.logger.context("MediaTransport"))
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        let socket_for_stun = self
+            .transport
+            .rtp_socket
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
-        self.call_session = CallSession::new(socket_for_stun, &self.config, self.logger.context("CallSession")).map_err(|e| Error::MapError(e.to_string()))?;
+        self.call_session = CallSession::new(
+            socket_for_stun,
+            &self.config,
+            self.logger.context("CallSession"),
+        )
+        .map_err(|e| Error::MapError(e.to_string()))?;
 
         Ok(())
     }
@@ -127,7 +139,6 @@ impl Controller {
             .stop()
             .map_err(|e| Error::MapError(e.to_string()))
     }
-
 
     pub fn accept_call(
         &mut self,
@@ -164,21 +175,33 @@ impl Controller {
                 .parse()
                 .map_err(Error::ParsingSocketAddressError)?;
 
-        let remote_fingerprint = self.call_session.remote_fingerprint.clone().ok_or(Error::NotLoggedInError)?;
+        let remote_fingerprint = self
+            .call_session
+            .remote_fingerprint
+            .clone()
+            .ok_or(Error::NotLoggedInError)?;
         let (local_to_remote_rtp_tx, remote_to_local_rtp_rx, connected, srtp_ctx) = self
             .transport
-            .start(remote_rtp_address,
-                   remote_rtcp_address,
-                   self.event_tx.clone(),
-                   self.call_session.local_setup_role,
-                   remote_fingerprint,
-                   &self.call_session.local_cert,
+            .start(
+                remote_rtp_address,
+                remote_rtcp_address,
+                self.event_tx.clone(),
+                self.call_session.local_setup_role,
+                remote_fingerprint,
+                &self.call_session.local_cert,
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
 
-            let role = self.call_session.local_setup_role;
+        let role = self.call_session.local_setup_role;
         self.media_pipeline
-            .start(local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.event_tx.clone(), connected, srtp_ctx, role)
+            .start(
+                local_to_remote_rtp_tx,
+                remote_to_local_rtp_rx,
+                self.event_tx.clone(),
+                connected,
+                srtp_ctx,
+                role,
+            )
             .map_err(|e| Error::MapError(e.to_string()))
     }
 
@@ -315,14 +338,12 @@ impl Controller {
     }
 
     fn give_response_to_thread(&mut self, response: ClientResponse) -> Result<(), Error> {
-        match &self.client_response_tx {
-            Some(client_response_tx) => client_response_tx
-                .send(response)
-                .map_err(|e| Error::IOError(e.to_string())),
-            None => {
-                self.logger.warn("No podes obtener canal, no estas loggeado");
-                Err(Error::NotLoggedInError)
-            },
+        if let Some(client_response_tx) = &self.client_response_tx { client_response_tx
+        .send(response)
+        .map_err(|e| Error::IOError(e.to_string())) } else {
+            self.logger
+                .warn("No podes obtener canal, no estas loggeado");
+            Err(Error::NotLoggedInError)
         }
     }
 
@@ -335,12 +356,10 @@ impl Controller {
     }
 
     fn get_token(&self) -> Result<String, Error> {
-        match &self.token {
-            Some(token) => Ok(token.clone()),
-            None => {
-                self.logger.warn("No podes obtener token, no estas loggeado");
-                Err(Error::NotLoggedInError)
-            },
+        if let Some(token) = &self.token { Ok(token.clone()) } else {
+            self.logger
+                .warn("No podes obtener token, no estas loggeado");
+            Err(Error::NotLoggedInError)
         }
     }
 
@@ -372,12 +391,8 @@ fn send_message(
 
     let mut buff = [0u8; 1024];
     match stream.read(&mut buff) {
-        Ok(size) => {
-            ServerResponse::from_bytes(&buff[..size]).ok_or(Error::BadResponse)
-        },
-        Err(e) => {
-            Err(Error::IOError(e.to_string()))
-        },
+        Ok(size) => ServerResponse::from_bytes(&buff[..size]).ok_or(Error::BadResponse),
+        Err(e) => Err(Error::IOError(e.to_string())),
     }
 }
 

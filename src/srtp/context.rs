@@ -56,20 +56,20 @@ impl SrtpContext {
     pub fn protect(&mut self, packet: &RtpPacket, is_client: bool) -> Result<Vec<u8>, SrtpError> {
         let seq_num = packet.chunk_id as u16;
         let roc = packet.frame_id as u32;
-        
+
         self.roc_map.insert(packet.ssrc, roc);
 
         let (key, salt) = self.get_write_keys(is_client);
         let packet_bytes = packet.to_bytes();
-        
+
         if packet_bytes.len() < 28 {
             return Err(SrtpError::PacketTooShort);
         }
 
         let iv = Self::get_iv(salt, packet.ssrc, roc, seq_num);
-        
+
         let encrypted_payload = Self::apply_aes_ctr(key, &iv, &packet_bytes[28..], true)?;
-        
+
         let mut out_packet = packet_bytes[..28].to_vec();
         out_packet.extend_from_slice(&encrypted_payload);
 
@@ -97,13 +97,13 @@ impl SrtpContext {
         }
         let content_len = packet_bytes.len() - 10;
         let (content, tag) = packet_bytes.split_at(content_len);
-        
+
         let mut temp_packet = RtpPacket::from_bytes(content).ok_or(SrtpError::PacketTooShort)?;
         let (key, salt) = self.get_read_keys(is_client);
         let roc = temp_packet.frame_id as u32;
-        
+
         self.verify_srtp_tag(key, content, roc, tag)?;
-        
+
         let iv = Self::get_iv(salt, temp_packet.ssrc, roc, temp_packet.chunk_id as u16);
         let decrypted = Self::apply_aes_ctr(key, &iv, &temp_packet.payload, false)?;
 
@@ -126,20 +126,20 @@ impl SrtpContext {
         is_client: bool,
     ) -> Result<Vec<u8>, SrtpError> {
         let index = self.next_rtcp_index(ssrc)?;
-        
+
         let (key, salt) = self.get_write_keys(is_client);
-        
+
         if packet_data.len() < 8 {
             return Err(SrtpError::PacketTooShort);
         }
-        
+
         let iv = Self::get_srtcp_iv(salt, ssrc, index);
         let encrypted_payload = Self::apply_aes_ctr(key, &iv, &packet_data[8..], true)?;
-        
+
         let mut out_packet = packet_data[..8].to_vec();
         out_packet.extend_from_slice(&encrypted_payload);
         out_packet.extend_from_slice(&(index | 0x8000_0000).to_be_bytes());
-        
+
         let tag = Self::calculate_hmac(key, &out_packet)?;
         out_packet.extend_from_slice(&tag);
 
@@ -164,30 +164,30 @@ impl SrtpContext {
         }
 
         let (key, salt) = self.get_read_keys(is_client);
-        
+
         let split_at_tag = packet_bytes.len() - 10;
         let (auth_input, tag) = packet_bytes.split_at(split_at_tag);
-        
+
         if Self::calculate_hmac(key, auth_input)? != tag {
             return Err(SrtpError::AuthenticationFailed);
         }
-        
+
         let split_at_index = auth_input.len() - 4;
         let (content, index_bytes) = auth_input.split_at(split_at_index);
-        
+
         let index_val = u32::from_be_bytes(
             index_bytes
                 .try_into()
                 .map_err(|_| SrtpError::PacketTooShort)?,
         );
         let srtcp_index = index_val & 0x7FFF_FFFF;
-        
+
         let ssrc_bytes = packet_bytes.get(4..8).ok_or(SrtpError::PacketTooShort)?;
         let ssrc = u32::from_be_bytes(ssrc_bytes.try_into().unwrap());
 
         let iv = Self::get_srtcp_iv(salt, ssrc, srtcp_index);
         let decrypted_payload = Self::apply_aes_ctr(key, &iv, &content[8..], false)?;
-        
+
         let mut out_packet = content[..8].to_vec();
         out_packet.extend_from_slice(&decrypted_payload);
 
@@ -237,13 +237,13 @@ impl SrtpContext {
         let mut signer = Signer::new(MessageDigest::sha1(), &pkey).map_err(SrtpError::from)?;
         signer.update(data).map_err(SrtpError::from)?;
         let full_hmac = signer.sign_to_vec().map_err(SrtpError::from)?;
-        
+
         Ok(full_hmac[0..10].to_vec())
     }
 
     /// Generates the 128-bit Initialization Vector (IV) for AES-CTR.
     ///
-    /// Computed by XORing the session salt with the SSRC, ROC, and sequence number
+    /// Computed by `XORing` the session salt with the SSRC, ROC, and sequence number
     /// as specified in RFC 3711.
     fn get_iv(salt: &[u8], ssrc: u32, roc: u32, seq_num: u16) -> [u8; 16] {
         let mut iv = [0u8; 16];
@@ -254,11 +254,11 @@ impl SrtpContext {
         let ssrc_bytes = ssrc.to_be_bytes();
         let roc_bytes = roc.to_be_bytes();
         let seq_bytes = seq_num.to_be_bytes();
-        
+
         block[4..8].copy_from_slice(&ssrc_bytes);
         block[10..14].copy_from_slice(&roc_bytes);
         block[14..16].copy_from_slice(&seq_bytes);
-        
+
         for i in 0..16 {
             iv[i] ^= block[i];
         }
@@ -298,7 +298,7 @@ impl SrtpContext {
     fn next_rtcp_index(&mut self, ssrc: u32) -> Result<u32, SrtpError> {
         let index = self.srtcp_idx_map.entry(ssrc).or_insert(0);
         let current = *index;
-        
+
         if current > 0x7FFF_FFFF {
             return Err(SrtpError::KeyDerivationFailed);
         }
@@ -308,19 +308,19 @@ impl SrtpContext {
     }
 
     /// Generates the Initialization Vector (IV) for SRTCP.
-    /// Formula: (Salt) XOR ((SSRC << 64) | (SRTCP_INDEX << 16))
+    /// Formula: (Salt) XOR ((SSRC << 64) | (`SRTCP_INDEX` << 16))
     fn get_srtcp_iv(salt: &[u8], ssrc: u32, index: u32) -> [u8; 16] {
         let mut iv = [0u8; 16];
-        
+
         let salt_len = salt.len().min(14);
         iv[0..salt_len].copy_from_slice(&salt[0..salt_len]);
 
         let mut block = [0u8; 16];
         let ssrc_bytes = ssrc.to_be_bytes();
         let index_bytes = index.to_be_bytes();
-        
+
         block[4..8].copy_from_slice(&ssrc_bytes);
-        
+
         block[10..14].copy_from_slice(&index_bytes);
 
         // 3. XOR the salt with the block
@@ -341,19 +341,10 @@ mod tests {
         let keying_material = [0u8; 60];
         let mut context = SrtpContext::new(&keying_material).unwrap();
 
-        let packet = RtpPacket::new(
-            1,               
-            0,                
-            96,            
-            vec![1, 2, 3, 4], 
-            12345,           
-            100,              
-            1,                
-            999,              
-        );
-        
+        let packet = RtpPacket::new(1, 0, 96, vec![1, 2, 3, 4], 12345, 100, 1, 999);
+
         let protected = context.protect(&packet, true).expect("Protection failed");
-        
+
         let unprotected = context
             .unprotect(&protected, false)
             .expect("Unprotection failed");
@@ -367,21 +358,21 @@ mod tests {
         let key_material = [0u8; 60];
         let mut client_ctx = SrtpContext::new(&key_material).unwrap();
         let mut server_ctx = SrtpContext::new(&key_material).unwrap();
-        
+
         let ssrc = 0x12345678;
         let packet = crate::transport::rtcp::RtcpPacket::ConnectivityReport(ssrc);
         let raw_bytes = packet.to_bytes();
-        
+
         let protected = client_ctx
             .protect_rtcp(&raw_bytes, ssrc, true)
             .expect("SRTCP protection failed");
-        
+
         assert_eq!(protected.len(), raw_bytes.len() + 4 + 10);
-        
+
         let unprotected = server_ctx
             .unprotect_rtcp(&protected, false)
             .expect("SRTCP unprotection failed");
-        
+
         assert_eq!(
             unprotected, raw_bytes,
             "Decrypted data does not match original"

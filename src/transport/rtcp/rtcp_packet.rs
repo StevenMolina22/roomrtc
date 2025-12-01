@@ -39,7 +39,7 @@ impl RtcpPacket {
     /// Byte 1: Packet Type (PT)
     /// Bytes 2-3: Length (in 32-bit words - 1). 8 bytes = 2 words. Length = 1.
     /// Bytes 4-7: SSRC
-    pub fn to_bytes(&self) -> Vec<u8> {
+    #[must_use] pub fn to_bytes(&self) -> Vec<u8> {
         // We map our custom types to arbitrary PT numbers or keep using the ASCII bytes
         // 'C'=67, 'B'=66, 'H'=72, 'R'=82 are all valid byte values for PT.
         let (pt, ssrc) = match self {
@@ -86,7 +86,7 @@ impl RtcpPacket {
 
     /// Helper to extract just the SSRC from raw bytes without fully
     /// parsing the packet type. Useful for SRTCP context lookup.
-    pub fn ssrc_from_bytes(data: &[u8]) -> Option<u32> {
+    #[must_use] pub fn ssrc_from_bytes(data: &[u8]) -> Option<u32> {
         if data.len() < 8 {
             return None;
         }

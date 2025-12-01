@@ -24,7 +24,7 @@ pub struct DtlsSocket {
 
 impl DtlsSocket {
     /// Creates a new `DtlsSocket` from an established DTLS stream.
-    pub fn new(stream: DtlsStream<UdpChannel>, remote_addr: SocketAddr) -> Self {
+    #[must_use] pub fn new(stream: DtlsStream<UdpChannel>, remote_addr: SocketAddr) -> Self {
         Self {
             stream: Arc::new(Mutex::new(stream)),
             remote_addr,
@@ -42,7 +42,7 @@ impl DtlsSocket {
         let mut guard = self
             .stream
             .lock()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "DTLS stream poisoned"))?;
+            .map_err(|_| io::Error::other("DTLS stream poisoned"))?;
         f(&mut guard)
     }
 
@@ -58,7 +58,7 @@ impl DtlsSocket {
                 .0
                 .ssl()
                 .export_keying_material(&mut buf, label, None)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| io::Error::other(e.to_string()))?;
             Ok(buf)
         })
     }
@@ -83,7 +83,7 @@ impl Socket for DtlsSocket {
         let guard = self
             .stream
             .lock()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "DTLS stream poisoned"))?;
+            .map_err(|_| io::Error::other("DTLS stream poisoned"))?;
         guard.get_ref().socket.set_read_timeout(dur)
     }
 

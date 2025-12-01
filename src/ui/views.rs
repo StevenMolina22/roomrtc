@@ -15,13 +15,13 @@ pub enum View {
     LogIn,
 
     CallHub,
-    
+
     PreCall(String),
 
     Calling(String),
 
     CallIncoming(String, SessionDescriptionProtocol),
-    
+
     CallEnded,
 
     /// The in-call view shown when a call is active.
@@ -29,6 +29,6 @@ pub enum View {
 
     /// Generic error view to show unrecoverable or displayable errors.
     Error,
-    
+
     FatalError,
 }

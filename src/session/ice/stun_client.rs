@@ -34,7 +34,7 @@ pub fn get_public_ip_and_port(socket: &UdpSocket) -> Result<String, String> {
     let remote_addr = STUN_SERVER
         .to_socket_addrs()
         .map_err(|e| e.to_string())?
-        .find(|addr| addr.is_ipv4())
+        .find(std::net::SocketAddr::is_ipv4)
         .ok_or("DNS Error: No IPv4 address found for STUN server")?;
 
     println!(
@@ -45,7 +45,7 @@ pub fn get_public_ip_and_port(socket: &UdpSocket) -> Result<String, String> {
 
     for i in 1..=3 {
         if let Err(e) = socket.send_to(&packet, remote_addr) {
-            println!("[STUN] Attempt {}: Error sending: {}", i, e);
+            println!("[STUN] Attempt {i}: Error sending: {e}");
             continue;
         }
 
@@ -56,7 +56,7 @@ pub fn get_public_ip_and_port(socket: &UdpSocket) -> Result<String, String> {
                 return parse_stun_response(&buf[..amt]);
             }
             Err(e) => {
-                println!("[STUN] Attempt {}: Timeout or error receiving: {}", i, e);
+                println!("[STUN] Attempt {i}: Timeout or error receiving: {e}");
             }
         }
     }
@@ -108,10 +108,13 @@ fn parse_stun_response(data: &[u8]) -> Result<String, String> {
 
                 let ip = format!(
                     "{}.{}.{}.{}",
-                    val[4] ^ 0x21, val[5] ^ 0x12, val[6] ^ 0xA4, val[7] ^ 0x42
+                    val[4] ^ 0x21,
+                    val[5] ^ 0x12,
+                    val[6] ^ 0xA4,
+                    val[7] ^ 0x42
                 );
 
-                return Ok(format!("{}:{}", ip, port));
+                return Ok(format!("{ip}:{port}"));
             }
         }
 
@@ -134,14 +137,17 @@ mod tests {
 
     impl StunBuilder {
         fn new() -> Self {
-            Self { attributes: Vec::new() }
+            Self {
+                attributes: Vec::new(),
+            }
         }
 
         fn add_attribute(mut self, attr_type: u16, value: &[u8]) -> Self {
             self.attributes.extend_from_slice(&attr_type.to_be_bytes());
-            self.attributes.extend_from_slice(&(value.len() as u16).to_be_bytes());
+            self.attributes
+                .extend_from_slice(&(value.len() as u16).to_be_bytes());
             self.attributes.extend_from_slice(value);
-            
+
             let padding = (4 - (value.len() % 4)) % 4;
             for _ in 0..padding {
                 self.attributes.push(0x00);
@@ -151,7 +157,7 @@ mod tests {
 
         fn add_xor_address(self, ip: &str, port: u16) -> Self {
             let mut value = vec![0x00, 0x01]; // Reserved + Family (IPv4)
-            
+
             let magic_high_16 = (MAGIC_COOKIE >> 16) as u16;
             let x_port = port ^ magic_high_16;
             value.extend_from_slice(&x_port.to_be_bytes());
@@ -166,12 +172,12 @@ mod tests {
 
         fn build(self) -> Vec<u8> {
             let mut packet = vec![
-                0x01, 0x01,             // Type: Binding Response
-                0x00, 0x00,             // Length (placeholder)
+                0x01, 0x01, // Type: Binding Response
+                0x00, 0x00, // Length (placeholder)
                 0x21, 0x12, 0xA4, 0x42, // Magic Cookie
             ];
             packet.extend_from_slice(&[0xAA; 12]);
-            
+
             packet.extend_from_slice(&self.attributes);
 
             let len = (packet.len() - 20) as u16;
@@ -184,10 +190,10 @@ mod tests {
 
     fn build_fake_stun_response(public_ip: &str, public_port: u16) -> Vec<u8> {
         let magic_cookie: u32 = 0x2112A442;
-        
+
         let mut packet = vec![
-            0x01, 0x01,             // Type: Binding Success Response (0x0101)
-            0x00, 0x0C,             // Length: 12 bytes de payload (Attribute header 4 + body 8)
+            0x01, 0x01, // Type: Binding Success Response (0x0101)
+            0x00, 0x0C, // Length: 12 bytes de payload (Attribute header 4 + body 8)
             0x21, 0x12, 0xA4, 0x42, // Magic Cookie
         ];
         packet.extend_from_slice(&[0u8; 12]);
@@ -198,14 +204,11 @@ mod tests {
         packet.push(0x00); // Reserved (1 byte)
         packet.push(0x01); // Family: IPv4 (0x01)
 
-        let magic_high_16 = (magic_cookie >> 16) as u16; 
+        let magic_high_16 = (magic_cookie >> 16) as u16;
         let x_port = public_port ^ magic_high_16;
         packet.extend_from_slice(&x_port.to_be_bytes());
 
-        let ip_parts: Vec<u8> = public_ip
-            .split('.')
-            .map(|s| s.parse().unwrap())
-            .collect();
+        let ip_parts: Vec<u8> = public_ip.split('.').map(|s| s.parse().unwrap()).collect();
         let ip_u32 = u32::from_be_bytes([ip_parts[0], ip_parts[1], ip_parts[2], ip_parts[3]]);
         let x_ip = ip_u32 ^ magic_cookie;
         packet.extend_from_slice(&x_ip.to_be_bytes());
@@ -223,17 +226,23 @@ mod tests {
         let result = parse_stun_response(&packet);
 
         assert!(result.is_ok(), "El parser falló al leer un paquete válido");
-        assert_eq!(result.unwrap(), format!("{}:{}", expected_ip, expected_port));
+        assert_eq!(
+            result.unwrap(),
+            format!("{expected_ip}:{expected_port}")
+        );
     }
 
     #[test]
     fn test_parse_stun_response_invalid_cookie() {
         let mut packet = build_fake_stun_response("1.2.3.4", 5555);
-        packet[4] = 0x00; 
+        packet[4] = 0x00;
 
         let result = parse_stun_response(&packet);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Invalid STUN response: Magic Cookie mismatch");
+        assert_eq!(
+            result.unwrap_err(),
+            "Invalid STUN response: Magic Cookie mismatch"
+        );
     }
 
     #[test]
@@ -277,7 +286,6 @@ mod tests {
 
     #[test]
     fn test_robustness_ignores_ipv6() {
-        
         let mut value = vec![0x00, 0x02]; // Family IPv6
         value.extend_from_slice(&[0xFF; 18]); // Datos IPv6 fake
 
@@ -292,12 +300,10 @@ mod tests {
 
     #[test]
     fn test_robustness_malformed_length() {
-        let mut packet = StunBuilder::new()
-            .add_xor_address("1.2.3.4", 5000)
-            .build();
-        
+        let mut packet = StunBuilder::new().add_xor_address("1.2.3.4", 5000).build();
+
         packet[3] = 0xFF; // Big length
 
-        let _ = parse_stun_response(&packet); 
+        let _ = parse_stun_response(&packet);
     }
 }

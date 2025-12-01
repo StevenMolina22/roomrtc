@@ -1,13 +1,12 @@
+use crate::controller::AppEvent;
+use crate::logger::Logger;
 use crate::tools::Socket;
 use crate::transport::rtcp::RtcpReportHandler;
 use crate::transport::rtp::error::RtpError as Error;
-use crate::transport::rtp::rtp_packet::RtpPacket;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use crate::controller::AppEvent;
-use crate::logger::Logger;
 
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
 ///
@@ -59,17 +58,16 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                 }
 
                 let protected_data = match rx.recv() {
-                    Ok(p) => {
-                        p
-                    },
+                    Ok(p) => p,
                     Err(e) => {
                         break;
                     }
                 };
 
-
-                if let Err(e) = send_packet(&rtp_socket, &report_handler, &connected, protected_data) {
-                    logger.error(&format!("RtpSender error: {}", e));
+                if let Err(e) =
+                    send_packet(&rtp_socket, &report_handler, &connected, protected_data)
+                {
+                    logger.error(&format!("RtpSender error: {e}"));
                     break;
                 }
             }

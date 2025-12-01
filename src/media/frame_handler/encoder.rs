@@ -36,7 +36,7 @@ impl Encoder {
             encoder,
             max_chunk_size: media_config.rtp_max_chunk_size,
             frame_count: 0,
-            key_frame_interval: 18
+            key_frame_interval: 18,
         })
     }
 

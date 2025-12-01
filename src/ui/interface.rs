@@ -1,6 +1,7 @@
 use super::views::View;
 use crate::config::Config;
 use crate::controller::{AppEvent, Controller};
+use crate::logger::Logger;
 use crate::media::frame_handler::Frame;
 use crate::session::sdp::SessionDescriptionProtocol;
 use crate::ui::GUIError as Error;
@@ -11,7 +12,6 @@ use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
 use std::net::SocketAddr;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, mpsc};
-use crate::logger::Logger;
 
 /// Application state and UI controller for the `RoomRTC` GUI.
 ///
@@ -64,7 +64,12 @@ impl RoomRTCApp {
         let config = Arc::new(config);
         let (event_tx, event_rx) = mpsc::channel();
 
-        let controller = match Controller::new(event_tx.clone(), &config, server_address, logger.context("Controller")) {
+        let controller = match Controller::new(
+            event_tx,
+            &config,
+            server_address,
+            logger.context("Controller"),
+        ) {
             Ok(c) => c,
             Err(e) => panic!("Failed to initialize controller: {e}"),
         };
@@ -115,7 +120,9 @@ impl eframe::App for RoomRTCApp {
                     self.show_call_incoming(peer_username.clone(), sdp_offer.clone(), ui);
                 }
                 View::CallHub => self.show_call_hub(ui),
-                View::Call(username, peer_username) => self.show_call(username.clone(), peer_username.clone(), ctx, ui),
+                View::Call(username, peer_username) => {
+                    self.show_call(username.clone(), peer_username.clone(), ctx, ui);
+                }
                 View::CallEnded => self.show_call_ended(ui),
                 View::Error => self.show_error(ui),
                 View::FatalError => self.show_fatal_error(ui),
@@ -216,8 +223,8 @@ impl RoomRTCApp {
                     Err(e) => {
                         self.fatal_error_msg = Some(e.to_string());
                         self.view = View::FatalError;
-                        return
-                    },
+                        return;
+                    }
                 };
 
                 ui.label(username);
@@ -226,7 +233,7 @@ impl RoomRTCApp {
                     match self.controller.log_out() {
                         Ok(()) => {
                             self.view = View::Welcome;
-                        },
+                        }
                         Err(e) => {
                             self.fatal_error_msg = Some(e.to_string());
                             self.view = View::Error;
@@ -268,7 +275,7 @@ impl RoomRTCApp {
 
     fn show_calling(&mut self, peer_username: String, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading(format!("Calling {}", peer_username));
+            ui.heading(format!("Calling {peer_username}"));
             ui.separator();
             ui.label("Connecting…");
             ui.separator();
@@ -279,19 +286,17 @@ impl RoomRTCApp {
 
     fn show_pre_call(&mut self, peer_username: String) {
         match self.controller.call(&peer_username) {
-            Ok((local_frame_rx, remote_frame_rx)) => {
-                match self.controller.get_username() {
-                    Ok(username) => {
-                        self.local_frame_rx = Some(local_frame_rx);
-                        self.remote_frame_rx = Some(remote_frame_rx);
-                        self.view = View::Call(username, peer_username);
-                    }
-                    Err(e) => {
-                        self.error_msg = Some(e.to_string());
-                        self.view = View::Error;
-                    },
+            Ok((local_frame_rx, remote_frame_rx)) => match self.controller.get_username() {
+                Ok(username) => {
+                    self.local_frame_rx = Some(local_frame_rx);
+                    self.remote_frame_rx = Some(remote_frame_rx);
+                    self.view = View::Call(username, peer_username);
                 }
-            }
+                Err(e) => {
+                    self.error_msg = Some(e.to_string());
+                    self.view = View::Error;
+                }
+            },
             Err(e) => {
                 self.warning_msg = Some(e.to_string());
                 self.view = View::CallHub;
@@ -330,7 +335,7 @@ impl RoomRTCApp {
                                 Err(e) => {
                                     self.error_msg = Some(e.to_string());
                                     self.view = View::Error;
-                                },
+                                }
                             }
                         }
                         Err(e) => {
@@ -351,17 +356,14 @@ impl RoomRTCApp {
 
             if let Err(e) = self.update_video_textures(ctx) {
                 self.warning_msg = Some(e.to_string());
-                match self.controller.hang_up() {
-                    Err(e) => {
-                        self.fatal_error_msg = Some(e.to_string());
-                        self.view = View::FatalError;
-                    }
-                    Ok(()) => {
-                        self.reset_after_call();
-                        self.view = View::CallHub;
-                    }
+                if let Err(e) = self.controller.hang_up() {
+                    self.fatal_error_msg = Some(e.to_string());
+                    self.view = View::FatalError;
+                } else {
+                    self.reset_after_call();
+                    self.view = View::CallHub;
                 }
-                return
+                return;
             }
 
             ui.horizontal_centered(|ui| {
@@ -383,15 +385,12 @@ impl RoomRTCApp {
 
             let exit_btn = egui::Button::new("End call").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
-                match self.controller.hang_up() {
-                    Err(e) => {
-                        self.fatal_error_msg = Some(e.to_string());
-                        self.view = View::FatalError;
-                    }
-                    Ok(()) => {
-                        self.reset_after_call();
-                        self.view = View::CallHub;
-                    }
+                if let Err(e) = self.controller.hang_up() {
+                    self.fatal_error_msg = Some(e.to_string());
+                    self.view = View::FatalError;
+                } else {
+                    self.reset_after_call();
+                    self.view = View::CallHub;
                 }
             }
         });
@@ -556,7 +555,7 @@ impl RoomRTCApp {
                     self.fatal_error_msg = Some(hangup_err.to_string());
                     self.view = View::FatalError;
                 } else {
-                    self.warning_msg = Some(e.to_string());
+                    self.warning_msg = Some(e);
                     self.view = View::CallEnded;
                 }
                 self.reset_after_call();

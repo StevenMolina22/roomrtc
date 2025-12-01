@@ -26,7 +26,7 @@ const SERIAL_NUMBER: u32 = 1;
 /// Holds the local cryptographic identity for this session.
 /// Required or the DTLS Handshake
 pub struct LocalCert {
-    /// Opaque identity consumed by udp_dtls during the DTLS handshake.
+    /// Opaque identity consumed by `udp_dtls` during the DTLS handshake.
     pub identity: Identity,
     /// The SHA-256 fingerprint string (e.g., "AA:BB:CC") advertised in SDP.
     pub fingerprint: String,

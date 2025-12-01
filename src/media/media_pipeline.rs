@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::controller::AppEvent;
+use crate::logger::Logger;
 use crate::media::camera::{Camera, FrameSource};
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
@@ -11,7 +12,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use crate::logger::Logger;
 
 pub struct MediaPipeline {
     camera: Camera,
@@ -48,14 +48,14 @@ impl MediaPipeline {
             event_tx.clone(),
             connected.clone(),
             srtp_ctx.clone(),
-            is_client.clone(),
+            is_client,
         )?;
         let remote_frame_rx = self.start_remote_frames_pipeline(
             rtp_rx,
-            event_tx.clone(),
-            connected.clone(),
-            srtp_ctx.clone(),
-            is_client.clone(),
+            event_tx,
+            connected,
+            srtp_ctx,
+            is_client,
         )?;
 
         Ok((local_frame_rx, remote_frame_rx))
@@ -84,7 +84,7 @@ impl MediaPipeline {
                 let mut decoder = match Decoder::new().map_err(|e| Error::MapError(e.to_string())) {
                     Ok(d) => d,
                     Err(e) => {
-                        logger.error(&format!("Failed to create decoder: {}", e));
+                        logger.error(&format!("Failed to create decoder: {e}"));
                         send_message_to_ui(
                             event_tx,
                             AppEvent::Error("Failed to create decoder".into()),
@@ -115,15 +115,17 @@ impl MediaPipeline {
                                         match ctx.unprotect(&protected_data, is_client) {
                                             Ok(unprotected_packet) => unprotected_packet,
                                             Err(e) => {
-                                                logger.error(&format!("SRTP unprotect failed: {}", e));
+                                                logger.error(&format!(
+                                                    "SRTP unprotect failed: {e}"
+                                                ));
                                                 break;
-                                            },
+                                            }
                                         }
                                     }
                                     Err(e) => {
-                                        logger.error(&format!("SRTP context lock failed: {}", e));
+                                        logger.error(&format!("SRTP context lock failed: {e}"));
                                         break;
-                                    },
+                                    }
                                 }
                             } else {
                                 continue;
@@ -155,8 +157,8 @@ impl MediaPipeline {
                 }
                 if connected.load(Ordering::SeqCst) {
                     connected.store(false, Ordering::SeqCst);
-                    send_message_to_ui(event_tx.clone(), AppEvent::CallEnded)
-                };
+                    send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
+                }
                 logger.info("Remote frames pipeline terminated");
             }
         });
@@ -180,14 +182,15 @@ impl MediaPipeline {
         let mut encoder = match Encoder::new(&self.config.media) {
             Ok(d) => d,
             Err(e) => {
-                self.logger.error(&format!("Failed to create encoder: {}", e));
-                send_message_to_ui(event_tx.clone(), AppEvent::Error(e.to_string()));
+                self.logger
+                    .error(&format!("Failed to create encoder: {e}"));
+                send_message_to_ui(event_tx, AppEvent::Error(e.to_string()));
                 return Err(Error::MapError(e.to_string()));
             }
         };
 
         let ssrc = self.ssrc;
-        let srtp_ctx = srtp_ctx.clone();
+        let srtp_ctx = srtp_ctx;
         let config = self.config.clone();
         let logger = self.logger.clone();
 
@@ -204,16 +207,21 @@ impl MediaPipeline {
                 let encoded_frame = match encoder.encode_frame(&frame) {
                     Ok(f) => f,
                     Err(e) => {
-                        logger.error(&format!("Failed to encode frame: {}", e));
+                        logger.error(&format!("Failed to encode frame: {e}"));
                         break;
-                    },
+                    }
                 };
 
                 let rtp_packet = generate_rtp_packet(encoded_frame, config.clone(), ssrc);
 
                 for packet in rtp_packet {
-                    if let Err(e) = send_encripted_rtp_packet(srtp_tx.clone(), packet, srtp_ctx.clone(), is_client) {
-                        logger.error(&format!("Failed to send encrypted RTP packet: {}", e));
+                    if let Err(e) = send_encripted_rtp_packet(
+                        srtp_tx.clone(),
+                        packet,
+                        srtp_ctx.clone(),
+                        is_client,
+                    ) {
+                        logger.error(&format!("Failed to send encrypted RTP packet: {e}"));
                     }
                 }
             }
@@ -333,7 +341,7 @@ fn send_encripted_rtp_packet(
     };
     if let Err(e) = srtp_tx.send(protected_data) {
         return Err(Error::SendError(e.to_string()));
-    };
+    }
 
     Ok(())
 }

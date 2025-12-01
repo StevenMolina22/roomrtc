@@ -35,7 +35,7 @@ fn main() -> Result<(), eframe::Error> {
     let logger = match Logger::new(log_path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("Failed to initialize logger: {}", e);
+            eprintln!("Failed to initialize logger: {e}");
             std::process::exit(1);
         }
     };

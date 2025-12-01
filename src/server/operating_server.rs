@@ -55,26 +55,32 @@ impl OperatingServer {
             let mut users = match self.users.write() {
                 Ok(users) => users,
                 Err(e) => {
-                    self.logger.error(&format!("Failed to acquire users lock during login: {}", e));
+                    self.logger
+                        .error(&format!("Failed to acquire users lock during login: {e}"));
                     return ServerResponse::Error(e.to_string());
                 }
             };
 
             if let Some(data) = users.get_mut(&username) {
                 if data.password != password {
-                    self.logger.warn(&format!("Login failed for {}: Wrong password", username));
+                    self.logger
+                        .warn(&format!("Login failed for {username}: Wrong password"));
                     return ServerResponse::LoginError("Wrong password. Try again".to_string());
                 }
 
                 match data.status {
                     UserStatus::Available | UserStatus::Occupied(_) => {
-                        self.logger.warn(&format!("Login failed for {}: User already logged in", username));
+                        self.logger.warn(&format!(
+                            "Login failed for {username}: User already logged in"
+                        ));
                         return ServerResponse::LoginError("User already logged in".to_string());
                     }
 
                     UserStatus::Offline => {
                         if self.users_connected.load(Ordering::SeqCst) == self.max_users {
-                            return ServerResponse::LoginError("Server capacity is full".to_string());
+                            return ServerResponse::LoginError(
+                                "Server capacity is full".to_string(),
+                            );
                         }
                         data.update_status(UserStatus::Available);
                         self.users_connected.fetch_add(1, Ordering::SeqCst);
@@ -83,18 +89,25 @@ impl OperatingServer {
                     }
                 }
             } else {
-                self.logger.warn(&format!("Login failed for {}: User not found", username));
+                self.logger
+                    .warn(&format!("Login failed for {username}: User not found"));
                 return ServerResponse::LoginError(format!("User {username} not found"));
             }
         }
 
         self.username = Some(username.clone());
-        notify_status_update(&self.users, status_to_notify.0, status_to_notify.1, &self.logger);
-        self.logger.info(&format!("User {} logged in successfully", username));
+        notify_status_update(
+            &self.users,
+            status_to_notify.0,
+            status_to_notify.1,
+            &self.logger,
+        );
+        self.logger
+            .info(&format!("User {username} logged in successfully"));
         ServerResponse::LoginOk(
             username.clone(),
             self.server_client_socket_address,
-            self.get_clients_for_user(username.clone()),
+            self.get_clients_for_user(username),
         )
     }
 
@@ -104,12 +117,16 @@ impl OperatingServer {
     /// New users are always created with `UserStatus::Offline`.
     pub fn signup_user(&mut self, username: String, password: String) -> ServerResponse {
         let status_to_notify;
-        if let Err(_) = validate_string(username.clone()) {
-            self.logger.warn(&format!("Signup failed for {}: Invalid username format", username));
+        if validate_string(username.clone()).is_err() {
+            self.logger.warn(&format!(
+                "Signup failed for {username}: Invalid username format"
+            ));
             return ServerResponse::SignupError("Invalid username".to_string());
         }
-        if let Err(_) = validate_string(password.clone()) {
-            self.logger.warn(&format!("Signup failed for {}: Invalid password format", username));
+        if validate_string(password.clone()).is_err() {
+            self.logger.warn(&format!(
+                "Signup failed for {username}: Invalid password format"
+            ));
             return ServerResponse::SignupError("Invalid password".to_string());
         }
 
@@ -117,7 +134,9 @@ impl OperatingServer {
             let mut users = self.users.write().unwrap();
 
             if users.contains_key(&username) {
-                self.logger.warn(&format!("Signup failed for {}: User already exists", username));
+                self.logger.warn(&format!(
+                    "Signup failed for {username}: User already exists"
+                ));
                 return ServerResponse::SignupError(format!("User {username} already exists"));
             }
 
@@ -126,12 +145,20 @@ impl OperatingServer {
             status_to_notify = (username.clone(), UserStatus::Offline);
         }
 
-        notify_status_update(&self.users, status_to_notify.0, status_to_notify.1, &self.logger);
+        notify_status_update(
+            &self.users,
+            status_to_notify.0,
+            status_to_notify.1,
+            &self.logger,
+        );
         if let Err(e) = self.load_user_data_in_disk(username.clone(), password) {
-            self.logger.error(&format!("Error loading user data to disk for {}: {}", username, e));
+            self.logger.error(&format!(
+                "Error loading user data to disk for {username}: {e}"
+            ));
             return ServerResponse::Error(format!("Error loading user data: {e}"));
         }
-        self.logger.info(&format!("New user signed up: {}", username));
+        self.logger
+            .info(&format!("New user signed up: {username}"));
         ServerResponse::SignupOk
     }
 
@@ -144,28 +171,32 @@ impl OperatingServer {
             let mut users = self.users.write().unwrap();
             if let Some(user_data) = users.get_mut(&username) {
                 user_data.update_status(UserStatus::Offline);
-                let stream = match user_data.server_client_stream {
-                    Some(ref stream) => stream,
-                    None => {
-                        self.logger.warn(&format!("Logout failed for {}: Stream not found", username));
-                        return ServerResponse::Error("User not found".to_string());
-                    },
+                let stream = if let Some(ref stream) = user_data.server_client_stream { stream } else {
+                    self.logger
+                        .warn(&format!("Logout failed for {username}: Stream not found"));
+                    return ServerResponse::Error("User not found".to_string());
                 };
 
                 let mut stream = match stream.lock() {
                     Ok(stream) => stream,
                     Err(e) => {
-                        self.logger.error(&format!("Logout failed for {}: Failed to lock stream: {}", username, e));
+                        self.logger.error(&format!(
+                            "Logout failed for {username}: Failed to lock stream: {e}"
+                        ));
                         return ServerResponse::Error(e.to_string());
-                    },
+                    }
                 };
 
                 stream.conn.send_close_notify();
                 if let Err(e) = stream.flush() {
-                    self.logger.warn(&format!("Failed to flush stream during logout for {}: {}", username, e));
+                    self.logger.warn(&format!(
+                        "Failed to flush stream during logout for {username}: {e}"
+                    ));
                 }
                 if let Err(e) = stream.sock.shutdown(Shutdown::Both) {
-                    self.logger.warn(&format!("Failed to shutdown socket during logout for {}: {}", username, e));
+                    self.logger.warn(&format!(
+                        "Failed to shutdown socket during logout for {username}: {e}"
+                    ));
                 }
 
                 self.users_connected
@@ -175,13 +206,19 @@ impl OperatingServer {
                     .ok();
                 status_to_notify = (username.clone(), UserStatus::Offline);
             } else {
-                self.logger.warn(&format!("Logout failed for {}: User not found", username));
+                self.logger
+                    .warn(&format!("Logout failed for {username}: User not found"));
                 return ServerResponse::LogoutError(format!("User {username} not found"));
             }
         }
         self.username = None;
-        notify_status_update(&self.users, status_to_notify.0, status_to_notify.1, &self.logger);
-        self.logger.info(&format!("User {} logged out", username));
+        notify_status_update(
+            &self.users,
+            status_to_notify.0,
+            status_to_notify.1,
+            &self.logger,
+        );
+        self.logger.info(&format!("User {username} logged out"));
         ServerResponse::LogoutOk
     }
 
@@ -203,40 +240,58 @@ impl OperatingServer {
         to_usr: String,
         offer_sdp: SessionDescriptionProtocol,
     ) -> ServerResponse {
-      
-        let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
-        self.logger.info(&format!("Call request from {} to {}", from_usr, to_usr));
+        self.logger
+            .info(&format!("Call request from {from_usr} to {to_usr}"));
 
+        let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => {
-                self.logger.warn(&format!("Call request failed: Sender {} not found", from_usr));
+                self.logger.warn(&format!(
+                    "Call request failed: Sender {from_usr} not found"
+                ));
                 return ServerResponse::Error(err_event);
-            },
+            }
         };
 
         let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => {
-                self.logger.warn(&format!("Call request failed: Receiver {} not found", to_usr));
+                self.logger.warn(&format!(
+                    "Call request failed: Receiver {to_usr} not found"
+                ));
                 return ServerResponse::Error(err_event);
-            },
+            }
         };
 
         if from_usr_data.status != UserStatus::Available {
-            self.logger.warn(&format!("Call request failed: Sender {} not available", from_usr));
+            self.logger.warn(&format!(
+                "Call request failed: Sender {from_usr} not available"
+            ));
             return ServerResponse::Error(ServerError::UserNotAvailable(from_usr).to_string());
         }
 
         if to_usr_data.status != UserStatus::Available {
-            self.logger.warn(&format!("Call request failed: Receiver {} not available", to_usr));
+            self.logger.warn(&format!(
+                "Call request failed: Receiver {to_usr} not available"
+            ));
             return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
         }
 
         from_usr_data.update_status(UserStatus::Occupied(to_usr.clone()));
         to_usr_data.update_status(UserStatus::Occupied(from_usr.clone()));
 
-        notify_status_update(&self.users, from_usr.clone(), UserStatus::Occupied(to_usr.clone()));
-        notify_status_update(&self.users, to_usr.clone(), UserStatus::Occupied(from_usr.clone()));
+        notify_status_update(
+            &self.users,
+            from_usr.clone(),
+            UserStatus::Occupied(to_usr.clone()),
+            &self.logger,
+        );
+        notify_status_update(
+            &self.users,
+            to_usr.clone(),
+            UserStatus::Occupied(from_usr.clone()),
+            &self.logger,
+        );
 
         {
             let mut users = self.users.write().unwrap();
@@ -244,14 +299,21 @@ impl OperatingServer {
             users.insert(from_usr_data.username.clone(), from_usr_data);
         }
 
-        let ans =
-            match get_answer_from_peer(from_usr.clone(), to_usr.clone(), offer_sdp, &self.users, &self.logger) {
-                Ok(answer) => answer,
-                Err(err_event) => {
-                    self.logger.error(&format!("Failed to get answer from peer {}: {}", to_usr, err_event));
-                    return ServerResponse::Error(err_event.to_string());
-                },
-            };
+        let ans = match get_answer_from_peer(
+            from_usr.clone(),
+            to_usr.clone(),
+            offer_sdp,
+            &self.users,
+            &self.logger,
+        ) {
+            Ok(answer) => answer,
+            Err(err_event) => {
+                self.logger.error(&format!(
+                    "Failed to get answer from peer {to_usr}: {err_event}"
+                ));
+                return ServerResponse::Error(err_event.to_string());
+            }
+        };
 
         match ans {
             ClientResponse::CallAccept { sdp_answer } => {
@@ -261,7 +323,7 @@ impl OperatingServer {
             _ => {
                 self.logger.warn("Invalid answer received from peer");
                 ServerResponse::Error("Invalid answer".to_string())
-            },
+            }
         }
     }
 
@@ -280,12 +342,12 @@ impl OperatingServer {
         to_usr: String,
         sdp_answer: SessionDescriptionProtocol,
     ) -> ServerResponse {
-        let from_usr_data = match get_user_data(&from_usr, &self.users) {
+        let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => return ServerResponse::Error(err_event),
         };
 
-        let to_usr_data = match get_user_data(&to_usr, &self.users) {
+        let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => return ServerResponse::Error(err_event),
         };
@@ -307,15 +369,9 @@ impl OperatingServer {
             users.insert(from_usr_data.username.clone(), from_usr_data);
         }
 
-        notify_status_update(
-            &self.users,
-            from_usr.clone(),
-            UserStatus::Occupied(to_usr.clone()),
-            &self.logger,
-        );
-        notify_status_update(&self.users, to_usr.clone(), UserStatus::Occupied(from_usr.clone()), &self.logger);
-
-        self.logger.info(&format!("Call accepted: {} and {} are now OCCUPIED", from_usr, to_usr));
+        self.logger.info(&format!(
+            "Call accepted: {from_usr} and {to_usr} are now OCCUPIED"
+        ));
 
         ServerResponse::CallAccepted { sdp_answer }
     }
@@ -347,8 +403,18 @@ impl OperatingServer {
         from_usr_data.update_status(UserStatus::Available);
         to_usr_data.update_status(UserStatus::Available);
 
-        notify_status_update(&self.users, from_usr.clone(), UserStatus::Available, &self.logger);
-        notify_status_update(&self.users, to_usr.clone(), UserStatus::Availble, &self.logger);
+        notify_status_update(
+            &self.users,
+            from_usr.clone(),
+            UserStatus::Available,
+            &self.logger,
+        );
+        notify_status_update(
+            &self.users,
+            to_usr.clone(),
+            UserStatus::Available,
+            &self.logger,
+        );
 
         {
             let mut users = self.users.write().unwrap();
@@ -356,7 +422,8 @@ impl OperatingServer {
             users.insert(from_usr_data.username.clone(), from_usr_data);
         }
 
-        self.logger.warn(&format!("Call from {} rejected by {}", from_usr, to_usr));
+        self.logger
+            .warn(&format!("Call from {from_usr} rejected by {to_usr}"));
         ServerResponse::CallRejected
     }
 
@@ -374,26 +441,29 @@ impl OperatingServer {
         {
             let mut users = self.users.write().unwrap();
 
-            let data = match users.get_mut(&user) {
-                Some(data) => data,
-                None => {
-                    self.logger.warn(&format!("Call hangup failed: User {} does not exist", user));
-                    return ServerResponse::CallHangUpError("User does not exist".to_string());
-                },
+            let data = if let Some(data) = users.get_mut(&user) { data } else {
+                self.logger
+                    .warn(&format!("Call hangup failed: User {user} does not exist"));
+                return ServerResponse::CallHangUpError("User does not exist".to_string());
             };
 
-            match data.status {
-                UserStatus::Occupied(_) => {}
-                _ => {
-                    self.logger.warn(&format!("Call hangup failed: User {} is not occupied", user));
-                    return ServerResponse::CallHangUpError("Unexpected user status".to_string());
-                },
+            if let UserStatus::Occupied(_) = data.status {} else {
+                self.logger.warn(&format!(
+                    "Call hangup failed: User {user} is not occupied"
+                ));
+                return ServerResponse::CallHangUpError("Unexpected user status".to_string());
             }
 
             data.update_status(UserStatus::Available);
         }
-        notify_status_update(&self.users, user.clone(), UserStatus::Available, &self.logger);
-        self.logger.info(&format!("Call hangup requested by {}", user));
+        notify_status_update(
+            &self.users,
+            user.clone(),
+            UserStatus::Available,
+            &self.logger,
+        );
+        self.logger
+            .info(&format!("Call hangup requested by {user}"));
         ServerResponse::CallHangUpOk
     }
 
@@ -450,10 +520,13 @@ impl OperatingServer {
             user_data.update_status(UserStatus::Offline);
         }
 
-
-
-        notify_status_update(&self.users, username.clone(), UserStatus::Offline, &self.logger);
-        self.logger.info(&format!("User {} disconnected", username));
+        notify_status_update(
+            &self.users,
+            username.clone(),
+            UserStatus::Offline,
+            &self.logger,
+        );
+        self.logger.info(&format!("User {username} disconnected"));
         self.username = None;
         Ok(())
     }
@@ -502,11 +575,11 @@ fn get_answer_from_peer(
 ) -> Result<ClientResponse, ServerError> {
     let mut stream = get_stream_from_user(to_usr.clone(), users)?;
 
-    logger.info(&format!("Sending CALLINCOMING to {}", to_usr));
+    logger.info(&format!("Sending CALLINCOMING to {to_usr}"));
     send_message(
         &mut stream,
         &ServerMessage::CallIncoming {
-            from: from_usr.clone(),
+            from: from_usr,
             offer_sdp,
         },
     );
@@ -532,11 +605,15 @@ fn validate_string(s: String) -> Result<(), ServerError> {
 
     if trimmed.is_empty() {
         return Err(ServerError::InvalidFormat);
-    };
+    }
 
-    if trimmed.contains(' ') || trimmed.contains('\n') || trimmed.contains(':') || trimmed.contains('|') {
+    if trimmed.contains(' ')
+        || trimmed.contains('\n')
+        || trimmed.contains(':')
+        || trimmed.contains('|')
+    {
         return Err(ServerError::InvalidFormat);
-    };
+    }
 
     Ok(())
 }
@@ -595,13 +672,17 @@ fn notify_status_update(
     let users = users.clone();
     let logger = logger.clone();
     thread::spawn(move || {
-        logger.debug(&format!("Broadcasting status update for {}: {:?}", username, status));
+        logger.debug(&format!(
+            "Broadcasting status update for {username}: {status:?}"
+        ));
         let mut streams: Vec<Arc<Mutex<StreamOwned<ServerConnection, TcpStream>>>> = Vec::new();
         {
             let users_guard = match users.read() {
                 Ok(guard) => guard,
                 Err(e) => {
-                    logger.error(&format!("Failed to acquire users lock for status update: {}", e));
+                    logger.error(&format!(
+                        "Failed to acquire users lock for status update: {e}"
+                    ));
                     return;
                 }
             };
@@ -642,7 +723,7 @@ mod tests {
             users_connected,
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
-            128
+            128,
             logger,
         )
     }
@@ -663,7 +744,7 @@ mod tests {
             users_connected,
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
-            128
+            128,
             logger,
         )
     }
@@ -864,7 +945,6 @@ mod tests {
             ("bob", "123", UserStatus::Available),
             ("alice", "abc", UserStatus::Available),
         ]);
-
 
         let _ = op_s.call_request(
             "alice".into(),

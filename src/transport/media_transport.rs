@@ -14,6 +14,7 @@ use crate::session::sdp::{DtlsSetupRole, Fingerprint};
 use openssl::pkcs12::Pkcs12;
 use crate::dtls::key_manager::{LocalCert, PKCS12_PASSWORD};
 use openssl::ssl::{SslAcceptor, SslMethod, SslVerifyMode};
+use crate::logger::Logger;
 
 pub struct MediaTransport {
     config: Arc<Config>,
@@ -26,10 +27,11 @@ pub struct MediaTransport {
     rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<UdpSocket>>>>,
 
     connected: Arc<AtomicBool>,
+    logger: Logger,
 }
 
 impl MediaTransport {
-    pub fn new(config: &Arc<Config>) -> Result<Self, Error> {
+    pub fn new(config: &Arc<Config>, logger: Logger) -> Result<Self, Error> {
         let rtp_socket = UdpSocket::bind(format!("{}:0", config.network.bind_address))
             .map_err(|e| Error::BindingError(e.to_string()))?;
 
@@ -41,6 +43,8 @@ impl MediaTransport {
         let rtcp_socket =
             UdpSocket::bind(rtcp_address).map_err(|e| Error::BindingError(e.to_string()))?;
 
+        logger.info(&format!("MediaTransport bound to RTP: {}, RTCP: {}", rtp_address, rtcp_address));
+
         Ok(Self {
             config: Arc::clone(config),
             rtp_address,
@@ -48,6 +52,7 @@ impl MediaTransport {
             rtcp_socket,
             rtcp_handler: None,
             connected: Arc::new(AtomicBool::new(false)),
+            logger,
         })
     }
 
@@ -60,6 +65,8 @@ impl MediaTransport {
         expected_fingerprint: Fingerprint,
         local_cert: &LocalCert
     ) -> Result<(Sender<Vec<u8>>, Receiver<Vec<u8>>, Arc<AtomicBool>, SrtpContext), Error> {
+        self.logger.info(&format!("Starting MediaTransport. Remote RTP: {}, Remote RTCP: {}", remote_rtp_address, remote_rtcp_address));
+
         let rtp_dtls = self.create_dtls_socket(
             self.rtp_socket
                 .try_clone()
@@ -76,6 +83,8 @@ impl MediaTransport {
         self.rtcp_socket
             .connect(remote_rtcp_address)
             .map_err(|e| Error::SocketConnectionError(e.to_string()))?;
+
+        self.logger.info("Sockets connected to remote addresses.");
 
         let key_material = rtp_dtls
             .export_keying_material("EXTRACTOR-dtls_srtp", 60)
@@ -107,6 +116,7 @@ impl MediaTransport {
 
 
     pub fn stop(&mut self) -> Result<(), Error> {
+        self.logger.info("Stopping MediaTransport...");
         self.connected.store(false, Ordering::SeqCst);
         self.rtp_socket.set_read_timeout(None).map_err(|e| Error::SocketConfigFailed)?;
         self.rtcp_socket.set_read_timeout(None).map_err(|e| Error::SocketConfigFailed)?;
@@ -150,6 +160,7 @@ impl MediaTransport {
             srtp_sender_socket,
             rtcp_handler,
             &self.connected,
+            self.logger.context("RtpSender"),
         )
         .map_err(|e| Error::MapError(e.to_string()))?;
 
@@ -174,6 +185,7 @@ impl MediaTransport {
             srtp_receiver_socket,
             rtcp_handler,
             &self.connected,
+            self.logger.context("RtpReceiver"),
         )
         .map_err(|e| Error::MapError(e.to_string()))?;
 

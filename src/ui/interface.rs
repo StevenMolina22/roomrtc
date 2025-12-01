@@ -11,6 +11,7 @@ use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
 use std::net::SocketAddr;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, mpsc};
+use crate::logger::Logger;
 
 /// Application state and UI controller for the `RoomRTC` GUI.
 ///
@@ -44,6 +45,7 @@ pub struct RoomRTCApp {
     fatal_error_msg: Option<String>,
     error_msg: Option<String>,
     warning_msg: Option<String>,
+    logger: Logger,
 }
 
 impl RoomRTCApp {
@@ -58,11 +60,11 @@ impl RoomRTCApp {
     ///   receiving local frames, remote frames and events. The
     ///   `Controller` is created and returned in a running state.
     #[must_use]
-    pub fn new(config: Config, server_address: SocketAddr) -> Self {
+    pub fn new(config: Config, server_address: SocketAddr, logger: Logger) -> Self {
         let config = Arc::new(config);
         let (event_tx, event_rx) = mpsc::channel();
 
-        let controller = match Controller::new(event_tx.clone(), &config, server_address) {
+        let controller = match Controller::new(event_tx.clone(), &config, server_address, logger.context("Controller")) {
             Ok(c) => c,
             Err(e) => panic!("Failed to initialize controller: {e}"),
         };
@@ -80,6 +82,7 @@ impl RoomRTCApp {
             fatal_error_msg: None,
             error_msg: None,
             warning_msg: None,
+            logger,
         }
     }
 }

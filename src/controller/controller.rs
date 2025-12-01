@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock, mpsc};
 use std::thread;
+use crate::logger::Logger;
 
 pub struct Controller {
     config: Arc<Config>,
@@ -33,6 +34,7 @@ pub struct Controller {
     client_response_tx: Option<Sender<ClientResponse>>,
 
     client_server_stream: StreamOwned<ClientConnection, TcpStream>,
+    logger: Logger,
 }
 
 impl Controller {
@@ -40,6 +42,7 @@ impl Controller {
         event_tx: Sender<AppEvent>,
         config: &Arc<Config>,
         sv_addr: SocketAddr,
+        logger: Logger,
     ) -> Result<Self, Error> {
         let client_server_stream = connect_tls(
             sv_addr,
@@ -47,12 +50,12 @@ impl Controller {
             config.server.server_name.clone(),
         )?;
 
-        let media_pipeline = MediaPipeline::new(config, 0);
-        let transport = MediaTransport::new(config).map_err(|e| Error::MapError(e.to_string()))?;
+        let media_pipeline = MediaPipeline::new(config, 0, logger.context("MediaPipeline"));
+        let transport = MediaTransport::new(config, logger.context("MediaTransport")).map_err(|e| Error::MapError(e.to_string()))?;
         let socket_for_stun = transport.rtp_socket
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
-        let call_session = CallSession::new(socket_for_stun, config)
+        let call_session = CallSession::new(socket_for_stun, config, logger.context("CallSession"))
             .map_err(|e| Error::MapError(e.to_string()))?;
 
         Ok(Self {
@@ -67,6 +70,7 @@ impl Controller {
             event_tx,
             client_response_tx: None,
             client_server_stream,
+            logger,
         })
     }
 
@@ -84,11 +88,11 @@ impl Controller {
         };
         match send_message(msg, &mut self.client_server_stream)? {
             ServerResponse::CallAccepted { sdp_answer } => {
-                println!("proceso la answer");
+                self.logger.info("Call accepted by peer");
                 self.call_session
                     .process_answer(&sdp_answer)
                     .map_err(|e| Error::MapError(e.to_string()))?;
-                println!("inicio la call");
+                self.logger.info("Starting call...");
                 self.join_call()
             }
             ServerResponse::CallRejected => Err(Error::CallRefused),
@@ -108,11 +112,11 @@ impl Controller {
 
         self.stop_media_components()?;
 
-        self.transport = MediaTransport::new(&self.config).map_err(|e| Error::MapError(e.to_string()))?;
+        self.transport = MediaTransport::new(&self.config, self.logger.context("MediaTransport")).map_err(|e| Error::MapError(e.to_string()))?;
         let socket_for_stun = self.transport.rtp_socket
             .try_clone()
             .map_err(|e| Error::CloningSocketError(e.to_string()))?;
-        self.call_session = CallSession::new(socket_for_stun, &self.config).map_err(|e| Error::MapError(e.to_string()))?;
+        self.call_session = CallSession::new(socket_for_stun, &self.config, self.logger.context("CallSession")).map_err(|e| Error::MapError(e.to_string()))?;
 
         Ok(())
     }
@@ -137,7 +141,7 @@ impl Controller {
 
         self.give_response_to_thread(response)?;
 
-        println!("joining call...");
+        self.logger.info("joining call...");
         self.join_call()
     }
 
@@ -171,7 +175,7 @@ impl Controller {
                    &self.call_session.local_cert,
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
-        
+
             let role = self.call_session.local_setup_role;
         self.media_pipeline
             .start(local_to_remote_rtp_tx, remote_to_local_rtp_rx, self.event_tx.clone(), connected, srtp_ctx, role)
@@ -316,7 +320,7 @@ impl Controller {
                 .send(response)
                 .map_err(|e| Error::IOError(e.to_string())),
             None => {
-                println!("No podes obtener canal, no estas loggeado");
+                self.logger.warn("No podes obtener canal, no estas loggeado");
                 Err(Error::NotLoggedInError)
             },
         }
@@ -334,7 +338,7 @@ impl Controller {
         match &self.token {
             Some(token) => Ok(token.clone()),
             None => {
-                println!("No podes obtener token, no estas loggeado");
+                self.logger.warn("No podes obtener token, no estas loggeado");
                 Err(Error::NotLoggedInError)
             },
         }

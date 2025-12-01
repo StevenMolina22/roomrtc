@@ -5,6 +5,7 @@ use super::error::IceError as Error;
 use crate::config::IceConfig;
 use if_addrs;
 use crate::session::ice::stun_client;
+use crate::logger::Logger;
 
 /// An ICE agent that gathers local candidates, accepts remote candidates
 /// and forms candidate pairs for connectivity checks.
@@ -18,12 +19,7 @@ pub struct IceAgent {
     remote_candidates: Vec<Candidate>,
     candidate_pairs: Vec<CandidatePair>,
     selected_pair: Option<CandidatePair>,
-}
-
-impl Default for IceAgent {
-    fn default() -> Self {
-        Self::new()
-    }
+    logger: Logger,
 }
 
 impl IceAgent {
@@ -31,12 +27,13 @@ impl IceAgent {
     ///
     /// The agent starts with no local or remote candidates and no pairs.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new(logger: Logger) -> Self {
         Self {
             local_candidates: Vec::new(),
             remote_candidates: Vec::new(),
             candidate_pairs: Vec::new(),
             selected_pair: None,
+            logger,
         }
     }
 
@@ -69,13 +66,13 @@ impl IceAgent {
         self.local_candidates.push(host);
     }
 
-    println!("[ICE] STUN: Starting discovery on existing socket...");
+    self.logger.info("STUN: Starting discovery on existing socket...");
 
     match stun_client::get_public_ip_and_port(socket) {
         Ok(addr) => {
             if let Some((ip, port_str)) = addr.split_once(':')
                 && let Ok(stun_port) = port_str.parse::<u16>() {
-                    println!("[ICE] STUN OK: {}:{}", ip, stun_port);
+                    self.logger.info(&format!("STUN OK: {}:{}", ip, stun_port));
 
                     let srflx = Candidate::new(
                         crate::session::ice::candidate_type::CandidateType::ServerReflexive,
@@ -90,7 +87,7 @@ impl IceAgent {
                 }
 
         },
-        Err(e) => println!("[ICE] STUN failed: {}", e),
+        Err(e) => self.logger.warn(&format!("STUN failed: {}", e)),
     }
 
     Ok(())
@@ -136,10 +133,10 @@ impl IceAgent {
                 let is_remote_stun = remote.candidate_type == crate::session::ice::candidate_type::CandidateType::ServerReflexive;
 
                 if is_local_stun || is_remote_stun {
-                    println!(
-                        "[ICE] Skipping STUN pair: {} <-> {}",
+                    self.logger.debug(&format!(
+                        "Skipping STUN pair: {} <-> {}",
                         local.address, remote.address
-                    );
+                    ));
                     continue;
                 }
                 // -------------------------------------------------------------
@@ -150,7 +147,7 @@ impl IceAgent {
         }
 
         if self.candidate_pairs.is_empty() {
-            println!("[ICE] Error: No viable Host-Host pairs (are hosts on different networks?)");
+            self.logger.error("Error: No viable Host-Host pairs (are hosts on different networks?)");
             return Err(Error::NoCandidatePairs);
         }
 
@@ -174,15 +171,15 @@ impl IceAgent {
         self.selected_pair = Some(selected_pair.clone());
 
         // Display handshake completion message
-        eprintln!("Handshake complete! A direct connection can be established.");
-        eprintln!(
+        self.logger.info("Handshake complete! A direct connection can be established.");
+        self.logger.info(&format!(
             "   - My Address: {}:{}",
             selected_pair.local.address, selected_pair.local.port
-        );
-        eprintln!(
+        ));
+        self.logger.info(&format!(
             "   - Peer Address: {}:{}",
             selected_pair.remote.address, selected_pair.remote.port
-        );
+        ));
 
         Ok(())
     }
@@ -264,7 +261,8 @@ mod tests {
 
     #[test]
     fn test_new_agent_is_empty() {
-        let agent = IceAgent::new();
+        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let agent = IceAgent::new(logger);
 
         assert!(agent.local_candidates.is_empty());
         assert!(agent.remote_candidates.is_empty());
@@ -274,7 +272,8 @@ mod tests {
 
     #[test]
     fn test_gather_candidates_adds_local_candidate() {
-        let mut agent = IceAgent::new();
+        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let mut agent = IceAgent::new(logger);
         let ice_config = IceConfig {
             foundation: "1".to_string(),
             transport: "UDP".to_string(),
@@ -309,7 +308,8 @@ mod tests {
 
     #[test]
     fn test_add_remote_candidate_creates_pairs() -> Result<(), Error> {
-        let mut agent = IceAgent::new();
+        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let mut agent = IceAgent::new(logger);
 
         let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind test socket");
         agent.gather_candidates(&socket, &make_ice_config())?;
@@ -331,7 +331,8 @@ mod tests {
 
     #[test]
     fn test_start_connectivity_checks_selects_pair() -> Result<(), Error> {
-        let mut agent = IceAgent::new();
+        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let mut agent = IceAgent::new(logger);
 
         let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind test socket");
         agent.gather_candidates(&socket, &make_ice_config())?;
@@ -350,7 +351,8 @@ mod tests {
 
     #[test]
     fn test_error_when_starting_checks_without_pairs() {
-        let mut agent = IceAgent::new();
+        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let mut agent = IceAgent::new(logger);
         let result = agent.start_connectivity_checks();
         assert!(matches!(result, Err(Error::NoCandidatePairs)));
     }

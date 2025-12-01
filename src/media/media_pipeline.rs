@@ -1,30 +1,33 @@
 use crate::config::Config;
+use crate::controller::AppEvent;
 use crate::media::camera::{Camera, FrameSource};
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
+use crate::session::sdp::DtlsSetupRole;
+use crate::srtp::SrtpContext;
 use crate::transport::rtp::RtpPacket;
 use chrono::Local;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, mpsc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use crate::controller::AppEvent;
-use crate::session::sdp::DtlsSetupRole;
-use crate::srtp::SrtpContext;
+use crate::logger::Logger;
 
 pub struct MediaPipeline {
     camera: Camera,
     config: Arc<Config>,
     ssrc: u32,
+    logger: Logger,
 }
 
 impl MediaPipeline {
     #[must_use]
-    pub fn new(config: &Arc<Config>, ssrc: u32) -> Self {
+    pub fn new(config: &Arc<Config>, ssrc: u32, logger: Logger) -> Self {
         Self {
             camera: Camera::new(config),
             config: Arc::clone(config),
             ssrc,
+            logger,
         }
     }
 
@@ -35,19 +38,34 @@ impl MediaPipeline {
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
         srtp_ctx: SrtpContext,
-        role: DtlsSetupRole
+        role: DtlsSetupRole,
     ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         let is_client = matches!(role, DtlsSetupRole::Active);
         let srtp_ctx = Arc::new(Mutex::new(srtp_ctx));
 
-        let local_frame_rx = self.start_local_frame_pipeline(rtp_tx, event_tx.clone(), connected.clone(), srtp_ctx.clone(), is_client.clone())?;
-        let remote_frame_rx = self.start_remote_frames_pipeline(rtp_rx, event_tx.clone(), connected.clone(), srtp_ctx.clone(), is_client.clone())?;
+        let local_frame_rx = self.start_local_frame_pipeline(
+            rtp_tx,
+            event_tx.clone(),
+            connected.clone(),
+            srtp_ctx.clone(),
+            is_client.clone(),
+        )?;
+        let remote_frame_rx = self.start_remote_frames_pipeline(
+            rtp_rx,
+            event_tx.clone(),
+            connected.clone(),
+            srtp_ctx.clone(),
+            is_client.clone(),
+        )?;
 
         Ok((local_frame_rx, remote_frame_rx))
     }
 
     pub fn stop(&self) -> Result<(), Error> {
-        self.camera.stop().map_err(|e| Error::MapError(e.to_string()))
+        self.logger.info("Stopping MediaPipeline...");
+        self.camera
+            .stop()
+            .map_err(|e| Error::MapError(e.to_string()))
     }
 
     fn start_remote_frames_pipeline(
@@ -56,17 +74,21 @@ impl MediaPipeline {
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
         srtp_context: Arc<Mutex<SrtpContext>>,
-        is_client: bool
+        is_client: bool,
     ) -> Result<Receiver<Frame>, Error> {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
+        let logger = self.logger.clone();
 
         thread::spawn({
             move || {
-                let mut decoder = match Decoder::new()
-                    .map_err(|e| Error::MapError(e.to_string())) {
+                let mut decoder = match Decoder::new().map_err(|e| Error::MapError(e.to_string())) {
                     Ok(d) => d,
-                    Err(_) => {
-                        send_message_to_ui(event_tx, AppEvent::Error("Failed to create decoder".into()));
+                    Err(e) => {
+                        logger.error(&format!("Failed to create decoder: {}", e));
+                        send_message_to_ui(
+                            event_tx,
+                            AppEvent::Error("Failed to create decoder".into()),
+                        );
                         return;
                     }
                 };
@@ -88,26 +110,26 @@ impl MediaPipeline {
                             if (20..=63).contains(&first_byte) {
                                 continue;
                             } else if (128..=191).contains(&first_byte) {
-                                match srtp_context.lock(){
+                                match srtp_context.lock() {
                                     Ok(mut ctx) => {
                                         match ctx.unprotect(&protected_data, is_client) {
                                             Ok(unprotected_packet) => unprotected_packet,
                                             Err(e) => {
-                                                break
-                                            }
+                                                logger.error(&format!("SRTP unprotect failed: {}", e));
+                                                break;
+                                            },
                                         }
                                     }
                                     Err(e) => {
-                                        break
+                                        logger.error(&format!("SRTP context lock failed: {}", e));
+                                        break;
                                     },
                                 }
                             } else {
-                                continue
+                                continue;
                             }
-                        },
-                        Err(_) => {
-                            break
                         }
+                        Err(_) => break,
                     };
 
                     if actual_frame == Some(rtp_packet.frame_id) {
@@ -135,6 +157,7 @@ impl MediaPipeline {
                     connected.store(false, Ordering::SeqCst);
                     send_message_to_ui(event_tx.clone(), AppEvent::CallEnded)
                 };
+                logger.info("Remote frames pipeline terminated");
             }
         });
         Ok(remote_frame_rx)
@@ -157,6 +180,7 @@ impl MediaPipeline {
         let mut encoder = match Encoder::new(&self.config.media) {
             Ok(d) => d,
             Err(e) => {
+                self.logger.error(&format!("Failed to create encoder: {}", e));
                 send_message_to_ui(event_tx.clone(), AppEvent::Error(e.to_string()));
                 return Err(Error::MapError(e.to_string()));
             }
@@ -165,6 +189,8 @@ impl MediaPipeline {
         let ssrc = self.ssrc;
         let srtp_ctx = srtp_ctx.clone();
         let config = self.config.clone();
+        let logger = self.logger.clone();
+
         thread::spawn(move || {
             for frame in camera_frame_rx {
                 if !connected.load(Ordering::SeqCst) {
@@ -177,23 +203,30 @@ impl MediaPipeline {
 
                 let encoded_frame = match encoder.encode_frame(&frame) {
                     Ok(f) => f,
-                    Err(_) => {
-                        break
+                    Err(e) => {
+                        logger.error(&format!("Failed to encode frame: {}", e));
+                        break;
                     },
                 };
 
                 let rtp_packet = generate_rtp_packet(encoded_frame, config.clone(), ssrc);
 
                 for packet in rtp_packet {
-                    send_encripted_rtp_packet(srtp_tx.clone(), packet, srtp_ctx.clone(), is_client);
+                    if let Err(e) = send_encripted_rtp_packet(srtp_tx.clone(), packet, srtp_ctx.clone(), is_client) {
+                        logger.error(&format!("Failed to send encrypted RTP packet: {}", e));
+                    }
                 }
-
             }
 
-            if connected.load(Ordering::SeqCst) {
-                connected.store(false, Ordering::SeqCst);
-                send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
+            while connected.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
+
+            // if connected.load(Ordering::SeqCst) {
+            //     connected.store(false, Ordering::SeqCst);
+            //     send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
+            // }
+            logger.info("Local frame pipeline terminated");
         });
 
         Ok(local_frame_rx)
@@ -254,7 +287,11 @@ fn send_message_to_ui(event_tx: Sender<AppEvent>, event: AppEvent) {
     event_tx.send(event);
 }
 
-fn generate_rtp_packet(encoded_frame: EncodedFrame, config: Arc<Config>, ssrc: u32) -> Vec<RtpPacket> {
+fn generate_rtp_packet(
+    encoded_frame: EncodedFrame,
+    config: Arc<Config>,
+    ssrc: u32,
+) -> Vec<RtpPacket> {
     let mut packets = Vec::new();
     let marker = encoded_frame.chunks.len() as u16;
     for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
@@ -273,7 +310,12 @@ fn generate_rtp_packet(encoded_frame: EncodedFrame, config: Arc<Config>, ssrc: u
     packets
 }
 
-fn send_encripted_rtp_packet(srtp_tx: Sender<Vec<u8>>, packet: RtpPacket, srtp_ctx: Arc<Mutex<SrtpContext>>, is_client: bool) -> Result<(), Error> {
+fn send_encripted_rtp_packet(
+    srtp_tx: Sender<Vec<u8>>,
+    packet: RtpPacket,
+    srtp_ctx: Arc<Mutex<SrtpContext>>,
+    is_client: bool,
+) -> Result<(), Error> {
     let protected_data = {
         let mut ctx = match srtp_ctx.lock() {
             Ok(c) => c,

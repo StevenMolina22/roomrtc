@@ -104,13 +104,9 @@ impl Controller {
                 .parse()
                 .map_err(Error::ParsingSocketAddressError)?;
 
-        self.rtp_udp_socket
-            .connect(remote_rtp)
-            .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
-        self.rtcp_udp_socket
-            .connect(remote_rtcp)
-            .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
-
+        // Handshake First (Before OS Connect)
+        // We pass the raw sockets to the DTLS wrapper. The wrapper handles
+        // destination addressing internally during the handshake.
         let rtp_dtls = self.create_dtls_socket(
             self.rtp_udp_socket
                 .try_clone()
@@ -124,8 +120,19 @@ impl Controller {
             remote_rtcp,
         )?;
 
+        // Now that the handshake is done, we lock the raw sockets to the remote peer.
+        // This is required for the RtpSender/Receiver threads that run later,
+        // because they use 'socket.send()' which requires a connected socket.
+        self.rtp_udp_socket
+            .connect(remote_rtp)
+            .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
+        self.rtcp_udp_socket
+            .connect(remote_rtcp)
+            .map_err(|e| Error::ConnectionSocketError(e.to_string()))?;
+
+        // Export Keys & Setup Context
         let key_material = rtp_dtls
-            .export_keying_material("EXTRACTOR-dtls_srtp", 60) // RFC 5764 label, keying material uses AES-128
+            .export_keying_material("EXTRACTOR-dtls_srtp", 60)
             .map_err(|e| Error::MapError(format!("Key export failed: {}", e)))?;
         println!("DTLS-SRTP Key Material: {:?}", key_material);
 
@@ -150,6 +157,7 @@ impl Controller {
         rtcp_handler
             .init_connection()
             .map_err(|e| Error::MapError(e.to_string()))?;
+
         self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
         self.rtp_socket = Some(rtp_dtls);
         self.rtcp_socket = Some(rtcp_dtls);

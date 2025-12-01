@@ -7,7 +7,6 @@ use openssl::{
     nid::Nid,
     pkcs12::Pkcs12,
     pkey::PKey,
-    rsa::Rsa,
     x509::X509NameBuilder,
 };
 use std::fmt;

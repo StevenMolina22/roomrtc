@@ -121,8 +121,7 @@ impl Camera {
                     &mat,
                     &mut rgb,
                     imgproc::COLOR_BGR2RGB,
-                    0,
-                    core::AlgorithmHint::ALGO_HINT_DEFAULT,
+                    0
                 )
                 .is_err()
                 {

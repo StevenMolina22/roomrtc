@@ -169,15 +169,15 @@ fn send_encoded_frame(
         return Err(Error::SendError("Media pipeline turned off".into()));
     }
 
-    let marker = encoded_frame.chunks.len() as u16;
-    for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
+    let total_chunks = encoded_frame.chunks.len();
+    for (sequence_number, payload) in encoded_frame.chunks.iter().enumerate() {
         let packet = RtpPacket {
             version: config.media.rtp_version,
-            marker,
+            total_chunks: total_chunks as u8,
+            is_i_frame: encoded_frame.is_i_frame,
+            sequence_number: sequence_number as u64,
             payload_type: config.media.rtp_payload_type,
-            frame_id: encoded_frame.id,
-            chunk_id: chunk_id as u64,
-            timestamp: Local::now().timestamp_millis() as u32,
+            timestamp: encoded_frame.frame_time,
             ssrc,
             payload: payload.clone(),
         };
@@ -189,9 +189,9 @@ fn send_encoded_frame(
 }
 
 fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {
-    let fr_id = chunks.first()?.frame_id;
+    let ts = chunks.first()?.timestamp;
 
-    chunks.sort_by_key(|c| c.chunk_id);
+    chunks.sort_by_key(|c| c.sequence_number);
     let mut data = Vec::new();
     for c in chunks.iter() {
         data.extend_from_slice(&c.payload);
@@ -205,7 +205,7 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
         data: decoded_data,
         width,
         height,
-        id: fr_id,
+        frame_time: ts,
     })
 }
 
@@ -237,7 +237,7 @@ mod tests {
             data: raw_data.clone(),
             width,
             height,
-            id: 7,
+            frame_time: Local::now().timestamp_millis() as u64,
         };
 
         // ------- Encode -------
@@ -247,18 +247,17 @@ mod tests {
 
         assert!(!encoded.chunks.is_empty(), "El encoder debe generar chunks");
 
-        // ------- Construimos los RtpPacket -------
         let mut rtp_chunks = Vec::new();
-        let marker = encoded.chunks.len() as u16;
+        let total_chunks = encoded.chunks.len() as u8;
 
         for (i, chunk) in encoded.chunks.iter().enumerate() {
             rtp_chunks.push(RtpPacket {
                 version: config.media.rtp_version,
-                marker,
+                total_chunks,
+                is_i_frame: encoded.is_i_frame,
                 payload_type: config.media.rtp_payload_type,
-                frame_id: encoded.id,
-                chunk_id: i as u64,
-                timestamp: 1234,
+                sequence_number: i as u64,
+                timestamp: raw_frame.frame_time,
                 ssrc: 55,
                 payload: chunk.clone(),
             });
@@ -269,21 +268,6 @@ mod tests {
             .expect("generate_frame_from_chunks no devolvió frame");
 
         // ------- Validaciones -------
-        assert_eq!(decoded.width, width);
-        assert_eq!(decoded.height, height);
-        assert_eq!(decoded.id, raw_frame.id);
-
-        // No comparamos byte a byte porque H.264 es con pérdida,
-        // pero verificamos que la salida tenga datos y tamaño correcto
-        assert_eq!(
-            decoded.data.len(),
-            raw_data.len(),
-            "El decoded debe tener mismo tamaño que el raw"
-        );
-
-        assert!(
-            decoded.data.iter().any(|b| *b != 0),
-            "Debe haber datos válidos"
-        );
+        assert_eq!(decoded, raw_frame);
     }
 }

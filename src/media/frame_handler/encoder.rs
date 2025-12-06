@@ -1,7 +1,7 @@
 use crate::config::MediaConfig;
 
 use super::{EncodedFrame, error::FrameError as Error, frame::Frame};
-use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
+use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder, FrameType};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
 
 /// A basic H.264 video encoder using the `OpenH264` library.
@@ -54,13 +54,18 @@ impl Encoder {
             .encoder
             .encode(&yuv)
             .map_err(|_| Error::EncodingError)?;
+        
         let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
+        let frame_type = nalus.frame_type();
+        
+        
 
         Ok(EncodedFrame {
-            id: frame.id,
             chunks,
+            frame_time: frame.frame_time,
             width: frame.width,
             height: frame.height,
+            is_i_frame: frame_type == FrameType::I,
         })
     }
 }

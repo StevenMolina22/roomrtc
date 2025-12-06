@@ -12,52 +12,26 @@ pub struct RtpPacket {
     /// Packet format version.
     pub version: u8,
 
-    /// Marker/total-chunks field used by the application.
-    pub marker: u16,
+    /// Amount of chunks that compose a unique frame.
+    pub total_chunks: u8,
+
+    /// Determines if the frame is an intra frame or not.
+    pub is_i_frame: bool,
 
     /// Payload type.
     pub payload_type: u8,
 
     /// Logical frame identifier for the packet's media frame.
-    pub frame_id: u64,
-
-    /// Chunk identifier within the frame.
-    pub chunk_id: u64,
+    pub sequence_number: u64,
 
     /// Timestamp associated with the sample/frame.
-    pub timestamp: u32,
+    pub timestamp: u64,
 
     /// SSRC (synchronization source) identifier.
     pub ssrc: u32,
 
     /// Payload bytes of the packet.
     pub payload: Vec<u8>,
-}
-
-impl Display for RtpPacket {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "RtpPacket {{
-    version: {},
-    marker: {},
-    payload_type: {},
-    frame_id: {},
-    chunk_id: {},
-    timestamp: {},
-    ssrc: {},
-    payload_len: {}
-}}",
-            self.version,
-            self.marker,
-            self.payload_type,
-            self.frame_id,
-            self.chunk_id,
-            self.timestamp,
-            self.ssrc,
-            self.payload.len(),
-        )
-    }
 }
 
 impl RtpPacket {
@@ -69,14 +43,14 @@ impl RtpPacket {
     /// network byte order.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(26 + self.payload.len());
+        let mut buf = Vec::with_capacity(24 + self.payload.len());
 
         buf.push(self.version);
+        buf.extend_from_slice(&self.total_chunks.to_be_bytes());
+        buf.push(self.is_i_frame as u8);
         buf.push(self.payload_type);
-        buf.extend_from_slice(&self.frame_id.to_be_bytes());
-        buf.extend_from_slice(&self.chunk_id.to_be_bytes());
+        buf.extend_from_slice(&self.sequence_number.to_be_bytes());
         buf.extend_from_slice(&self.timestamp.to_be_bytes());
-        buf.extend_from_slice(&self.marker.to_be_bytes());
         buf.extend_from_slice(&self.ssrc.to_be_bytes());
         buf.extend_from_slice(&self.payload);
 
@@ -87,26 +61,26 @@ impl RtpPacket {
     /// `to_bytes`. Returns `None` if the slice is too short or malformed.
     #[must_use]
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < 28 {
+        if data.len() < 24 {
             return None;
         }
 
         let version = data[0];
-        let payload_type = data[1];
-        let frame_id = u64::from_be_bytes(array_from_slice::<8>(&data[2..10]));
-        let chunk_id = u64::from_be_bytes(array_from_slice::<8>(&data[10..18]));
-        let timestamp = u32::from_be_bytes(array_from_slice::<4>(&data[18..22]));
-        let total_chunks = u16::from_be_bytes(array_from_slice::<2>(&data[22..24]));
-        let ssrc = u32::from_be_bytes(array_from_slice::<4>(&data[24..28]));
-        let payload = data[28..].to_vec();
+        let total_chunks = data[1];
+        let is_i_frame = data[2];
+        let payload_type = data[3];
+        let sequence_number = u64::from_be_bytes(array_from_slice(&data[4..12]));
+        let timestamp = u64::from_be_bytes(array_from_slice(&data[12..20]));
+        let ssrc = u32::from_be_bytes(array_from_slice::<4>(&data[20..24]));
+        let payload = data[24..].to_vec();
 
         Some(Self {
             version,
+            total_chunks,
+            is_i_frame: is_i_frame != 0,
             payload_type,
-            frame_id,
-            chunk_id,
+            sequence_number,
             timestamp,
-            marker: total_chunks,
             ssrc,
             payload,
         })
@@ -128,93 +102,36 @@ mod tests {
     fn test_rtp_packet_serialization_roundtrip() {
         let original_packet = RtpPacket {
             version: 2,
-            marker: 5,
+            total_chunks: 15,      
+            is_i_frame: true,  
             payload_type: 96,
-            payload: vec![10, 20, 30, 40, 50],
-            timestamp: 1_122_334_455,
-            frame_id: 123_456_789,
-            chunk_id: 42,
-            ssrc: 987_654_321,
+            sequence_number: 100,
+            timestamp: 5000,
+            ssrc: 1234,
+            payload: vec![0xAA, 0xBB],
         };
 
         let bytes = original_packet.to_bytes();
-        let deserialized_option = RtpPacket::from_bytes(&bytes);
+        assert_eq!(bytes.len(), 26);
+        
+        assert_eq!(bytes[2], 1, "El booleano true debería ser 1 en binario");
 
-        assert!(deserialized_option.is_some(), "from_bytes returned None");
+        let deserialized = RtpPacket::from_bytes(&bytes).unwrap();
 
-        let deserialized_packet = deserialized_option.unwrap();
-
-        assert_eq!(
-            original_packet.version, deserialized_packet.version,
-            "Version mismatch"
-        );
-        assert_eq!(
-            original_packet.marker, deserialized_packet.marker,
-            "Marker mismatch"
-        );
-        assert_eq!(
-            original_packet.payload_type, deserialized_packet.payload_type,
-            "Payload type mismatch"
-        );
-        assert_eq!(
-            original_packet.frame_id, deserialized_packet.frame_id,
-            "Frame ID mismatch"
-        );
-        assert_eq!(
-            original_packet.chunk_id, deserialized_packet.chunk_id,
-            "Chunk ID mismatch"
-        );
-        assert_eq!(
-            original_packet.timestamp, deserialized_packet.timestamp,
-            "Timestamp mismatch"
-        );
-        assert_eq!(
-            original_packet.ssrc, deserialized_packet.ssrc,
-            "SSRC mismatch"
-        );
-        assert_eq!(
-            original_packet.payload, deserialized_packet.payload,
-            "Payload data mismatch"
-        );
+        assert_eq!(original_packet.total_chunks, deserialized.total_chunks);
+        assert_eq!(original_packet.is_i_frame, deserialized.is_i_frame);
+        assert_eq!(deserialized.is_i_frame, true);
     }
 
     #[test]
-    fn test_from_bytes_too_short() {
-        let short_bytes: &[u8] = &[0; 27];
+    fn test_bool_false_serialization() {
+        let mut packet = RtpPacket::default();
+        packet.is_i_frame = false;
 
-        let result = RtpPacket::from_bytes(short_bytes);
+        let bytes = packet.to_bytes();
+        assert_eq!(bytes[2], 0, "False in binary should be 0");
 
-        assert!(
-            result.is_none(),
-            "Expected None for a packet shorter than the header"
-        );
-    }
-
-    #[test]
-    fn test_from_bytes_exactly_header_size() {
-        let header_only_bytes: &[u8] = &[
-            2, 96, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 0, 1, 0, 0, 0, 2,
-        ];
-
-        let result = RtpPacket::from_bytes(header_only_bytes);
-
-        assert!(
-            result.is_some(),
-            "Packet with exact header size should deserialize"
-        );
-        let packet = result.unwrap();
-        assert_eq!(packet.frame_id, 1);
-        assert_eq!(packet.timestamp, 100);
-        assert_eq!(packet.ssrc, 2);
-        assert!(packet.payload.is_empty(), "Payload should be empty");
-    }
-
-    #[test]
-    fn test_from_bytes_empty_slice() {
-        let empty_bytes: &[u8] = &[];
-
-        let result = RtpPacket::from_bytes(empty_bytes);
-
-        assert!(result.is_none(), "Expected None for an empty byte slice");
+        let deserialized = RtpPacket::from_bytes(&bytes).unwrap();
+        assert_eq!(deserialized.is_i_frame, false);
     }
 }

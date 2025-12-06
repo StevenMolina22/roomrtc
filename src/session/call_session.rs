@@ -12,10 +12,6 @@ use crate::logger::Logger;
 
 /// High-level session that exposes SDP and ICE operations used by the UI
 /// and signaling code.
-///
-/// `Session` holds a local `SessionDescriptionProtocol` and an `IceAgent`.
-/// It can create an SDP offer, process remote offers/answers and drive
-/// ICE connectivity checks.
 pub struct CallSession {
     /// Local SDP state representing current media descriptions.
     pub sdp: SessionDescriptionProtocol,
@@ -23,6 +19,9 @@ pub struct CallSession {
     /// ICE agent responsible for gathering local candidates and
     /// performing connectivity checks with remote candidates.
     pub ice_agent: IceAgent,
+
+    /// UDP socket used for STUN/ICE and media transport.
+    pub socket: UdpSocket, 
 
     /// Locally generated certificate and DTLS identity for DTLS handshakes.
     pub local_cert: LocalCert,
@@ -48,27 +47,6 @@ enum RemoteSdpType {
 impl CallSession {
     /// Create a new `CallSession` using the provided media port and codec
     /// configuration.
-    /// - `ice_config`: ICE configuration for candidate creation.
-    /// - `sdp_config`: SDP session-level configuration values.
-    ///
-    /// Parameters:
-    /// - `media_port`: UDP port where ICE candidate gathering is performed
-    ///   and where the endpoint expects/receives RTP packets.
-    /// - `media_config`: media stream configuration (payload type, codec
-    ///   name and clock rate).
-    ///
-    /// This method performs the following steps:
-    /// 1. Creates an `IceAgent` and calls `gather_candidates` to obtain
-    ///    local candidates.
-    /// 2. Builds a local `MediaDescription` and adds an `rtpmap` attribute
-    ///    (and a `candidate` attribute if a local candidate is available).
-    /// 3. Initializes the local `SessionDescriptionProtocol` and, if a
-    ///    local candidate exists, sets the connection data (`c=`) to the
-    ///    candidate's IP address.
-    ///
-    /// # Returns
-    /// Returns a `CallSession` containing the local SDP and an `IceAgent`
-    /// already configured with (potentially) gathered candidates.
     pub fn new(
         stun_socket: UdpSocket,
         config: &Arc<Config>,
@@ -138,6 +116,7 @@ impl CallSession {
         Ok(Self {
             sdp,
             ice_agent,
+            socket: stun_socket,
             local_cert,
             remote_fingerprint: None,
             remote_setup_role: None,
@@ -209,7 +188,7 @@ impl CallSession {
         }
 
         self.ice_agent
-            .start_connectivity_checks()
+            .start_connectivity_checks(&self.socket) 
             .map_err(|e| Error::IceConnectionError(e.to_string()))
     }
 

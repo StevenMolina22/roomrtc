@@ -20,8 +20,9 @@ pub struct CallSession {
     /// performing connectivity checks with remote candidates.
     pub ice_agent: IceAgent,
 
-    /// UDP socket used for STUN/ICE and media transport.
-    pub socket: UdpSocket, 
+    /// UDP socket used for communication (STUN, ICE Checks, and RTP).
+    /// We store the socket here to persist it throughout the session.
+    pub socket: UdpSocket,
 
     /// Locally generated certificate and DTLS identity for DTLS handshakes.
     pub local_cert: LocalCert,
@@ -154,6 +155,14 @@ impl CallSession {
         self.process_remote_sdp(answer_sdp, RemoteSdpType::Answer)
     }
 
+    /// Start ICE connectivity checks using the current set of local
+    /// and remote candidates.
+    pub fn start_ice_checks(&mut self) -> Result<(), Error> {
+        self.ice_agent
+            .start_connectivity_checks(&self.socket)
+            .map_err(|e| Error::IceConnectionError(e.to_string()))
+    }
+
     /// Return the local SDP offer, a copy from the current
     /// `SessionDescriptionProtocol` state.
     #[must_use]
@@ -187,9 +196,7 @@ impl CallSession {
             }
         }
 
-        self.ice_agent
-            .start_connectivity_checks(&self.socket) 
-            .map_err(|e| Error::IceConnectionError(e.to_string()))
+        Ok(())
     }
 
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {

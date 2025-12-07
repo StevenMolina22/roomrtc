@@ -226,10 +226,7 @@ mod tests {
         let result = parse_stun_response(&packet);
 
         assert!(result.is_ok(), "El parser falló al leer un paquete válido");
-        assert_eq!(
-            result.unwrap(),
-            format!("{expected_ip}:{expected_port}")
-        );
+        assert_eq!(result.unwrap(), format!("{expected_ip}:{expected_port}"));
     }
 
     #[test]

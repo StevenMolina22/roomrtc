@@ -94,7 +94,12 @@ impl Controller {
                 self.call_session
                     .process_answer(&sdp_answer)
                     .map_err(|e| Error::MapError(e.to_string()))?;
-                self.logger.info("Starting call...");
+                self.logger.info("Starting ICE checks...");
+                self.call_session
+                    .start_ice_checks()
+                    .map_err(|e| Error::MapError(e.to_string()))?;
+
+                self.logger.info("Joining call...");
                 self.join_call()
             }
             ServerResponse::CallRejected => Err(Error::CallRefused),
@@ -152,7 +157,12 @@ impl Controller {
 
         self.give_response_to_thread(response)?;
 
-        self.logger.info("joining call...");
+        self.logger.info("SDP Answer sent. Starting ICE checks...");
+        self.call_session
+            .start_ice_checks()
+            .map_err(|e| Error::MapError(e.to_string()))?;
+
+        self.logger.info("Joining call...");
         self.join_call()
     }
 
@@ -338,9 +348,11 @@ impl Controller {
     }
 
     fn give_response_to_thread(&mut self, response: ClientResponse) -> Result<(), Error> {
-        if let Some(client_response_tx) = &self.client_response_tx { client_response_tx
-        .send(response)
-        .map_err(|e| Error::IOError(e.to_string())) } else {
+        if let Some(client_response_tx) = &self.client_response_tx {
+            client_response_tx
+                .send(response)
+                .map_err(|e| Error::IOError(e.to_string()))
+        } else {
             self.logger
                 .warn("No podes obtener canal, no estas loggeado");
             Err(Error::NotLoggedInError)
@@ -356,7 +368,9 @@ impl Controller {
     }
 
     fn get_token(&self) -> Result<String, Error> {
-        if let Some(token) = &self.token { Ok(token.clone()) } else {
+        if let Some(token) = &self.token {
+            Ok(token.clone())
+        } else {
             self.logger
                 .warn("No podes obtener token, no estas loggeado");
             Err(Error::NotLoggedInError)

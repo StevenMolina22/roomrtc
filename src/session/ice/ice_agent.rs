@@ -205,6 +205,21 @@ impl IceAgent {
         }
     }
 
+    /// Verify that a candidate pair is reachable via PING/PONG exchange.
+    ///
+    /// Performs a connectivity check by sending PING messages to the target
+    /// address and waiting for a PONG response. The check repeats for up to 2 seconds.
+    /// If a PING is received from the remote, a PONG is sent back in response.
+    ///
+    /// # Arguments
+    ///
+    /// - `socket`: the UDP socket to use for sending and receiving messages.
+    /// - `target`: the target address in "IP:port" format to send PING messages to.
+    ///
+    /// # Returns
+    ///
+    /// - `true` if a valid PONG response is received from the target within the timeout.
+    /// - `false` if no PONG is received or the timeout expires.
     fn verify_candidate_pair(socket: &std::net::UdpSocket, target: &str) -> bool {
         let start = Instant::now();
         let max_duration = Duration::from_secs(2);

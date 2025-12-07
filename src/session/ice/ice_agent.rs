@@ -159,14 +159,11 @@ impl IceAgent {
             return Err(Error::NoCandidatePairs);
         }
 
-        // 1. Ordenar pares por prioridad (Host > Srflx)
         self.candidate_pairs
             .sort_by(|a, b| b.priority.cmp(&a.priority));
 
         let mut selected_index = None;
 
-        // Configurar un timeout de lectura para no bloquear el hilo eternamente
-        // Esto es vital: si no recibimos nada, queremos volver a intentar enviar.
         socket
             .set_read_timeout(Some(Duration::from_millis(300)))
             .map_err(|_| Error::NetworkInterfaceError)?; // O el error que prefieras
@@ -187,19 +184,17 @@ impl IceAgent {
 
             let target = format!("{}:{}", pair.remote.address, pair.remote.port);
 
-            // Intentamos verificar este par específico durante un tiempo límite (ej. 2 segundos)
             if Self::verify_candidate_pair(socket, &target) {
                 pair.state = ConnectivityState::Succeeded;
                 println!("[ICE] Pair VALIDATED: {}", pair);
                 selected_index = Some(index);
-                break; // ¡Encontramos uno que funciona!
+                break;
             } else {
                 pair.state = ConnectivityState::Failed;
                 println!("[ICE] Pair FAILED: {}", pair);
             }
         }
 
-        // Restaurar timeout a None (bloqueante) o lo que use tu app después
         let _ = socket.set_read_timeout(None);
 
         if let Some(index) = selected_index {
@@ -215,22 +210,17 @@ impl IceAgent {
         let max_duration = Duration::from_secs(2);
         let mut buf = [0u8; 1024];
 
-        // Bucle de intentos
         while start.elapsed() < max_duration {
-            // 1. ENVIAR PING
             if let Err(e) = socket.send_to(b"PING", target) {
                 println!("[ICE] Send error: {}", e);
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
 
-            // 2. ESCUCHAR RESPUESTA
             match socket.recv_from(&mut buf) {
                 Ok((amt, src)) => {
-                    // Verificación simple: ¿La IP de origen está en nuestro target?
-                    // target es "IP:PORT", src.ip().to_string() es "IP".
                     if !target.contains(&src.ip().to_string()) {
-                        continue; // Ignorar paquetes de otros
+                        continue;
                     }
 
                     let msg = &buf[..amt];
@@ -239,19 +229,17 @@ impl IceAgent {
                         println!("[ICE] Received PONG from remote: {}", src);
                         return true;
                     } else if msg == b"PING" {
-                        // El otro lado nos busca. Respondemos PONG y seguimos esperando.
                         let _ = socket.send_to(b"PONG", target);
                         println!("[ICE] Received PING from remote, sent PONG back.");
                     }
                 }
                 Err(_) => {
-                    // Timeout de lectura (asumiendo que socket tiene read_timeout configurado)
                     continue;
                 }
             }
         }
 
-        false // Se acabó el tiempo sin éxito
+        false
     }
 
     pub fn get_local_ip_str(&self) -> Result<String, Error> {

@@ -133,3 +133,128 @@ impl UserHandler {
 fn send_response(stream: &mut StreamOwned<ServerConnection, TcpStream>, response: ServerResponse) {
     stream.write_all(&response.to_bytes());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_server_protocol::ClientMessage;
+    use crate::session::sdp::SessionDescriptionProtocol;
+    use crate::user::UserStatus;
+
+    fn setup_handler() -> (UserHandler, Arc<RwLock<HashMap<String, UserData>>>) {
+        let users = Arc::new(RwLock::new(HashMap::new()));
+        let users_ref = users.clone();
+        
+        let users_connected = Arc::new(AtomicUsize::new(0));
+        let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+
+        let logger = match Logger::new("/dev/null") {
+            Ok(l) => l,
+            Err(_) => match Logger::new("test_fallback.log") {
+                Ok(l2) => l2,
+                Err(e) => panic!("Failed to create logger for tests: {e}"),
+            },
+        };
+
+        let op_server = OperatingServer::new(
+            users,
+            users_connected,
+            addr,
+            "test_handler_users.txt".into(),
+            10,
+            logger.clone(),
+        );
+
+        let handler = UserHandler {
+            op_server,
+            logger,
+        };
+
+        (handler, users_ref)
+    }
+
+    #[test]
+    fn test_dispatch_login() {
+        let (mut handler, _) = setup_handler();
+        
+        handler.op_server.signup_user("tester".into(), "pass".into());
+
+        let msg = ClientMessage::LogIn { 
+            username: "tester".into(), 
+            password: "pass".into() 
+        };
+
+        let response = handler.handle_client_message(msg);
+        
+        match response {
+            ServerResponse::LoginOk(u, _, _) => assert_eq!(u, "tester"),
+            _ => assert!(false, "El mensaje LogIn no devolvió LoginOk"),
+        }
+    }
+
+    #[test]
+    fn test_dispatch_signup() {
+        let (mut handler, _) = setup_handler();
+        
+        let msg = ClientMessage::SignUp { 
+            username: "newuser".into(), 
+            password: "123".into() 
+        };
+
+        let response = handler.handle_client_message(msg);
+        assert!(matches!(response, ServerResponse::SignupOk));
+    }
+
+    #[test]
+    fn test_dispatch_logout() {
+        let (mut handler, users_ref) = setup_handler();
+        
+        handler.op_server.signup_user("leaver".into(), "pass".into());
+        handler.op_server.login_user("leaver".into(), "pass".into());
+
+        let msg = ClientMessage::LogOut { token: "leaver".into() };
+        let response = handler.handle_client_message(msg);
+        
+        assert!(matches!(response, ServerResponse::Error(_))); 
+        
+        if let Ok(users) = users_ref.read() {
+            if let Some(user) = users.get("leaver") {
+                assert_eq!(user.status, UserStatus::Offline);
+            }
+        }
+    }
+
+    #[test]
+    fn test_dispatch_call_hangup() {
+        let (mut handler, users_ref) = setup_handler();
+        
+        // Creamos usuario
+        handler.op_server.signup_user("busy".into(), "pass".into());
+        
+        if let Ok(mut u) = users_ref.write() {
+            if let Some(data) = u.get_mut("busy") {
+                data.status = UserStatus::Occupied("other".into());
+            }
+        }
+
+        let msg = ClientMessage::CallHangup { token: "busy".into() };
+        let response = handler.handle_client_message(msg);
+        
+        assert!(matches!(response, ServerResponse::CallHangUpOk));
+    }
+
+    #[test]
+    fn test_dispatch_call_request_validation() {
+        let (mut handler, _) = setup_handler();
+        
+        let msg = ClientMessage::CallRequest { 
+            token: "origin".into(), 
+            to: "dest".into(), 
+            offer_sdp: SessionDescriptionProtocol::default() 
+        };
+
+        let response = handler.handle_client_message(msg);
+        
+        assert!(matches!(response, ServerResponse::Error(_)));
+    }
+}

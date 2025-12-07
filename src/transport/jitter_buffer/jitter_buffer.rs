@@ -58,18 +58,6 @@ impl<const N: usize> JitterBuffer<N>  {
 
         let pos = (seq % N as u64) as usize;
 
-        if self.i_frame_needed {
-            if packet.is_i_frame {
-                self.read_seq = Some(seq);
-                self.write_seq = Some(seq);
-                self.read_idx = pos;
-                self.write_idx = pos;
-                self.packets[pos] = Some(packet);
-                self.i_frame_needed = false;
-            }
-            return;
-        }
-
         match (self.read_seq, self.write_seq) {
             (Some(read), Some(write)) => {
                 if seq < read {
@@ -91,7 +79,12 @@ impl<const N: usize> JitterBuffer<N>  {
                 }
             }
             _ => {
-                self.clear_buffer();
+                self.read_seq = Some(seq);
+                self.write_seq = Some(seq);
+                self.read_idx = pos;
+                self.write_idx = pos;
+                self.packets[pos] = Some(packet);
+                self.i_frame_needed = false;
             }
         }
     }
@@ -390,7 +383,6 @@ mod tests {
         // Setup: Meter I-Frame inicial para desbloquear
         jitter.add(make_packet(1, 1000, true, 1, 1, 0xFF));
         jitter.pop();
-
         // Test: Meter un frame partido en 3 chunks ordenados
         // Frame Timestamp: 2000
         // Seq: 2, 3, 4

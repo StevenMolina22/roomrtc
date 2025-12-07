@@ -6,6 +6,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
+use chrono;
 
 pub trait FrameSource: Send {
     /// Start the capture thread.
@@ -27,8 +28,7 @@ pub struct Camera {
     /// Flag used to signal the capture thread to keep running.
     running: Arc<RwLock<bool>>,
 
-    /// Monotonic counter used to assign `Frame.id` values.
-    frame_id: Arc<RwLock<usize>>,
+    /// Config file 
     config: Arc<Config>,
 }
 
@@ -42,7 +42,6 @@ impl Camera {
     pub fn new(media_config: &Arc<Config>) -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
-            frame_id: Arc::new(RwLock::new(0)),
             config: Arc::clone(media_config),
         }
     }
@@ -59,7 +58,6 @@ impl Camera {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
         *running.write().map_err(|_| Error::PoisonedLock)? = true;
-        let frame_id = self.frame_id.clone();
 
         let config = self.config.clone();
 
@@ -128,24 +126,12 @@ impl Camera {
                     continue;
                 };
 
-                let id = {
-                    let mut id_lock = if let Ok(lock) = frame_id.write() {
-                        lock
-                    } else {
-                        eprintln!("Failed to acquire frame ID lock.");
-                        continue;
-                    };
-                    let id = *id_lock;
-                    *id_lock = id + 1;
-                    id
-                };
-
                 #[allow(clippy::cast_sign_loss)]
                 let frame = Frame {
                     data,
                     width: rgb.cols() as usize,
                     height: rgb.rows() as usize,
-                    id: id as u64,
+                    frame_time: chrono::Local::now().timestamp_millis()
                 };
 
                 if tx.send(frame).is_err() {

@@ -76,15 +76,15 @@ impl MediaPipeline {
                         }
                     };
 
-                    if actual_frame == Some(rtp_packet.frame_id) {
+                    if actual_frame == Some(rtp_packet.timestamp) {
                         chunks.push(rtp_packet.clone());
                     } else {
                         chunks = vec![rtp_packet.clone()];
-                        actual_frame = Some(rtp_packet.frame_id);
+                        actual_frame = Some(rtp_packet.timestamp);
                     }
 
                     let expected_marker = rtp_packet.marker;
-                    let current_chunk_count = chunks.len() as u16;
+                    let current_chunk_count = chunks.len() as u8;
 
                     if current_chunk_count == expected_marker {
                         if let Some(frame_data) =
@@ -173,6 +173,7 @@ fn send_encoded_frame(
     for (sequence_number, payload) in encoded_frame.chunks.iter().enumerate() {
         let packet = RtpPacket {
             version: config.media.rtp_version,
+            marker: 0,
             total_chunks: total_chunks as u8,
             is_i_frame: encoded_frame.is_i_frame,
             sequence_number: sequence_number as u64,
@@ -237,7 +238,7 @@ mod tests {
             data: raw_data.clone(),
             width,
             height,
-            frame_time: Local::now().timestamp_millis() as u64,
+            frame_time: Local::now().timestamp_millis(),
         };
 
         // ------- Encode -------
@@ -253,6 +254,7 @@ mod tests {
         for (i, chunk) in encoded.chunks.iter().enumerate() {
             rtp_chunks.push(RtpPacket {
                 version: config.media.rtp_version,
+                marker: 0,
                 total_chunks,
                 is_i_frame: encoded.is_i_frame,
                 payload_type: config.media.rtp_payload_type,

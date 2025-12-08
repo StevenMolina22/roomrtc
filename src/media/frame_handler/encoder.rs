@@ -14,6 +14,7 @@ use openh264::formats::{RgbSliceU8, YUVBuffer};
 pub struct Encoder {
     encoder: H264Encoder,
     max_chunk_size: usize,
+    total_frames: u64,
 }
 
 impl Encoder {
@@ -33,6 +34,7 @@ impl Encoder {
         Ok(Self {
             encoder,
             max_chunk_size: media_config.rtp_max_chunk_size,
+            total_frames: 0
         })
     }
 
@@ -50,14 +52,21 @@ impl Encoder {
         let rgb_source = RgbSliceU8::new(&frame.data, (frame.width, frame.height));
         let yuv = YUVBuffer::from_rgb8_source(rgb_source);
 
+
         let nalus = self
             .encoder
             .encode(&yuv)
             .map_err(|_| Error::EncodingError)?;
-        
+
+        self.total_frames += 1;
         let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
         let frame_type = nalus.frame_type();
         let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
+
+        if self.total_frames.is_multiple_of(60) {
+            self.encoder.force_intra_frame();
+        }
+
 
         Ok(EncodedFrame {
             chunks,

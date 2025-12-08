@@ -2,16 +2,16 @@ use crate::config::Config;
 use crate::media::camera::{Camera, FrameSource};
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
-use crate::transport::{rtp::RtpPacket, jitter_buffer::JitterBuffer};
-use chrono::Local;
+use crate::transport::rtp::RtpPacket;
+use crate::transport::jitter_buffer::JitterBuffer;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 use std::thread;
+use chrono::Local;
 use crate::controller::AppEvent;
 
-
-const JITTER_BUFF_SIZE: usize = 512;
+const JITTER_BUFF_SIZE: usize = 4096;
 
 pub struct MediaPipeline {
     camera: Camera,
@@ -36,10 +36,8 @@ impl MediaPipeline {
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
     ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
-
-
         let local_frame_rx = self.start_local_frame_pipeline(rtp_tx, event_tx.clone(), connected.clone())?;
-        let remote_frame_rx = self.start_remote_frame_pipeline(rtp_rx, event_tx.clone(), connected.clone())?;
+        let remote_frame_rx = self.start_remote_frames_pipeline(rtp_rx, event_tx.clone(), connected.clone())?;
 
         Ok((local_frame_rx, remote_frame_rx))
     }
@@ -48,7 +46,7 @@ impl MediaPipeline {
         self.camera.stop().map_err(|e| Error::MapError(e.to_string()))
     }
 
-    fn start_remote_frame_pipeline(
+    fn start_remote_frames_pipeline(
         &self,
         rtp_rx: Receiver<RtpPacket>,
         event_tx: Sender<AppEvent>,
@@ -69,6 +67,7 @@ impl MediaPipeline {
                     }
                 };
 
+
                 loop {
                     if !connected.load(Ordering::SeqCst) {
                         break;
@@ -85,7 +84,6 @@ impl MediaPipeline {
                     {
                         break;
                     }
-
                 }
                 if connected.load(Ordering::SeqCst) {
                     connected.store(false, Ordering::SeqCst);
@@ -247,7 +245,6 @@ mod tests {
             });
         }
 
-        // ------- Decodificar vía generate_frame_from_chunks -------
         rtp_chunks.sort_by_key(|c| c.sequence_number);
         let mut data = Vec::new();
         for c in rtp_chunks.iter() {
@@ -256,8 +253,6 @@ mod tests {
 
         let decoded = generate_frame_from_chunks(&data, &mut decoder)
             .expect("generate_frame_from_chunks no devolvió frame");
-
-        // ------- Validaciones -------
-        assert_eq!(decoded.data, raw_frame.data);
+        assert_eq!(decoded, raw_frame);
     }
 }

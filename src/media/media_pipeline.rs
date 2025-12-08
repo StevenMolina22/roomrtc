@@ -44,8 +44,8 @@ impl MediaPipeline {
         Ok((local_frame_rx, remote_frame_rx))
     }
 
-    pub fn stop(&self) -> Result<(), Error> {
-        self.camera.stop().map_err(|e| Error::MapError(e.to_string()))
+    pub fn stop(&self) {
+        self.camera.stop()
     }
 
     fn start_remote_frame_pipeline(
@@ -119,6 +119,7 @@ impl MediaPipeline {
         let ssrc = self.ssrc;
         let config = Arc::clone(&self.config);
         thread::spawn(move || {
+            let mut seq_num: u64 = 0;
             for frame in camera_frame_rx {
                 if !connected.load(Ordering::SeqCst) {
                     break;
@@ -133,7 +134,7 @@ impl MediaPipeline {
                     Err(_) => break,
                 };
 
-                if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, connected.clone(), &config).is_err() {
+                if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, connected.clone(), &mut seq_num, &config).is_err() {
                     break;
                 }
             }
@@ -152,6 +153,7 @@ fn send_encoded_frame(
     rtp_tx: &Sender<RtpPacket>,
     ssrc: u32,
     connected: Arc<AtomicBool>,
+    sequence_number: &mut u64,
     config: &Arc<Config>,
 ) -> Result<(), Error> {
     if !connected.load(Ordering::SeqCst) {
@@ -159,18 +161,20 @@ fn send_encoded_frame(
     }
 
     let total_chunks = encoded_frame.chunks.len();
-    for (sequence_number, payload) in encoded_frame.chunks.iter().enumerate() {
+
+    for (i, payload) in encoded_frame.chunks.iter().enumerate() {
         let packet = RtpPacket {
             version: config.media.rtp_version,
-            marker: 0,
+            marker: (i == total_chunks - 1) as u8,
             total_chunks: total_chunks as u8,
             is_i_frame: encoded_frame.is_i_frame,
-            sequence_number: sequence_number as u64,
+            sequence_number: *sequence_number,
             payload_type: config.media.rtp_payload_type,
             timestamp: encoded_frame.frame_time,
             ssrc,
             payload: payload.clone(),
         };
+        *sequence_number += 1;
         rtp_tx
             .send(packet)
             .map_err(|e| Error::SendError(e.to_string()))?;

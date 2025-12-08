@@ -3,7 +3,8 @@ use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
 use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
+use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
 use chrono;
@@ -14,7 +15,7 @@ pub trait FrameSource: Send {
     fn start(&mut self) -> Result<Receiver<Frame>, Error>;
 
     /// Signal the capture thread to stop.
-    fn stop(&self) -> Result<(), Error>;
+    fn stop(&self);
 }
 
 /// A camera that runs a capture thread and produces
@@ -26,7 +27,7 @@ pub trait FrameSource: Send {
 /// produce incremental frame ids.
 pub struct Camera {
     /// Flag used to signal the capture thread to keep running.
-    running: Arc<RwLock<bool>>,
+    running: Arc<AtomicBool>,
 
     /// Config file 
     config: Arc<Config>,
@@ -41,7 +42,7 @@ impl Camera {
     #[must_use]
     pub fn new(media_config: &Arc<Config>) -> Self {
         Self {
-            running: Arc::new(RwLock::new(false)),
+            running: Arc::new(AtomicBool::new(false)),
             config: Arc::clone(media_config),
         }
     }
@@ -57,10 +58,10 @@ impl Camera {
     fn start_internal(&mut self) -> Result<Receiver<Frame>, Error> {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
-        *running.write().map_err(|_| Error::PoisonedLock)? = true;
-
         let config = self.config.clone();
-
+        
+        
+        running.store(true, std::sync::atomic::Ordering::SeqCst);
         thread::spawn(move || {
             let camera_index = if let Ok(index) = i32::try_from(config.media.camera_index) {
                 index
@@ -101,15 +102,7 @@ impl Camera {
 
             let frame_duration = Duration::from_millis(1000 / u64::from(config.media.frame_rate));
 
-            while {
-                match running.read() {
-                    Ok(guard) => *guard,
-                    Err(e) => {
-                        eprintln!("Failed to read running flag: {e}");
-                        false
-                    }
-                }
-            } {
+            while running.load(std::sync::atomic::Ordering::SeqCst) {
                 if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
                     eprintln!("Failed to read camera frame.");
                     continue;
@@ -135,7 +128,7 @@ impl Camera {
                 };
 
                 if tx.send(frame).is_err() {
-                    break;
+                    continue;
                 }
 
                 thread::sleep(frame_duration);
@@ -147,10 +140,8 @@ impl Camera {
 
     /// Stop the capture thread by clearing the running flag. The
     /// capture thread will observe this and exit shortly.
-    fn stop_internal(&self) -> Result<(), Error> {
-        let mut run = self.running.write().map_err(|_| Error::PoisonedLock)?;
-        *run = false;
-        Ok(())
+    fn stop_internal(&self) {
+        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -159,7 +150,7 @@ impl FrameSource for Camera {
         self.start_internal()
     }
 
-    fn stop(&self) -> Result<(), Error> {
+    fn stop(&self) {
         self.stop_internal()
     }
 }

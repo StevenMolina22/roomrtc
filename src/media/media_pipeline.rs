@@ -139,10 +139,10 @@ impl MediaPipeline {
                 }
             }
 
-            if connected.load(Ordering::SeqCst) {
-                connected.store(false, Ordering::SeqCst);
-                send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
-            }
+            // if connected.load(Ordering::SeqCst) {
+            //     connected.store(false, Ordering::SeqCst);
+            //     send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
+            // }
         });
 
         Ok(local_frame_rx)

@@ -133,7 +133,10 @@ impl MediaPipeline {
                 }
 
                 let encoded_frame = match encoder.encode_frame(&frame) {
-                    Ok(f) => f,
+                    Ok(f) => {
+                        println!("is iframe: {}", f.is_i_frame);
+                        f
+                    },
                     Err(_) => break,
                 };
 

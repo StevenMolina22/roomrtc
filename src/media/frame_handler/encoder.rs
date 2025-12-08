@@ -57,15 +57,14 @@ impl Encoder {
         
         let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
         let frame_type = nalus.frame_type();
-        
-        
+        let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
 
         Ok(EncodedFrame {
             chunks,
             frame_time: frame.frame_time,
             width: frame.width,
             height: frame.height,
-            is_i_frame: frame_type == FrameType::I,
+            is_i_frame,
         })
     }
 }

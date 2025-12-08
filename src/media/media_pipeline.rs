@@ -11,7 +11,7 @@ use std::thread;
 use crate::controller::AppEvent;
 
 
-const JITTER_BUFF_SIZE: usize = 512;
+const JITTER_BUFF_SIZE: usize = 2048;
 
 pub struct MediaPipeline {
     camera: Camera,
@@ -75,7 +75,10 @@ impl MediaPipeline {
                     }
 
                     match rtp_rx.recv() {
-                        Ok(packet) => jitter_buffer.add(packet),
+                        Ok(packet) => {
+                            println!("[MP] RTP packet received {}", packet.sequence_number);
+                            jitter_buffer.add(packet)
+                        },
                         Err(_) => break,
                     }
 
@@ -184,8 +187,14 @@ fn send_encoded_frame(
 
 fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<Frame> {
     let (decoded_data, width, height) = match decoder.decode_frame(&data) {
-        Ok(data) => data,
-        Err(_) => return None,
+        Ok(data) => {
+            println!("[MP] data decoded");
+            data
+        },
+        Err(_) => {
+            println!("[MP] failed to decode");
+            return None
+        },
     };
 
     Some(Frame {

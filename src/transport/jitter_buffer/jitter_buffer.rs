@@ -1,9 +1,10 @@
+use std::thread::sleep;
 use chrono::Local;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use crate::transport::rtp::RtpPacket;
 use super::rr_metrics::RrMetrics;
 
-const TOLERANCE_MILLIS: i64 = 500;
+const TOLERANCE_MILLIS: i64 = 10;
 
 pub struct JitterBuffer<const N: usize> {
     packets: [Option<RtpPacket>; N],
@@ -43,15 +44,18 @@ impl<const N: usize> JitterBuffer<N>  {
         let seq = packet.sequence_number;
         if (self.i_frame_needed && !packet.is_i_frame)
         {
+            println!("Need intra frame. Do not add this packet. SKIP");
             return
         }
         if packet.timestamp < self.last_frame_completed_timestamp
         {
+            println!("Packet timestamp to old to show. SKIP");
             return
         }
 
         if !self.valid_packet_seq_num(seq)
         {
+            println!("Packet sequence number {} not in his window to be shown. SKIP", seq);
             return
         }
 
@@ -60,24 +64,29 @@ impl<const N: usize> JitterBuffer<N>  {
         match (self.read_seq, self.write_seq) {
             (Some(read), Some(write)) => {
                 if seq < read {
+                    println!("Adding late packet to jitter. Setting new read idx");
                     self.read_idx = pos;
                     self.read_seq = Some(seq);
                     self.packets[pos] = Some(packet);
                 } else if seq > write {
-                    let overwrite = self.packets[pos].is_some();
+                    println!("Seq number is higher than write index. Check for overwrite");
                     self.write_idx = pos;
                     self.write_seq = Some(seq);
                     self.packets[pos] = Some(packet);
 
-                    if overwrite {
+                    if (self.read_idx <= self.write_idx && pos >= self.read_idx && pos <= self.write_idx)
+                        || (self.read_idx >= self.write_idx && (pos >= self.read_idx || pos <= self.write_idx)) {
+                        println!("OVERWRITE. CLEAR BUFF UNTIL INTRA");
                         self.resync_or_clear();
                     }
 
                 } else if seq > read && seq < write {
+                    println!("Adding packet to jitter. Just add data, no re-setting indexes");
                     self.packets[pos] = Some(packet);
                 }
             }
             _ => {
+                println!("First packet. Empty buffer");
                 self.read_seq = Some(seq);
                 self.write_seq = Some(seq);
                 self.read_idx = pos;
@@ -90,13 +99,21 @@ impl<const N: usize> JitterBuffer<N>  {
 
     pub(crate) fn pop(&mut self) -> Option<Vec<u8>> {
         let ts = match &self.packets[self.read_idx] {
-            Some(p) => p.timestamp,
-            None => return None,
+            Some(p) => {
+                println!("There is a packet to read in read idx");
+                p.timestamp
+            },
+            None => {
+                println!("No packet here. Frame incomplete. SKIP");
+                return None
+            },
         };
 
         if !self.valid_playout_time(ts) {
+            println!("Frame is no longer able to be shown. Too old. Clear buffer until next iframe or clear entire buff");
             self.resync_or_clear();
             if self.write_seq.is_none() || self.read_seq.is_none() {
+                println!("Buffer empty. No seq number. SKIP");
                 return None
             }
         };
@@ -105,13 +122,15 @@ impl<const N: usize> JitterBuffer<N>  {
         let mut frame_data = Vec::new();
         let mut chunks_processed = 0;
 
-        loop {
+        for _ in 0..N {
+            println!("INSIDE LOOP. Try to make a frame from packets");
             let packet = match self.packets[idx].clone() {
                 Some(p) => p,
                 None => return None
             };
 
             if packet.timestamp != ts {
+                println!("The packets have different timestamps. Different frames. SKIP");
                 return None;
             }
 
@@ -121,15 +140,19 @@ impl<const N: usize> JitterBuffer<N>  {
             idx = (idx + 1) % N;
 
             if packet.marker == 1 {
+                println!("FOUND END OF FRAME PACKET");
                 if chunks_processed == packet.total_chunks as usize {
+                    println!("FRAME COMPLETED. Proceed to clean packets");
                     while self.read_idx != idx {
                         self.packets[self.read_idx % N] = None;
                         self.read_idx += 1;
                     }
 
                     let mut found_next = false;
+                    println!("TRY TO FIND NEXT FRAME TO DECODE");
                     for _ in 0..N {
                         if let Some(next_p) = &self.packets[self.read_idx] {
+                            println!("FOUND NEXT FRAME");
                             self.read_seq = Some(next_p.sequence_number);
                             found_next = true;
                             break;
@@ -138,6 +161,7 @@ impl<const N: usize> JitterBuffer<N>  {
                     }
 
                     if !found_next {
+                        println!("ONLY ONE FRAME IN BUFF. SETTING ALL TO DEFAULT VALUES");
                         self.read_idx = 0;
                         self.write_idx = 0;
                         self.read_seq = None;
@@ -149,33 +173,39 @@ impl<const N: usize> JitterBuffer<N>  {
                     if packet.is_i_frame {
                         self.i_frame_needed = false
                     }
-                    break;
+
+                    let delta_rtp = ts - self.last_frame_completed_timestamp;
+                    let expected_playout_time_local = self.last_deliver_timestamp + delta_rtp;
+                    let sleep_time = expected_playout_time_local + TOLERANCE_MILLIS - Local::now().timestamp_millis();
+                    sleep(Duration::from_millis(sleep_time as u64));
+                    return Some(frame_data)
+
                 } else {
+                    println!("FRAME INCOMPLETE. SKIP");
                     return None
                 }
             }
         }
-
-        Some(frame_data)
+        None
     }
 
     fn resync_or_clear(&mut self) {
-        let mut idx = (self.read_idx + 1) % N;
-        loop {
+        let mut idx = self.read_idx;
+        for _ in 0..N {
             if let Some(pkt) = &self.packets[idx]
-                &&pkt.is_i_frame
+                && pkt.is_i_frame
             {
+                println!("FOUND IFRAME");
                 self.read_idx = idx;
                 self.read_seq = Some(pkt.sequence_number);
                 self.i_frame_needed = false;
                 return;
             }
             self.packets[idx] = None;
-            if idx == self.write_idx {
-                break;
-            }
             idx = (idx + 1) % N;
         }
+
+        println!("WHOLE BUFFER CLEANED");
 
         self.read_idx = 0;
         self.write_idx = 0;
@@ -209,36 +239,6 @@ impl<const N: usize> JitterBuffer<N>  {
         let expiration_deadline = expected_playout_time_local + TOLERANCE_MILLIS;
 
         expiration_deadline >= Local::now().timestamp_millis()
-    }
-
-    fn skip(&mut self, frame_timestamp: i64) -> Option<i64> {
-        let max_scans = self.packets.len();
-        let mut scanned_count = 0;
-
-        loop {
-            if scanned_count >= max_scans {
-                return None;
-            }
-
-            let ptr = self.read_idx % N;
-
-            match &self.packets[ptr] {
-                Some(packet) => {
-                    if packet.timestamp > frame_timestamp {
-                        self.read_seq = Some(packet.sequence_number);
-                        return Some(packet.timestamp);
-                    } else {
-                        self.packets[ptr] = None;
-                        self.read_idx += 1;
-                    }
-                },
-                None => {
-                    self.read_idx += 1;
-                }
-            }
-
-            scanned_count += 1;
-        }
     }
 
     /*

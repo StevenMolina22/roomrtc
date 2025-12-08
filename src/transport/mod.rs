@@ -7,4 +7,3 @@ pub mod jitter_buffer;
 
 pub use error::MediaTransportError;
 pub use media_transport::MediaTransport;
-pub use jitter_buffer::JitterBuffer;

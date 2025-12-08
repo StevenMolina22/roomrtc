@@ -134,7 +134,6 @@ impl Camera {
                 thread::sleep(frame_duration);
             }
         });
-
         Ok(rx)
     }
 

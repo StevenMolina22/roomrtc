@@ -83,6 +83,9 @@ pub struct MediaConfig {
 
     /// SDP media protocol (e.g. "RTP/AVP").
     pub media_protocol: String,
+
+    /// Jitter buffer size
+    pub jitter_buffer_size: usize
 }
 
 #[derive(Debug, Clone)]
@@ -276,6 +279,10 @@ impl Config {
                     .get("media_protocol")
                     .ok_or("Missing media_protocol")?
                     .to_string(),
+                jitter_buffer_size: media_section
+                    .get("jitter_buffer_size")
+                    .ok_or("Missing jitter_buffer_size")?
+                    .parse()?,
             },
             rtcp: RtcpConfig {
                 report_period_millis: rtcp_section

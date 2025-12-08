@@ -2,13 +2,16 @@ use crate::config::Config;
 use crate::media::camera::{Camera, FrameSource};
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
-use crate::transport::rtp::RtpPacket;
+use crate::transport::{rtp::RtpPacket, jitter_buffer::JitterBuffer};
 use chrono::Local;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 use std::thread;
 use crate::controller::AppEvent;
+
+
+const JITTER_BUFF_SIZE: usize = 512;
 
 pub struct MediaPipeline {
     camera: Camera,
@@ -33,8 +36,10 @@ impl MediaPipeline {
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
     ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
+
+
         let local_frame_rx = self.start_local_frame_pipeline(rtp_tx, event_tx.clone(), connected.clone())?;
-        let remote_frame_rx = self.start_remote_frames_pipeline(rtp_rx, event_tx.clone(), connected.clone())?;
+        let remote_frame_rx = self.start_remote_frame_pipeline(rtp_rx, event_tx.clone(), connected.clone())?;
 
         Ok((local_frame_rx, remote_frame_rx))
     }
@@ -43,13 +48,15 @@ impl MediaPipeline {
         self.camera.stop().map_err(|e| Error::MapError(e.to_string()))
     }
 
-    fn start_remote_frames_pipeline(
+    fn start_remote_frame_pipeline(
         &self,
         rtp_rx: Receiver<RtpPacket>,
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
     ) -> Result<Receiver<Frame>, Error> {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
+
+        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new();
 
         thread::spawn({
             move || {
@@ -61,42 +68,24 @@ impl MediaPipeline {
                         return;
                     }
                 };
-                let mut actual_frame = None;
-                let mut chunks = Vec::new();
 
                 loop {
                     if !connected.load(Ordering::SeqCst) {
                         break;
                     }
 
-                    let rtp_packet = match rtp_rx.recv() {
-                        Ok(packet) => packet,
-                        Err(_) => {
-                            break;
-                        }
-                    };
-
-                    if actual_frame == Some(rtp_packet.timestamp) {
-                        chunks.push(rtp_packet.clone());
-                    } else {
-                        chunks = vec![rtp_packet.clone()];
-                        actual_frame = Some(rtp_packet.timestamp);
+                    match rtp_rx.recv() {
+                        Ok(packet) => jitter_buffer.add(packet),
+                        Err(_) => break,
                     }
 
-                    let expected_marker = rtp_packet.marker;
-                    let current_chunk_count = chunks.len() as u8;
-
-                    if current_chunk_count == expected_marker {
-                        if let Some(frame_data) =
-                            generate_frame_from_chunks(&mut chunks, &mut decoder)
-                            && remote_frame_tx.send(frame_data.clone()).is_err()
-                        {
-                            break;
-                        }
-
-                        actual_frame = None;
-                        chunks.clear();
+                    if let Some(chunks) = jitter_buffer.pop()
+                        && let Some(frame_data) = generate_frame_from_chunks(&chunks, &mut decoder)
+                        && let Err(_) = remote_frame_tx.send(frame_data.clone())
+                    {
+                        break;
                     }
+
                 }
                 if connected.load(Ordering::SeqCst) {
                     connected.store(false, Ordering::SeqCst);
@@ -189,14 +178,7 @@ fn send_encoded_frame(
     Ok(())
 }
 
-fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder) -> Option<Frame> {
-    let ts = chunks.first()?.timestamp;
-
-    chunks.sort_by_key(|c| c.sequence_number);
-    let mut data = Vec::new();
-    for c in chunks.iter() {
-        data.extend_from_slice(&c.payload);
-    }
+fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<Frame> {
     let (decoded_data, width, height) = match decoder.decode_frame(&data) {
         Ok(data) => data,
         Err(_) => return None,
@@ -206,7 +188,7 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
         data: decoded_data,
         width,
         height,
-        frame_time: ts,
+        frame_time: Local::now().timestamp_millis(),
     })
 }
 
@@ -266,10 +248,16 @@ mod tests {
         }
 
         // ------- Decodificar vía generate_frame_from_chunks -------
-        let decoded = generate_frame_from_chunks(&mut rtp_chunks, &mut decoder)
+        rtp_chunks.sort_by_key(|c| c.sequence_number);
+        let mut data = Vec::new();
+        for c in rtp_chunks.iter() {
+            data.extend_from_slice(&c.payload);
+        }
+
+        let decoded = generate_frame_from_chunks(&data, &mut decoder)
             .expect("generate_frame_from_chunks no devolvió frame");
 
         // ------- Validaciones -------
-        assert_eq!(decoded, raw_frame);
+        assert_eq!(decoded.data, raw_frame.data);
     }
 }

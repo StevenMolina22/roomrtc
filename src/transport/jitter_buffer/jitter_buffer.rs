@@ -1,4 +1,3 @@
-use std::cmp::max;
 use chrono::Local;
 use std::time::Instant;
 use crate::transport::rtp::RtpPacket;
@@ -40,7 +39,7 @@ impl<const N: usize> JitterBuffer<N>  {
         }
     }
 
-    fn add(&mut self, packet: RtpPacket) {
+    pub(crate) fn add(&mut self, packet: RtpPacket) {
         let seq = packet.sequence_number;
         if (self.i_frame_needed && !packet.is_i_frame)
         {
@@ -89,7 +88,7 @@ impl<const N: usize> JitterBuffer<N>  {
         }
     }
 
-    fn pop(&mut self) -> Option<Vec<u8>> {
+    pub(crate) fn pop(&mut self) -> Option<Vec<u8>> {
         let ts = match &self.packets[self.read_idx] {
             Some(p) => p.timestamp,
             None => return None,
@@ -176,18 +175,6 @@ impl<const N: usize> JitterBuffer<N>  {
                 break;
             }
             idx = (idx + 1) % N;
-        }
-
-        self.read_idx = 0;
-        self.write_idx = 0;
-        self.read_seq = None;
-        self.write_seq = None;
-        self.i_frame_needed = true;
-    }
-
-    fn clear_buffer(&mut self) {
-        for p in self.packets.iter_mut() {
-            *p = None;
         }
 
         self.read_idx = 0;

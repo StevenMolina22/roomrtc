@@ -3,12 +3,12 @@ use crate::media::camera::{Camera, FrameSource};
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
 use crate::transport::{rtp::RtpPacket, jitter_buffer::JitterBuffer};
-use chrono::Local;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 use std::thread;
 use crate::controller::AppEvent;
+use crate::clock::Clock;
 
 
 const JITTER_BUFF_SIZE: usize = 2048;
@@ -17,15 +17,18 @@ pub struct MediaPipeline {
     camera: Camera,
     config: Arc<Config>,
     ssrc: u32,
+    clock: Arc<Clock>
 }
 
 impl MediaPipeline {
     #[must_use]
     pub fn new(config: &Arc<Config>, ssrc: u32) -> Self {
+        let clock = Arc::new(Clock::new());
         Self {
-            camera: Camera::new(config),
+            camera: Camera::new(clock.clone(), config),
             config: Arc::clone(config),
             ssrc,
+            clock
         }
     }
 
@@ -56,7 +59,8 @@ impl MediaPipeline {
     ) -> Result<Receiver<Frame>, Error> {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
 
-        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new();
+        let clock = self.clock.clone();
+        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(clock);
 
         thread::spawn({
             move || {
@@ -121,6 +125,7 @@ impl MediaPipeline {
 
         let ssrc = self.ssrc;
         let config = Arc::clone(&self.config);
+
         thread::spawn(move || {
             let mut seq_num: u64 = 0;
             for frame in camera_frame_rx {

@@ -1,7 +1,9 @@
+use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use crate::transport::rtp::RtpPacket;
 use super::rr_metrics::RrMetrics;
+use crate::clock::Clock;
 
 const TOLERANCE_MILLIS: u128 = 120;
 
@@ -20,11 +22,11 @@ pub struct JitterBuffer<const N: usize> {
     last_deliver_timestamp: u128,
 
     //metrics: RrMetrics,
-    start_time: Instant
+    clock: Arc<Clock>,
 }
 
 impl<const N: usize> JitterBuffer<N>  {
-    pub fn new() -> Self {
+    pub fn new(clock: Arc<Clock>) -> Self {
         Self {
             packets: std::array::from_fn(|_| None),
             read_idx: 0,
@@ -35,7 +37,7 @@ impl<const N: usize> JitterBuffer<N>  {
             last_frame_completed_timestamp: 0,
             last_deliver_timestamp: 0,
             //metrics: RrMetrics::default(),
-            start_time: Instant::now(),
+            clock
         }
     }
 
@@ -171,7 +173,10 @@ impl<const N: usize> JitterBuffer<N>  {
                     if self.last_deliver_timestamp != 0 {
                         let delta_rtp = packet.timestamp - self.last_frame_completed_timestamp;
                         let expected_playout_time_local = self.last_deliver_timestamp + delta_rtp;
-                        let sleep_time = expected_playout_time_local - self.start_time.elapsed().as_millis();
+                        println!("EXPECTED PLAYOUT TIME {expected_playout_time_local}");
+                        let now = self.clock.now();
+                        println!("NOW: {now}");
+                        let sleep_time = expected_playout_time_local.saturating_sub(now);
 
                         println!("sleep: {sleep_time}\n");
 
@@ -186,7 +191,7 @@ impl<const N: usize> JitterBuffer<N>  {
                         self.i_frame_needed = false
                     }
 
-                    self.last_deliver_timestamp = self.start_time.elapsed().as_millis();
+                    self.last_deliver_timestamp = self.clock.now();
                     return Some(frame_data)
 
                 } else {
@@ -249,7 +254,7 @@ impl<const N: usize> JitterBuffer<N>  {
         let delta_rtp = frame_timestamp - self.last_frame_completed_timestamp;
         let expected_playout_time_local = self.last_deliver_timestamp + delta_rtp;
         let expiration_deadline = expected_playout_time_local + TOLERANCE_MILLIS;
-        let actual = self.start_time.elapsed().as_millis();
+        let actual = self.clock.now();
         println!("frame = {frame_timestamp}\nlast completed: {}\nlast delivered: {}\ndelta: {delta_rtp}\nexpected: {expected_playout_time_local}\nexpriration: {expiration_deadline}\nactual: {actual}\n\n", self.last_frame_completed_timestamp, self.last_deliver_timestamp);
 
         expiration_deadline >= actual

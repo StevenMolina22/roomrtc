@@ -1,12 +1,13 @@
 use crate::config::Config;
 use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
-use opencv::{imgproc, prelude::*, videoio};
+use opencv::{imgproc, prelude::*, videoio, core};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc};
 use std::sync::atomic::AtomicBool;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use crate::clock::Clock;
 
 pub trait FrameSource: Send {
     /// Start the capture thread.
@@ -30,6 +31,9 @@ pub struct Camera {
 
     /// Config file 
     config: Arc<Config>,
+    
+    /// Clock of the program
+    clock: Arc<Clock>
 }
 
 impl Camera {
@@ -39,10 +43,11 @@ impl Camera {
     /// - `media_config`: media capture configuration (camera index,
     ///   frame size and frame rate).
     #[must_use]
-    pub fn new(media_config: &Arc<Config>) -> Self {
+    pub fn new(clock: Arc<Clock>, media_config: &Arc<Config>) -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             config: Arc::clone(media_config),
+            clock
         }
     }
 
@@ -58,9 +63,10 @@ impl Camera {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
         let config = self.config.clone();
-
-
+        let clock = self.clock.clone();
+        
         running.store(true, std::sync::atomic::Ordering::SeqCst);
+        
         thread::spawn(move || {
             let camera_index = if let Ok(index) = i32::try_from(config.media.camera_index) {
                 index
@@ -100,7 +106,6 @@ impl Camera {
             let mut rgb = Mat::default();
 
             let frame_duration = Duration::from_millis(1000 / u64::from(config.media.frame_rate));
-            let start_time = Instant::now();
 
             while running.load(std::sync::atomic::Ordering::SeqCst) {
                 if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
@@ -108,7 +113,7 @@ impl Camera {
                     continue;
                 }
 
-                if imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).is_err() {
+                if imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT).is_err() {
                     eprintln!("Failed to convert frame color.");
                     continue;
                 }
@@ -124,7 +129,7 @@ impl Camera {
                     data,
                     width: rgb.cols() as usize,
                     height: rgb.rows() as usize,
-                    frame_time: start_time.elapsed().as_millis()
+                    frame_time: clock.now()
                 };
 
                 if tx.send(frame).is_err() {

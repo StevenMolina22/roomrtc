@@ -4,9 +4,10 @@ use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
 use crate::transport::{rtp::RtpPacket, jitter_buffer::JitterBuffer};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, mpsc};
 use std::thread;
+use std::time::Duration;
 use crate::controller::AppEvent;
 use crate::clock::Clock;
 
@@ -59,8 +60,8 @@ impl MediaPipeline {
     ) -> Result<Receiver<Frame>, Error> {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
 
+        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(self.clock.clone());
         let clock = self.clock.clone();
-        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(clock);
 
         thread::spawn({
             move || {
@@ -75,22 +76,36 @@ impl MediaPipeline {
 
                 loop {
                     if !connected.load(Ordering::SeqCst) {
+                        println!("[MP] Connection closed");
                         break;
                     }
 
-                    match rtp_rx.recv() {
+                    match rtp_rx.recv_timeout(Duration::from_millis(1)) {
                         Ok(packet) => {
-                            println!("[MP] RTP packet received {}", packet.sequence_number);
+                            //println!("[MP] RTP packet received {}", packet.sequence_number);
                             jitter_buffer.add(packet)
                         },
-                        Err(_) => break,
+                        Err(RecvTimeoutError::Timeout) => {
+                            // No llegó nada por la red en 1ms. No pasa nada.
+                            // El ciclo continúa para atender el JitterBuffer.
+                            //println!("[MP] Timeout waiting for RTP packet");
+                        },
+                        Err(RecvTimeoutError::Disconnected) => {
+                            //println!("[MP] Disconnected channel");
+                            break
+                        }, // Se cortó la conexión
                     }
 
+                    // 2. INTENTAR REPRODUCIR (SIEMPRE)
+                    // Ahora esta línea se ejecuta constantemente, permitiendo que el
+                    // JitterBuffer decida cuándo dormir y cuándo entregar frames.
                     if let Some(chunks) = jitter_buffer.pop()
-                        && let Some(frame_data) = generate_frame_from_chunks(&chunks, &mut decoder)
-                        && let Err(_) = remote_frame_tx.send(frame_data.clone())
+                        && let Some(frame_data) = generate_frame_from_chunks(&chunks, &mut decoder, clock.clone())
                     {
-                        break;
+                        if let Err(_) = remote_frame_tx.send(frame_data.clone()) {
+                            println!("[MP] Failed to send remote frame");
+                            break;
+                        }
                     }
 
                 }
@@ -185,7 +200,7 @@ fn send_encoded_frame(
             ssrc,
             payload: payload.clone(),
         };
-        *sequence_number += 1;
+        *sequence_number = sequence_number.saturating_add(1);
         rtp_tx
             .send(packet)
             .map_err(|e| Error::SendError(e.to_string()))?;
@@ -193,7 +208,8 @@ fn send_encoded_frame(
     Ok(())
 }
 
-fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<Frame> {
+fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder, clock: Arc<Clock>) -> Option<Frame> {
+    let time_before = clock.now();
     let (decoded_data, width, height) = match decoder.decode_frame(&data) {
         Ok(data) => {
             println!("[MP] data decoded");
@@ -204,6 +220,8 @@ fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<F
             return None
         },
     };
+    let time_after = clock.now();
+    println!("TIME LASTED TO ENCODE {}", time_after - time_before);
 
     Some(Frame {
         data: decoded_data,
@@ -275,7 +293,7 @@ mod tests {
             data.extend_from_slice(&c.payload);
         }
 
-        let decoded = generate_frame_from_chunks(&data, &mut decoder)
+        let decoded = generate_frame_from_chunks(&data, &mut decoder, Arc::new(Clock::new()))
             .expect("generate_frame_from_chunks no devolvió frame");
 
         // ------- Validaciones -------

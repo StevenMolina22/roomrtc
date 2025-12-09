@@ -1,3 +1,4 @@
+use std::cmp::min;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -100,25 +101,31 @@ impl<const N: usize> JitterBuffer<N>  {
     }
 
     pub(crate) fn pop(&mut self) -> Option<Vec<u8>> {
-        let ts = match &self.packets[self.read_idx] {
-            Some(p) => {
-                println!("There is a packet to read in read idx");
-                p.timestamp
-            },
-            None => {
-                println!("No packet here. Frame incomplete. SKIP");
-                return None
-            },
-        };
+        let mut ts;
+        loop {
+            ts = match &self.packets[self.read_idx] {
+                Some(p) => {
+                    println!("There is a packet to read in read idx");
+                    p.timestamp
+                },
+                None => {
+                    println!("No packet here. Frame incomplete. SKIP");
+                    return None
+                },
+            };
 
-        if !self.valid_playout_time(ts) {
+            if self.valid_playout_time(ts) {
+                break;
+            }
+
             println!("Frame is no longer able to be shown. Too old. Clear buffer until next iframe or clear entire buff");
             self.resync_or_clear();
             if self.write_seq.is_none() || self.read_seq.is_none() {
                 println!("Buffer empty. No seq number. SKIP");
                 return None
             }
-        };
+
+        }
 
         let mut idx = self.read_idx;
         let mut frame_data = Vec::new();
@@ -147,7 +154,7 @@ impl<const N: usize> JitterBuffer<N>  {
                     println!("FRAME COMPLETED. Proceed to clean packets");
                     while self.read_idx != idx {
                         self.packets[self.read_idx % N] = None;
-                        self.read_idx += 1;
+                        self.read_idx = (self.read_idx + 1) % N;
                     }
 
                     let mut found_next = false;
@@ -164,14 +171,12 @@ impl<const N: usize> JitterBuffer<N>  {
 
                     if !found_next {
                         println!("ONLY ONE FRAME IN BUFF. SETTING ALL TO DEFAULT VALUES");
-                        self.read_idx = 0;
-                        self.write_idx = 0;
                         self.read_seq = None;
                         self.write_seq = None;
                     }
 
                     if self.last_deliver_timestamp != 0 {
-                        let delta_rtp = packet.timestamp - self.last_frame_completed_timestamp;
+                        let delta_rtp = packet.timestamp.saturating_sub(self.last_frame_completed_timestamp);
                         let expected_playout_time_local = self.last_deliver_timestamp + delta_rtp;
                         println!("EXPECTED PLAYOUT TIME {expected_playout_time_local}");
                         let now = self.clock.now();
@@ -179,19 +184,17 @@ impl<const N: usize> JitterBuffer<N>  {
                         let sleep_time = expected_playout_time_local.saturating_sub(now);
 
                         println!("sleep: {sleep_time}\n");
-
-                        if sleep_time > 0 {
-                            sleep(Duration::from_millis(sleep_time as u64));
-                        }
+                        sleep(Duration::from_millis(sleep_time as u64));
+                        self.last_deliver_timestamp = expected_playout_time_local;
+                    } else {
+                        self.last_deliver_timestamp = self.clock.now();
                     }
-
 
                     self.last_frame_completed_timestamp = packet.timestamp;
                     if packet.is_i_frame {
                         self.i_frame_needed = false
                     }
 
-                    self.last_deliver_timestamp = self.clock.now();
                     return Some(frame_data)
 
                 } else {
@@ -204,21 +207,25 @@ impl<const N: usize> JitterBuffer<N>  {
     }
 
     fn resync_or_clear(&mut self) {
-        let mut idx = self.read_idx;
-        let read_timestamp = self.packets[idx].as_ref().unwrap().timestamp;
+        let read_timestamp = self.packets[self.read_idx].as_ref().unwrap().timestamp;
 
         for _ in 0..N {
-            if let Some(pkt) = &self.packets[idx]
-                && pkt.is_i_frame && pkt.timestamp != read_timestamp
+            if let Some(pkt) = &self.packets[self.read_idx]
+                && pkt.is_i_frame
+                && pkt.timestamp != read_timestamp
             {
                 println!("FOUND IFRAME");
-                self.read_idx = idx;
                 self.read_seq = Some(pkt.sequence_number);
                 self.i_frame_needed = false;
                 return;
             }
-            self.packets[idx] = None;
-            idx = (idx + 1) % N;
+            self.packets[self.read_idx] = None;
+
+            if self.read_idx == self.write_idx {
+                break
+            }
+
+            self.read_idx = (self.read_idx + 1) % N;
         }
 
         println!("WHOLE BUFFER CLEANED");

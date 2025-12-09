@@ -63,7 +63,7 @@ impl Encoder {
         let frame_type = nalus.frame_type();
         let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
 
-        if self.total_frames.is_multiple_of(60) {
+        if self.total_frames.is_multiple_of(5) {
             self.encoder.force_intra_frame();
         }
 

@@ -15,7 +15,6 @@ use openh264::OpenH264API;
 pub struct Encoder {
     encoder: H264Encoder,
     max_chunk_size: usize,
-    total_frames: u64,
 }
 
 impl Encoder {
@@ -31,12 +30,12 @@ impl Encoder {
     /// be created by the `OpenH264` library.
     pub fn new(media_config: &MediaConfig) -> Result<Self, Error> {
         let config = EncoderConfig::new()
-            .bitrate(BitRate::from_bps(1_500_000))
+            .bitrate(BitRate::from_bps(2_500_000))
             .max_frame_rate(FrameRate::from_hz(30.0))
             .usage_type(UsageType::CameraVideoRealTime)
-            .intra_frame_period(IntraFramePeriod::from_num_frames(20))
+            .intra_frame_period(IntraFramePeriod::from_num_frames(30))
             .complexity(Complexity::Medium)
-            .rate_control_mode(RateControlMode::Bitrate)
+            .rate_control_mode(RateControlMode::Quality)
             .num_threads(4)
             .skip_frames(true);
 
@@ -46,7 +45,6 @@ impl Encoder {
         Ok(Self {
             encoder,
             max_chunk_size: media_config.rtp_max_chunk_size,
-            total_frames: 0
         })
     }
 
@@ -70,15 +68,9 @@ impl Encoder {
             .encode(&yuv)
             .map_err(|_| Error::EncodingError)?;
 
-        self.total_frames += 1;
         let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
         let frame_type = nalus.frame_type();
         let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
-
-        if self.total_frames.is_multiple_of(5) {
-            self.encoder.force_intra_frame();
-        }
-
 
         Ok(EncodedFrame {
             chunks,

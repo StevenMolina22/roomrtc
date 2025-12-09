@@ -4,10 +4,9 @@ use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
 use crate::transport::{rtp::RtpPacket, jitter_buffer::JitterBuffer};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 use std::thread;
-use std::time::Duration;
 use crate::controller::AppEvent;
 use crate::clock::Clock;
 
@@ -113,11 +112,39 @@ impl MediaPipeline {
         connected: Arc<AtomicBool>,
     ) -> Result<Receiver<Frame>, Error> {
         let (local_frame_tx, local_frame_rx) = mpsc::channel();
+        let (raw_tx, raw_rx) = mpsc::channel();
 
+        self.start_encoding_thread(raw_rx, event_tx.clone(), rtp_tx, connected.clone())?;
         let camera_frame_rx = self
             .camera
             .start()
             .map_err(|e| Error::MapError(e.to_string()))?;
+
+        thread::spawn(move || {
+            for frame in camera_frame_rx {
+                if !connected.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                if local_frame_tx.send(frame.clone()).is_err() {
+                    break;
+                }
+
+                if raw_tx.send(frame.clone()).is_err() {
+                    break;
+                }
+            }
+
+            // if connected.load(Ordering::SeqCst) {
+            //     connected.store(false, Ordering::SeqCst);
+            //     send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
+            // }
+        });
+
+        Ok(local_frame_rx)
+    }
+
+    fn start_encoding_thread(&mut self, raw_rx: Receiver<Frame>, event_tx: Sender<AppEvent>, rtp_tx: Sender<RtpPacket>, connected: Arc<AtomicBool>) -> Result<(), Error> {
         let mut encoder = match Encoder::new(&self.config.media) {
             Ok(d) => d,
             Err(e) => {
@@ -131,35 +158,19 @@ impl MediaPipeline {
 
         thread::spawn(move || {
             let mut seq_num: u64 = 0;
-            for frame in camera_frame_rx {
-                if !connected.load(Ordering::SeqCst) {
-                    break;
-                }
-
-                if local_frame_tx.send(frame.clone()).is_err() {
-                    break;
-                }
-
+            for frame in raw_rx {
                 let encoded_frame = match encoder.encode_frame(&frame) {
-                    Ok(f) => {
-                        println!("is iframe: {}", f.is_i_frame);
-                        f
-                    },
+                    Ok(f) => f,
                     Err(_) => break,
                 };
 
                 if send_encoded_frame(encoded_frame, &rtp_tx, ssrc, connected.clone(), &mut seq_num, &config).is_err() {
                     break;
                 }
-            }
-
-            // if connected.load(Ordering::SeqCst) {
-            //     connected.store(false, Ordering::SeqCst);
-            //     send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
-            // }
+            };
         });
 
-        Ok(local_frame_rx)
+        Ok(())
     }
 }
 fn send_encoded_frame(

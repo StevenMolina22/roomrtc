@@ -36,7 +36,7 @@ impl<const N: usize> JitterBuffer<N>  {
             last_frame_completed_timestamp: 0,
             last_deliver_timestamp: 0,
             //metrics: RrMetrics::default(),
-            clock
+            clock,
         }
     }
 
@@ -64,12 +64,10 @@ impl<const N: usize> JitterBuffer<N>  {
         match (self.read_seq, self.write_seq) {
             (Some(read), Some(write)) => {
                 if seq < read {
-                    println!("Adding late packet to jitter. Setting new read idx");
                     self.read_idx = pos;
                     self.read_seq = Some(seq);
                     self.packets[pos] = Some(packet);
                 } else if seq > write {
-                    println!("Seq number is higher than write index. Check for overwrite");
                     let old_write_idx = self.write_idx;
                     self.write_idx = pos;
                     self.write_seq = Some(seq);
@@ -132,8 +130,8 @@ impl<const N: usize> JitterBuffer<N>  {
         let mut frame_data = Vec::new();
         let mut chunks_processed = 0;
 
+        println!("INSIDE LOOP. Try to make a frame from packets");
         for _ in 0..N {
-            println!("INSIDE LOOP. Try to make a frame from packets");
             let packet = match self.packets[idx].clone() {
                 Some(p) => p,
                 None => return None
@@ -185,7 +183,10 @@ impl<const N: usize> JitterBuffer<N>  {
                         let sleep_time = expected_playout_time_local.saturating_sub(now);
 
                         println!("sleep: {sleep_time}\n");
-                        sleep(Duration::from_millis(sleep_time as u64));
+                        if sleep_time > 0 {
+                            sleep(Duration::from_millis(sleep_time as u64));
+                        }
+
                         self.last_deliver_timestamp = expected_playout_time_local;
                     } else {
                         self.last_deliver_timestamp = self.clock.now();
@@ -198,10 +199,9 @@ impl<const N: usize> JitterBuffer<N>  {
 
                     return Some(frame_data)
 
-                } else {
-                    println!("FRAME INCOMPLETE. SKIP");
-                    return None
                 }
+                println!("FRAME INCOMPLETE. SKIP");
+                return None
             }
         }
         None

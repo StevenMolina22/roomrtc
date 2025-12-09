@@ -1,9 +1,7 @@
-use std::cmp::min;
 use std::sync::Arc;
 use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::time::{Duration};
 use crate::transport::rtp::RtpPacket;
-use super::rr_metrics::RrMetrics;
 use crate::clock::Clock;
 
 const TOLERANCE_MILLIS: u128 = 120;
@@ -77,6 +75,10 @@ impl<const N: usize> JitterBuffer<N>  {
                     self.write_seq = Some(seq);
                     self.packets[pos] = Some(packet);
 
+                    if  (self.read_idx > old_write_idx && self.read_idx <= self.write_idx) {
+                        panic!("CASO BORDE PASO !!!!!!!!!!!!!!!!!!!!!!!");
+                    }
+
                     if (self.read_idx <= old_write_idx && pos >= self.read_idx && pos <= old_write_idx)
                         || (self.read_idx > old_write_idx && (pos >= self.read_idx || pos <= old_write_idx)) {
                         println!("OVERWRITE. CLEAR BUFF UNTIL INTRA");
@@ -124,7 +126,6 @@ impl<const N: usize> JitterBuffer<N>  {
                 println!("Buffer empty. No seq number. SKIP");
                 return None
             }
-
         }
 
         let mut idx = self.read_idx;
@@ -153,7 +154,7 @@ impl<const N: usize> JitterBuffer<N>  {
                 if chunks_processed == packet.total_chunks as usize {
                     println!("FRAME COMPLETED. Proceed to clean packets");
                     while self.read_idx != idx {
-                        self.packets[self.read_idx % N] = None;
+                        self.packets[self.read_idx] = None;
                         self.read_idx = (self.read_idx + 1) % N;
                     }
 
@@ -207,12 +208,14 @@ impl<const N: usize> JitterBuffer<N>  {
     }
 
     fn resync_or_clear(&mut self) {
+        // NO ESTOY CONSIDERANDO EL CASO DE QUE WRITE ESCRIBA DESPUES DEL READ, CONSIDERAR DESPUES
         let read_timestamp = self.packets[self.read_idx].as_ref().unwrap().timestamp;
 
         for _ in 0..N {
             if let Some(pkt) = &self.packets[self.read_idx]
                 && pkt.is_i_frame
                 && pkt.timestamp != read_timestamp
+            // deberia ademas checkear que sea despues del write_seq si hubo overwrite (idea, puedo recibir una flag de overwrite)
             {
                 println!("FOUND IFRAME");
                 self.read_seq = Some(pkt.sequence_number);

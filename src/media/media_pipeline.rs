@@ -12,7 +12,7 @@ use crate::controller::AppEvent;
 use crate::clock::Clock;
 
 
-const JITTER_BUFF_SIZE: usize = 2048;
+const JITTER_BUFF_SIZE: usize = 512;
 
 pub struct MediaPipeline {
     camera: Camera,
@@ -76,29 +76,17 @@ impl MediaPipeline {
 
                 loop {
                     if !connected.load(Ordering::SeqCst) {
-                        println!("[MP] Connection closed");
                         break;
                     }
 
-                    match rtp_rx.recv_timeout(Duration::from_millis(1)) {
+                    match rtp_rx.recv() {
                         Ok(packet) => {
-                            //println!("[MP] RTP packet received {}", packet.sequence_number);
+                            println!("[MP] RTP packet received {}", packet.sequence_number);
                             jitter_buffer.add(packet)
                         },
-                        Err(RecvTimeoutError::Timeout) => {
-                            // No llegó nada por la red en 1ms. No pasa nada.
-                            // El ciclo continúa para atender el JitterBuffer.
-                            //println!("[MP] Timeout waiting for RTP packet");
-                        },
-                        Err(RecvTimeoutError::Disconnected) => {
-                            //println!("[MP] Disconnected channel");
-                            break
-                        }, // Se cortó la conexión
+                        Err(_) => break,
                     }
 
-                    // 2. INTENTAR REPRODUCIR (SIEMPRE)
-                    // Ahora esta línea se ejecuta constantemente, permitiendo que el
-                    // JitterBuffer decida cuándo dormir y cuándo entregar frames.
                     if let Some(chunks) = jitter_buffer.pop()
                         && let Some(frame_data) = generate_frame_from_chunks(&chunks, &mut decoder, clock.clone())
                     {

@@ -11,7 +11,7 @@ pub enum FrameError {
     EncoderInitializationError,
 
     ///Error returned when a frame failed to be encoded.
-    EncodingError,
+    EncodingError(String),
 
     ///Error returned when the decoder failed to initialize.
     DecoderInitializationError,
@@ -45,7 +45,7 @@ impl Display for FrameError {
             Self::EncoderInitializationError => {
                 write!(fmt, "Error: failed to intialize encoder")
             }
-            Self::EncodingError => write!(fmt, "Error: failed to encode frame"),
+            Self::EncodingError(e) => write!(fmt, "Error: failed to encode frame: {e}"),
             Self::DecoderInitializationError => {
                 write!(fmt, "Error: failed to initialize decoder")
             }

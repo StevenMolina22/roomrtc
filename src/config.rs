@@ -55,10 +55,10 @@ pub struct MediaConfig {
     pub frame_height: f64,
 
     /// Capture frame rate.
-    pub frame_rate: u32,
+    pub frame_rate: f32,
 
     /// H.264 IDR interval (keyframe frequency) in frames.
-    pub h264_idr_interval: usize,
+    pub h264_idr_interval: u32,
 
     /// Maximum size (bytes) of RTP payload chunks.
     pub rtp_max_chunk_size: usize,

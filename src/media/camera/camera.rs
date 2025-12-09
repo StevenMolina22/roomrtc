@@ -105,7 +105,7 @@ impl Camera {
             let mut mat = Mat::default();
             let mut rgb = Mat::default();
 
-            let frame_duration = Duration::from_millis(1000 / u64::from(config.media.frame_rate));
+            let frame_duration = Duration::from_millis(((1000f32)/ config.media.frame_rate) as u64);
 
             while running.load(std::sync::atomic::Ordering::SeqCst) {
                 if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {

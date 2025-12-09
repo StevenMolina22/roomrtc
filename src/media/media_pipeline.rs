@@ -11,7 +11,7 @@ use crate::controller::AppEvent;
 use crate::clock::Clock;
 
 
-const JITTER_BUFF_SIZE: usize = 512;
+const JITTER_BUFF_SIZE: usize = 1024;
 
 pub struct MediaPipeline {
     camera: Camera,

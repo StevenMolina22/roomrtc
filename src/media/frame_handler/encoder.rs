@@ -33,12 +33,11 @@ impl Encoder {
     pub fn new(media_config: &MediaConfig) -> Result<Self, Error> {
         let config = EncoderConfig::new()
             .bitrate(BitRate::from_bps(2_500_000))
-            .max_frame_rate(FrameRate::from_hz(30.0))
+            .max_frame_rate(FrameRate::from_hz(media_config.frame_rate))
             .usage_type(UsageType::CameraVideoRealTime)
-            .intra_frame_period(IntraFramePeriod::from_num_frames(30))
-            .complexity(Complexity::Medium)
-            .rate_control_mode(RateControlMode::Quality)
-            .num_threads(4)
+            .intra_frame_period(IntraFramePeriod::from_num_frames(media_config.h264_idr_interval))
+            .complexity(Complexity::Low)
+            .rate_control_mode(RateControlMode::Off)
             .skip_frames(true);
 
         let encoder = H264Encoder::with_api_config(OpenH264API::from_source(), config)
@@ -61,6 +60,7 @@ impl Encoder {
     ///
     /// - [`Error::EncodingError`] — if encoding fails due to invalid frame data.
     pub fn encode_frame(&mut self, frame: &Frame) -> Result<EncodedFrame, Error> {
+        let clock = Instant::now();
         let mut yuv_img = YuvPlanarImageMut::alloc(
             frame.width as u32,
             frame.height as u32,
@@ -77,11 +77,15 @@ impl Encoder {
         ).map_err(|e| Error::EncodingError(e.to_string()))?;
 
         let yuv_source = YuvImgSource { img: &yuv_img };
+        println!("\nPRE ENCODE TIME {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", clock.elapsed().as_millis());
 
+        let clock = Instant::now();
         let nalus = self
             .encoder
             .encode(&yuv_source)
             .map_err(|e| Error::EncodingError(e.to_string()))?;
+
+        println!("\nENCODE TIME {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", clock.elapsed().as_millis());
 
         let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
         let frame_type = nalus.frame_type();

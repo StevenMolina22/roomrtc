@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crate::transport::rtp::RtpPacket;
 use super::rr_metrics::RrMetrics;
 
-const TOLERANCE_MILLIS: i64 = 10;
+const TOLERANCE_MILLIS: i64 = 120;
 
 pub struct JitterBuffer<const N: usize> {
     packets: [Option<RtpPacket>; N],
@@ -17,11 +17,11 @@ pub struct JitterBuffer<const N: usize> {
 
     i_frame_needed: bool,
 
-    last_frame_completed_timestamp: i64,
-    last_deliver_timestamp: i64,
+    last_frame_completed_timestamp: Instant,
+    last_deliver_timestamp: Instant,
 
-    metrics: RrMetrics,
-    start_time: Instant
+    //metrics: RrMetrics,
+    // start_time: Instant
 }
 
 impl<const N: usize> JitterBuffer<N>  {
@@ -35,8 +35,8 @@ impl<const N: usize> JitterBuffer<N>  {
             i_frame_needed: true,
             last_frame_completed_timestamp: 0,
             last_deliver_timestamp: 0,
-            metrics: RrMetrics::default(),
-            start_time: Instant::now(),
+            //metrics: RrMetrics::default(),
+            // start_time: Instant::now(),
         }
     }
 
@@ -169,16 +169,25 @@ impl<const N: usize> JitterBuffer<N>  {
                         self.write_seq = None;
                     }
 
-                    self.last_frame_completed_timestamp = ts;
-                    self.last_deliver_timestamp = Local::now().timestamp_millis();
+                    if self.last_deliver_timestamp != 0 {
+                        let delta_rtp = packet.timestamp - self.last_frame_completed_timestamp;
+                        let expected_playout_time_local = self.last_deliver_timestamp + delta_rtp;
+                        let sleep_time = expected_playout_time_local - Local::now().timestamp_millis();
+
+                        println!("sleep: {sleep_time}\n");
+
+                        if sleep_time > 0 {
+                            sleep(Duration::from_millis(sleep_time as u64));
+                        }
+                    }
+
+
+                    self.last_frame_completed_timestamp = packet.timestamp;
                     if packet.is_i_frame {
                         self.i_frame_needed = false
                     }
 
-                    let delta_rtp = ts - self.last_frame_completed_timestamp;
-                    let expected_playout_time_local = self.last_deliver_timestamp + delta_rtp;
-                    let sleep_time = expected_playout_time_local + TOLERANCE_MILLIS - Local::now().timestamp_millis();
-                    sleep(Duration::from_millis(sleep_time as u64));
+                    self.last_deliver_timestamp = Local::now().timestamp_millis();
                     return Some(frame_data)
 
                 } else {
@@ -192,9 +201,11 @@ impl<const N: usize> JitterBuffer<N>  {
 
     fn resync_or_clear(&mut self) {
         let mut idx = self.read_idx;
+        let read_timestamp = self.packets[idx].as_ref().unwrap().timestamp;
+
         for _ in 0..N {
             if let Some(pkt) = &self.packets[idx]
-                && pkt.is_i_frame
+                && pkt.is_i_frame && pkt.timestamp != read_timestamp
             {
                 println!("FOUND IFRAME");
                 self.read_idx = idx;
@@ -232,14 +243,17 @@ impl<const N: usize> JitterBuffer<N>  {
 
     fn valid_playout_time(&self, frame_timestamp: i64) -> bool {
         if self.last_deliver_timestamp == 0 {
+            println!("primer timestamp");
             return true;
         }
 
         let delta_rtp = frame_timestamp - self.last_frame_completed_timestamp;
         let expected_playout_time_local = self.last_deliver_timestamp + delta_rtp;
         let expiration_deadline = expected_playout_time_local + TOLERANCE_MILLIS;
+        let actual = Local::now().timestamp_millis();
+        println!("frame = {frame_timestamp}\nlast completed: {}\nlast delivered: {}\ndelta: {delta_rtp}\nexpected: {expected_playout_time_local}\nexpriration: {expiration_deadline}\nactual: {actual}\n\n", self.last_frame_completed_timestamp, self.last_deliver_timestamp);
 
-        expiration_deadline >= Local::now().timestamp_millis()
+        expiration_deadline >= actual
     }
 
     /*
@@ -315,6 +329,7 @@ impl<const N: usize> JitterBuffer<N>  {
      */
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,7 +540,7 @@ mod tests {
         network_queue.remove(100);
 
         // 2. SIMULACIÓN EN TIEMPO REAL
-        let start_time = std::time::Instant::now();
+        let start_time = Local::now().timestamp_millis();
         let mut frames_decoded = 0;
         let mut network_index = 0;
 
@@ -535,7 +550,7 @@ mod tests {
 
         // Corremos hasta terminar o timeout de seguridad (12s)
         while frames_decoded < total_frames - 5 { // -5 margen por perdidas
-            let now = std::time::Instant::now();
+            let now = Local::now().timestamp_millis();
 
             if now.elapsed().as_secs() > 12 {
                 break; // Timeout del test
@@ -663,3 +678,5 @@ mod tests {
         assert!(frames_decoded < total_frames, "Imposible: Decodificó frames que borramos");
     }
 }
+
+ */

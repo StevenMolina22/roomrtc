@@ -6,8 +6,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc};
 use std::sync::atomic::AtomicBool;
 use std::thread;
-use std::time::Duration;
-use chrono;
+use std::time::{Duration, Instant};
 
 pub trait FrameSource: Send {
     /// Start the capture thread.
@@ -59,8 +58,8 @@ impl Camera {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
         let config = self.config.clone();
-        
-        
+
+
         running.store(true, std::sync::atomic::Ordering::SeqCst);
         thread::spawn(move || {
             let camera_index = if let Ok(index) = i32::try_from(config.media.camera_index) {
@@ -101,6 +100,7 @@ impl Camera {
             let mut rgb = Mat::default();
 
             let frame_duration = Duration::from_millis(1000 / u64::from(config.media.frame_rate));
+            let start_time = Instant::now();
 
             while running.load(std::sync::atomic::Ordering::SeqCst) {
                 if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
@@ -124,7 +124,7 @@ impl Camera {
                     data,
                     width: rgb.cols() as usize,
                     height: rgb.rows() as usize,
-                    frame_time: chrono::Local::now().timestamp_millis()
+                    frame_time: start_time.elapsed().as_millis() as i64
                 };
 
                 if tx.send(frame).is_err() {

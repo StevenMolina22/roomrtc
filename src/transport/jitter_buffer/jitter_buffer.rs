@@ -20,7 +20,7 @@ pub struct JitterBuffer<const N: usize> {
     last_deliver_timestamp: u128,
 
     //metrics: RrMetrics,
-    // start_time: Instant
+    start_time: Instant
 }
 
 impl<const N: usize> JitterBuffer<N>  {
@@ -35,7 +35,7 @@ impl<const N: usize> JitterBuffer<N>  {
             last_frame_completed_timestamp: 0,
             last_deliver_timestamp: 0,
             //metrics: RrMetrics::default(),
-            // start_time: Instant::now(),
+            start_time: Instant::now(),
         }
     }
 

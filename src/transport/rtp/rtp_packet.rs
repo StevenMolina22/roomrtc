@@ -28,7 +28,7 @@ pub struct RtpPacket {
     pub sequence_number: u64,
 
     /// Timestamp associated with the sample/frame.
-    pub timestamp: i64,
+    pub timestamp: u128,
 
     /// SSRC (synchronization source) identifier.
     pub ssrc: u32,
@@ -46,7 +46,7 @@ impl RtpPacket {
     /// network byte order.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(25 + self.payload.len());
+        let mut buf = Vec::with_capacity(33 + self.payload.len());
 
         buf.push(self.version);
         buf.push(self.marker);
@@ -65,7 +65,7 @@ impl RtpPacket {
     /// `to_bytes`. Returns `None` if the slice is too short or malformed.
     #[must_use]
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < 25 {
+        if data.len() < 33 {
             return None;
         }
 
@@ -75,9 +75,9 @@ impl RtpPacket {
         let is_i_frame = data[3];
         let payload_type = data[4];
         let sequence_number = u64::from_be_bytes(array_from_slice(&data[5..13]));
-        let timestamp = i64::from_be_bytes(array_from_slice(&data[13..21]));
-        let ssrc = u32::from_be_bytes(array_from_slice::<4>(&data[21..25]));
-        let payload = data[25..].to_vec();
+        let timestamp = u128::from_be_bytes(array_from_slice(&data[13..29]));
+        let ssrc = u32::from_be_bytes(array_from_slice::<4>(&data[29..33]));
+        let payload = data[33..].to_vec();
 
         Some(Self {
             version,

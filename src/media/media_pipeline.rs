@@ -204,7 +204,7 @@ fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<F
         data: decoded_data,
         width,
         height,
-        frame_time: Local::now().timestamp_millis(),
+        frame_time: 0,
     })
 }
 
@@ -236,7 +236,7 @@ mod tests {
             data: raw_data.clone(),
             width,
             height,
-            frame_time: Local::now().timestamp_millis(),
+            frame_time: 0,
         };
 
         // ------- Encode -------

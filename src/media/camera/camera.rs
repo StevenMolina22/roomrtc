@@ -124,7 +124,7 @@ impl Camera {
                     data,
                     width: rgb.cols() as usize,
                     height: rgb.rows() as usize,
-                    frame_time: start_time.elapsed().as_millis() as i64
+                    frame_time: start_time.elapsed().as_millis()
                 };
 
                 if tx.send(frame).is_err() {

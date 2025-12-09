@@ -20,7 +20,7 @@ pub struct Frame {
     pub height: usize,
 
     /// Instant when the frame was captured.
-    pub frame_time: i64
+    pub frame_time: u128
 }
 
 /*
@@ -99,15 +99,15 @@ impl Frame {
     /// - bytes 16..: raw pixel bytes
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < 16 {
+        if bytes.len() < 24 {
             return None;
         }
 
-        let frame_time = i64::from_le_bytes(bytes[0..8].try_into().ok()?);
-        let width = u32::from_le_bytes(bytes[8..12].try_into().ok()?);
-        let height = u32::from_le_bytes(bytes[12..16].try_into().ok()?);
+        let frame_time = u128::from_le_bytes(bytes[0..16].try_into().ok()?);
+        let width = u32::from_le_bytes(bytes[16..20].try_into().ok()?);
+        let height = u32::from_le_bytes(bytes[20..24].try_into().ok()?);
 
-        let data = bytes[16..].to_vec();
+        let data = bytes[24..].to_vec();
 
         Some(Self {
             data,
@@ -120,7 +120,7 @@ impl Frame {
     /// Serialize the `Frame` into bytes in the same layout consumed by
     /// `from_bytes`.
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-        let mut buf = Vec::with_capacity(16 + self.data.len());
+        let mut buf = Vec::with_capacity(24 + self.data.len());
         buf.extend_from_slice(&self.frame_time.to_le_bytes());
         buf.extend_from_slice(
             &u32::try_from(self.width)

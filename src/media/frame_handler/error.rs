@@ -17,7 +17,7 @@ pub enum FrameError {
     DecoderInitializationError,
 
     ///Error returned when a frame failed to be decoded.
-    DecodingError,
+    DecodingError(String),
 
     /// Error returned when no frame data is provided to the decoder.
     EmptyFrameError,
@@ -49,7 +49,7 @@ impl Display for FrameError {
             Self::DecoderInitializationError => {
                 write!(fmt, "Error: failed to initialize decoder")
             }
-            Self::DecodingError => write!(fmt, "Error: failed to decode frame"),
+            Self::DecodingError(e) => write!(fmt, "Error: failed to decode frame: {e}"),
             Self::EmptyFrameError => write!(fmt, "Error: no frame was provided"),
             Self::UnableToCreateFrameFromYUVError => {
                 write!(fmt, "Error: failed to create a frame from yuv vec.")

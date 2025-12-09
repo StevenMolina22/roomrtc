@@ -1,8 +1,9 @@
 use crate::config::MediaConfig;
 
 use super::{EncodedFrame, error::FrameError as Error, frame::Frame};
-use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder, FrameType};
+use openh264::encoder::{BitRate, Complexity, EncodedBitStream, Encoder as H264Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode, UsageType};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
+use openh264::OpenH264API;
 
 /// A basic H.264 video encoder using the `OpenH264` library.
 ///
@@ -29,7 +30,18 @@ impl Encoder {
     /// Returns [`Error::EncoderInitializationError`] if the encoder cannot
     /// be created by the `OpenH264` library.
     pub fn new(media_config: &MediaConfig) -> Result<Self, Error> {
-        let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
+        let config = EncoderConfig::new()
+            .bitrate(BitRate::from_bps(1_500_000))
+            .max_frame_rate(FrameRate::from_hz(30.0))
+            .usage_type(UsageType::CameraVideoRealTime)
+            .intra_frame_period(IntraFramePeriod::from_num_frames(20))
+            .complexity(Complexity::Medium)
+            .rate_control_mode(RateControlMode::Bitrate)
+            .num_threads(4)
+            .skip_frames(true);
+
+        let encoder = H264Encoder::with_api_config(OpenH264API::from_source(), config)
+            .map_err(|_| Error::EncoderInitializationError)?;
 
         Ok(Self {
             encoder,

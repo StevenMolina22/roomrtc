@@ -134,7 +134,7 @@ impl Controller {
     }
 
     pub fn stop_media_components(&mut self) -> Result<(), Error> {
-        self.media_pipeline.stop();
+        self.media_pipeline.stop().map_err(|e| Error::MapError(e.to_string()))?;
         self.transport
             .stop()
             .map_err(|e| Error::MapError(e.to_string()))
@@ -180,7 +180,10 @@ impl Controller {
             .remote_fingerprint
             .clone()
             .ok_or(Error::NotLoggedInError)?;
-        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx, connected, srtp_ctx) = self
+        
+        let (local_to_remote_rtp_tx, 
+            remote_to_local_rtp_rx, 
+            connected) = self
             .transport
             .start(
                 remote_rtp_address,
@@ -192,16 +195,12 @@ impl Controller {
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
 
-        let role = self.call_session.local_setup_role;
         self.media_pipeline
             .start(
                 local_to_remote_rtp_tx,
                 remote_to_local_rtp_rx,
                 self.event_tx.clone(),
-                connected,
-                srtp_ctx,
-                role,
-            )
+                connected)
             .map_err(|e| Error::MapError(e.to_string()))
     }
 

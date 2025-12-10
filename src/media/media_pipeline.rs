@@ -4,13 +4,11 @@ use crate::logger::Logger;
 use crate::media::camera::{Camera, FrameSource};
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
-use crate::session::sdp::DtlsSetupRole;
-use crate::srtp::SrtpContext;
 use crate::transport::rtp::RtpPacket;
 use chrono::Local;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::thread;
 
 pub struct MediaPipeline {
@@ -33,30 +31,20 @@ impl MediaPipeline {
 
     pub fn start(
         &mut self,
-        rtp_tx: Sender<Vec<u8>>,
-        rtp_rx: Receiver<Vec<u8>>,
+        rtp_tx: Sender<RtpPacket>,
+        rtp_rx: Receiver<RtpPacket>,
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
-        srtp_ctx: SrtpContext,
-        role: DtlsSetupRole,
     ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
-        let is_client = matches!(role, DtlsSetupRole::Active);
-        let srtp_ctx = Arc::new(Mutex::new(srtp_ctx));
-
         let local_frame_rx = self.start_local_frame_pipeline(
             rtp_tx,
             event_tx.clone(),
-            connected.clone(),
-            srtp_ctx.clone(),
-            is_client,
-        )?;
+            connected.clone())?;
+
         let remote_frame_rx = self.start_remote_frames_pipeline(
             rtp_rx,
             event_tx,
-            connected,
-            srtp_ctx,
-            is_client,
-        )?;
+            connected)?;
 
         Ok((local_frame_rx, remote_frame_rx))
     }
@@ -70,11 +58,9 @@ impl MediaPipeline {
 
     fn start_remote_frames_pipeline(
         &self,
-        srtp_rx: Receiver<Vec<u8>>,
+        rtp_rx: Receiver<RtpPacket>,
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
-        srtp_context: Arc<Mutex<SrtpContext>>,
-        is_client: bool,
     ) -> Result<Receiver<Frame>, Error> {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
         let logger = self.logger.clone();
@@ -100,48 +86,19 @@ impl MediaPipeline {
                         break;
                     }
 
-                    let rtp_packet = match srtp_rx.recv() {
-                        Ok(protected_data) => {
-                            if protected_data.is_empty() {
-                                continue;
-                            }
-                            let first_byte = protected_data[0];
-
-                            if (20..=63).contains(&first_byte) {
-                                continue;
-                            } else if (128..=191).contains(&first_byte) {
-                                match srtp_context.lock() {
-                                    Ok(mut ctx) => {
-                                        match ctx.unprotect(&protected_data, is_client) {
-                                            Ok(unprotected_packet) => unprotected_packet,
-                                            Err(e) => {
-                                                logger.error(&format!(
-                                                    "SRTP unprotect failed: {e}"
-                                                ));
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        logger.error(&format!("SRTP context lock failed: {e}"));
-                                        break;
-                                    }
-                                }
-                            } else {
-                                continue;
-                            }
-                        }
-                        Err(_) => break,
+                    let packet = match rtp_rx.recv() {
+                        Ok(p) => p,
+                        Err(_) => break
                     };
 
-                    if actual_frame == Some(rtp_packet.frame_id) {
-                        chunks.push(rtp_packet.clone());
+                    if actual_frame == Some(packet.frame_id) {
+                        chunks.push(packet.clone());
                     } else {
-                        chunks = vec![rtp_packet.clone()];
-                        actual_frame = Some(rtp_packet.frame_id);
+                        chunks = vec![packet.clone()];
+                        actual_frame = Some(packet.frame_id);
                     }
 
-                    let expected_marker = rtp_packet.marker;
+                    let expected_marker = packet.marker;
                     let current_chunk_count = chunks.len() as u16;
 
                     if current_chunk_count == expected_marker {
@@ -167,11 +124,9 @@ impl MediaPipeline {
 
     fn start_local_frame_pipeline(
         &mut self,
-        srtp_tx: Sender<Vec<u8>>,
+        rtp_tx: Sender<RtpPacket>,
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
-        srtp_ctx: Arc<Mutex<SrtpContext>>,
-        is_client: bool,
     ) -> Result<Receiver<Frame>, Error> {
         let (local_frame_tx, local_frame_rx) = mpsc::channel();
         let camera_frame_rx = self
@@ -190,7 +145,6 @@ impl MediaPipeline {
         };
 
         let ssrc = self.ssrc;
-        let srtp_ctx = srtp_ctx;
         let config = self.config.clone();
         let logger = self.logger.clone();
 
@@ -212,39 +166,28 @@ impl MediaPipeline {
                     }
                 };
 
-                let rtp_packet = generate_rtp_packet(encoded_frame, config.clone(), ssrc);
-
-                for packet in rtp_packet {
-                    if let Err(e) = send_encripted_rtp_packet(
-                        srtp_tx.clone(),
-                        packet,
-                        srtp_ctx.clone(),
-                        is_client,
-                    ) {
-                        logger.error(&format!("Failed to send encrypted RTP packet: {e}"));
-                    }
+                if let Err(e) = send_encoded_frame(encoded_frame, &rtp_tx, ssrc, &connected, &config) {
+                    logger.error(&Error::SendError(e.to_string()).to_string());
+                    break
                 }
             }
 
             while connected.load(Ordering::SeqCst) {
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                thread::sleep(std::time::Duration::from_millis(100));
             }
 
-            // if connected.load(Ordering::SeqCst) {
-            //     connected.store(false, Ordering::SeqCst);
-            //     send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
-            // }
             logger.info("Local frame pipeline terminated");
         });
 
         Ok(local_frame_rx)
     }
 }
+
 fn send_encoded_frame(
     encoded_frame: EncodedFrame,
     rtp_tx: &Sender<RtpPacket>,
     ssrc: u32,
-    connected: Arc<AtomicBool>,
+    connected: &Arc<AtomicBool>,
     config: &Arc<Config>,
 ) -> Result<(), Error> {
     if !connected.load(Ordering::SeqCst) {
@@ -293,57 +236,6 @@ fn generate_frame_from_chunks(chunks: &mut Vec<RtpPacket>, decoder: &mut Decoder
 
 fn send_message_to_ui(event_tx: Sender<AppEvent>, event: AppEvent) {
     event_tx.send(event);
-}
-
-fn generate_rtp_packet(
-    encoded_frame: EncodedFrame,
-    config: Arc<Config>,
-    ssrc: u32,
-) -> Vec<RtpPacket> {
-    let mut packets = Vec::new();
-    let marker = encoded_frame.chunks.len() as u16;
-    for (chunk_id, payload) in encoded_frame.chunks.iter().enumerate() {
-        let packet = RtpPacket {
-            version: config.media.rtp_version,
-            marker,
-            payload_type: config.media.rtp_payload_type,
-            frame_id: encoded_frame.id,
-            chunk_id: chunk_id as u64,
-            timestamp: Local::now().timestamp_millis() as u32,
-            ssrc,
-            payload: payload.clone(),
-        };
-        packets.push(packet);
-    }
-    packets
-}
-
-fn send_encripted_rtp_packet(
-    srtp_tx: Sender<Vec<u8>>,
-    packet: RtpPacket,
-    srtp_ctx: Arc<Mutex<SrtpContext>>,
-    is_client: bool,
-) -> Result<(), Error> {
-    let protected_data = {
-        let mut ctx = match srtp_ctx.lock() {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(Error::MapError(e.to_string()));
-            }
-        };
-
-        match ctx.protect(&packet, is_client) {
-            Ok(data) => data,
-            Err(e) => {
-                return Err(Error::ProtectionError(e.to_string()));
-            }
-        }
-    };
-    if let Err(e) = srtp_tx.send(protected_data) {
-        return Err(Error::SendError(e.to_string()));
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

@@ -2,3 +2,95 @@
 [2025-12-01 14:51:56] [INFO] [] Application starting...
 [2025-12-01 16:38:22] [INFO] [] Application starting...
 [2025-12-01 16:38:22] [INFO] [] Application starting...
+[2025-12-09 21:14:50] [INFO] [] Application starting...
+[2025-12-09 21:14:50] [INFO] [] Application starting...
+[2025-12-09 21:14:50] [INFO] [MediaTransport] MediaTransport bound to RTP: 0.0.0.0:59863, RTCP: 0.0.0.0:59864
+[2025-12-09 21:14:50] [INFO] [MediaTransport] MediaTransport bound to RTP: 0.0.0.0:52322, RTCP: 0.0.0.0:52323
+[2025-12-09 21:14:50] [INFO] [IceAgent] STUN: Starting discovery on existing socket...
+[2025-12-09 21:14:50] [INFO] [IceAgent] STUN: Starting discovery on existing socket...
+[2025-12-09 21:14:50] [INFO] [IceAgent] STUN OK: 201.212.135.180:59863
+[2025-12-09 21:14:50] [INFO] [IceAgent] STUN OK: 201.212.135.180:52322
+[2025-12-09 21:15:21] [INFO] [Controller] Call accepted by peer
+[2025-12-09 21:15:21] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 192.168.0.193
+[2025-12-09 21:15:21] [DEBUG] [IceAgent] Skipping STUN pair: 192.168.0.193 <-> 201.212.135.180
+[2025-12-09 21:15:21] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 192.168.0.193
+[2025-12-09 21:15:21] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 201.212.135.180
+[2025-12-09 21:15:21] [INFO] [IceAgent] Handshake complete! A direct connection can be established.
+[2025-12-09 21:15:21] [INFO] [IceAgent]    - My Address: 192.168.0.193:52322
+[2025-12-09 21:15:21] [INFO] [IceAgent]    - Peer Address: 192.168.0.193:59863
+[2025-12-09 21:15:21] [INFO] [Controller] Starting call...
+[2025-12-09 21:15:21] [INFO] [MediaTransport] Starting MediaTransport. Remote RTP: 192.168.0.193:59863, Remote RTCP: 192.168.0.193:59864
+[2025-12-09 21:15:21] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 192.168.0.193
+[2025-12-09 21:15:21] [DEBUG] [IceAgent] Skipping STUN pair: 192.168.0.193 <-> 201.212.135.180
+[2025-12-09 21:15:21] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 192.168.0.193
+[2025-12-09 21:15:21] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 201.212.135.180
+[2025-12-09 21:15:21] [INFO] [IceAgent] Handshake complete! A direct connection can be established.
+[2025-12-09 21:15:21] [INFO] [IceAgent]    - My Address: 192.168.0.193:59863
+[2025-12-09 21:15:21] [INFO] [IceAgent]    - Peer Address: 192.168.0.193:52322
+[2025-12-09 21:15:21] [INFO] [Controller] joining call...
+[2025-12-09 21:15:21] [INFO] [MediaTransport] Starting MediaTransport. Remote RTP: 192.168.0.193:52322, Remote RTCP: 192.168.0.193:52323
+[2025-12-09 21:15:21] [INFO] [MediaTransport] Sockets connected to remote addresses.
+[2025-12-09 21:15:21] [INFO] [MediaTransport] Sockets connected to remote addresses.
+[2025-12-09 21:15:34] [INFO] [MediaPipeline] Stopping MediaPipeline...
+[2025-12-09 21:15:34] [INFO] [MediaTransport] Stopping MediaTransport...
+[2025-12-09 21:15:34] [INFO] [MediaTransport] MediaTransport bound to RTP: 0.0.0.0:38476, RTCP: 0.0.0.0:38477
+[2025-12-09 21:15:34] [INFO] [IceAgent] STUN: Starting discovery on existing socket...
+[2025-12-09 21:15:34] [ERROR] [MediaPipeline] Error: "Send failed": Error: "Send failed": Media pipeline turned off
+[2025-12-09 21:15:34] [INFO] [MediaPipeline] Local frame pipeline terminated
+[2025-12-09 21:15:34] [INFO] [RtpSender] RtpSender thread terminated
+[2025-12-09 21:15:34] [INFO] [MediaPipeline] Stopping MediaPipeline...
+[2025-12-09 21:15:34] [INFO] [MediaTransport] Stopping MediaTransport...
+[2025-12-09 21:15:34] [INFO] [MediaTransport] MediaTransport bound to RTP: 0.0.0.0:35043, RTCP: 0.0.0.0:35044
+[2025-12-09 21:15:34] [INFO] [IceAgent] STUN: Starting discovery on existing socket...
+[2025-12-09 21:15:34] [INFO] [MediaPipeline] Local frame pipeline terminated
+[2025-12-09 21:15:34] [INFO] [RtpSender] RtpSender thread terminated
+[2025-12-09 21:15:34] [INFO] [IceAgent] STUN OK: 201.212.135.180:38476
+[2025-12-09 21:15:34] [INFO] [MediaPipeline] Remote frames pipeline terminated
+[2025-12-09 21:15:34] [INFO] [IceAgent] STUN OK: 201.212.135.180:35043
+[2025-12-09 21:15:37] [ERROR] [RtpReceiver] RtpReceiver error: Error: "Connection closed"
+[2025-12-09 21:15:37] [INFO] [RtpReceiver] RtpReceiver thread terminated
+[2025-12-09 21:15:37] [INFO] [MediaTransport] Unprotection layer thread terminated
+[2025-12-09 21:15:44] [INFO] [] Application starting...
+[2025-12-09 21:15:44] [INFO] [MediaTransport] MediaTransport bound to RTP: 0.0.0.0:44378, RTCP: 0.0.0.0:44379
+[2025-12-09 21:15:44] [INFO] [IceAgent] STUN: Starting discovery on existing socket...
+[2025-12-09 21:15:44] [INFO] [IceAgent] STUN OK: 201.212.135.180:44378
+[2025-12-09 21:15:53] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 192.168.0.193
+[2025-12-09 21:15:53] [DEBUG] [IceAgent] Skipping STUN pair: 192.168.0.193 <-> 201.212.135.180
+[2025-12-09 21:15:53] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 192.168.0.193
+[2025-12-09 21:15:53] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 201.212.135.180
+[2025-12-09 21:15:53] [INFO] [IceAgent] Handshake complete! A direct connection can be established.
+[2025-12-09 21:15:53] [INFO] [IceAgent]    - My Address: 192.168.0.193:38476
+[2025-12-09 21:15:53] [INFO] [IceAgent]    - Peer Address: 192.168.0.193:44378
+[2025-12-09 21:15:53] [INFO] [Controller] joining call...
+[2025-12-09 21:15:53] [INFO] [MediaTransport] Starting MediaTransport. Remote RTP: 192.168.0.193:44378, Remote RTCP: 192.168.0.193:44379
+[2025-12-09 21:15:53] [INFO] [Controller] Call accepted by peer
+[2025-12-09 21:15:53] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 192.168.0.193
+[2025-12-09 21:15:53] [DEBUG] [IceAgent] Skipping STUN pair: 192.168.0.193 <-> 201.212.135.180
+[2025-12-09 21:15:53] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 192.168.0.193
+[2025-12-09 21:15:53] [DEBUG] [IceAgent] Skipping STUN pair: 201.212.135.180 <-> 201.212.135.180
+[2025-12-09 21:15:53] [INFO] [IceAgent] Handshake complete! A direct connection can be established.
+[2025-12-09 21:15:53] [INFO] [IceAgent]    - My Address: 192.168.0.193:44378
+[2025-12-09 21:15:53] [INFO] [IceAgent]    - Peer Address: 192.168.0.193:38476
+[2025-12-09 21:15:53] [INFO] [Controller] Starting call...
+[2025-12-09 21:15:53] [INFO] [MediaTransport] Starting MediaTransport. Remote RTP: 192.168.0.193:38476, Remote RTCP: 192.168.0.193:38477
+[2025-12-09 21:15:53] [INFO] [MediaTransport] Sockets connected to remote addresses.
+[2025-12-09 21:15:53] [INFO] [MediaTransport] Sockets connected to remote addresses.
+[2025-12-09 21:18:09] [INFO] [MediaPipeline] Stopping MediaPipeline...
+[2025-12-09 21:18:09] [INFO] [MediaTransport] Stopping MediaTransport...
+[2025-12-09 21:18:09] [INFO] [MediaTransport] MediaTransport bound to RTP: 0.0.0.0:56188, RTCP: 0.0.0.0:56189
+[2025-12-09 21:18:09] [INFO] [IceAgent] STUN: Starting discovery on existing socket...
+[2025-12-09 21:18:09] [INFO] [MediaPipeline] Local frame pipeline terminated
+[2025-12-09 21:18:09] [INFO] [RtpSender] RtpSender thread terminated
+[2025-12-09 21:18:09] [INFO] [MediaPipeline] Remote frames pipeline terminated
+[2025-12-09 21:18:09] [INFO] [MediaPipeline] Stopping MediaPipeline...
+[2025-12-09 21:18:09] [INFO] [MediaTransport] Stopping MediaTransport...
+[2025-12-09 21:18:09] [INFO] [MediaTransport] MediaTransport bound to RTP: 0.0.0.0:42688, RTCP: 0.0.0.0:42689
+[2025-12-09 21:18:09] [INFO] [IceAgent] STUN: Starting discovery on existing socket...
+[2025-12-09 21:18:09] [INFO] [IceAgent] STUN OK: 201.212.135.180:42688
+[2025-12-09 21:18:09] [INFO] [IceAgent] STUN OK: 201.212.135.180:56188
+[2025-12-09 21:18:09] [INFO] [MediaPipeline] Local frame pipeline terminated
+[2025-12-09 21:18:09] [INFO] [RtpSender] RtpSender thread terminated
+[2025-12-09 21:18:12] [ERROR] [RtpReceiver] RtpReceiver error: Error: "Connection closed"
+[2025-12-09 21:18:12] [INFO] [RtpReceiver] RtpReceiver thread terminated
+[2025-12-09 21:18:12] [INFO] [MediaTransport] Unprotection layer thread terminated
+[2025-12-09 21:18:12] [INFO] [MediaPipeline] Remote frames pipeline terminated

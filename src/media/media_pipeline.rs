@@ -63,7 +63,6 @@ impl MediaPipeline {
         let logger = self.logger.clone();
 
         let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(self.clock.clone());
-        let clock = self.clock.clone();
 
         thread::spawn({
             move || {
@@ -86,17 +85,15 @@ impl MediaPipeline {
 
                     match rtp_rx.recv() {
                         Ok(packet) => {
-                            println!("[MP] RTP packet received {}", packet.sequence_number);
                             jitter_buffer.add(packet)
                         },
                         Err(_) => break,
                     }
 
                     if let Some(chunks) = jitter_buffer.pop()
-                        && let Some(frame_data) = generate_frame_from_chunks(&chunks, &mut decoder, clock.clone())
+                        && let Some(frame_data) = generate_frame_from_chunks(&chunks, &mut decoder)
                     {
                         if let Err(_) = remote_frame_tx.send(frame_data.clone()) {
-                            println!("[MP] Failed to send remote frame");
                             break;
                         }
                     }
@@ -141,11 +138,6 @@ impl MediaPipeline {
                     break;
                 }
             }
-
-            // if connected.load(Ordering::SeqCst) {
-            //     connected.store(false, Ordering::SeqCst);
-            //     send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
-            // }
         });
 
         Ok(local_frame_rx)
@@ -222,20 +214,15 @@ fn send_encoded_frame(
     Ok(())
 }
 
-fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder, clock: Arc<Clock>) -> Option<Frame> {
-    let time_before = clock.now();
+fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<Frame> {
     let (decoded_data, width, height) = match decoder.decode_frame(&data) {
         Ok(data) => {
-            println!("[MP] data decoded");
             data
         },
         Err(_) => {
-            println!("[MP] failed to decode");
             return None
         },
     };
-    let time_after = clock.now();
-    println!("TIME LASTED TO ENCODE {}", time_after - time_before);
 
     Some(Frame {
         data: decoded_data,
@@ -305,7 +292,7 @@ mod tests {
             data.extend_from_slice(&c.payload);
         }
 
-        let decoded = generate_frame_from_chunks(&data, &mut decoder, Arc::new(Clock::new()))
+        let decoded = generate_frame_from_chunks(&data, &mut decoder)
             .expect("generate_frame_from_chunks no devolvió frame");
 
         // ------- Validaciones -------

@@ -1,4 +1,3 @@
-use std::time::Instant;
 use super::error::FrameError as Error;
 use openh264::decoder::Decoder as H264Decoder;
 use openh264::formats::YUVSource;
@@ -41,7 +40,6 @@ impl Decoder {
     /// - [`Error::DecodingError`] — if decoding fails due to invalid or
     ///   corrupted data.
     pub fn decode_frame(&mut self, encoded_data: &[u8]) -> Result<(Vec<u8>, usize, usize), Error> {
-        let clock = Instant::now();
         match self.decoder.decode(encoded_data) {
             Ok(Some(yuv)) => {
                 let (width, height) = yuv.dimensions();
@@ -68,7 +66,6 @@ impl Decoder {
                     yuv::YuvStandardMatrix::Bt709
                 ).map_err(|e| Error::DecodingError(e.to_string()))?;
 
-                println!("\nDECODE TIME {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", clock.elapsed().as_millis());
                 Ok((rgb, width, height))
             }
             Ok(None) => Err(Error::EmptyFrameError),

@@ -1,4 +1,3 @@
-use std::time::Instant;
 use crate::config::MediaConfig;
 use crate::media::frame_handler::YuvImgSource;
 
@@ -60,7 +59,6 @@ impl Encoder {
     ///
     /// - [`Error::EncodingError`] — if encoding fails due to invalid frame data.
     pub fn encode_frame(&mut self, frame: &Frame) -> Result<EncodedFrame, Error> {
-        let clock = Instant::now();
         let mut yuv_img = YuvPlanarImageMut::alloc(
             frame.width as u32,
             frame.height as u32,
@@ -77,15 +75,11 @@ impl Encoder {
         ).map_err(|e| Error::EncodingError(e.to_string()))?;
 
         let yuv_source = YuvImgSource { img: &yuv_img };
-        println!("\nPRE ENCODE TIME {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", clock.elapsed().as_millis());
-
-        let clock = Instant::now();
+        
         let nalus = self
             .encoder
             .encode(&yuv_source)
             .map_err(|e| Error::EncodingError(e.to_string()))?;
-
-        println!("\nENCODE TIME {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", clock.elapsed().as_millis());
 
         let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
         let frame_type = nalus.frame_type();

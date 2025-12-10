@@ -1,7 +1,6 @@
 use super::FrameError as Error;
 use opencv::{imgproc};
 use opencv::prelude::*;
-use std::fmt::{Display};
 
 /// An in-memory video frame used by the frame handler.
 ///
@@ -22,36 +21,6 @@ pub struct Frame {
     /// Instant when the frame was captured.
     pub frame_time: u128
 }
-
-/*
-impl Display for Frame {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let preview_len = 16; // bytes para mostrar
-        let preview: Vec<String> = self
-            .data
-            .iter()
-            .take(preview_len)
-            .map(|b| format!("{b:02X}"))
-            .collect();
-
-        write!(
-            f,
-            "Frame {{ id: {}, size: {}x{}, data_len: {}, preview: [{}]{} }}",
-            self.id,
-            self.width,
-            self.height,
-            self.data.len(),
-            preview.join(" "),
-            if self.data.len() > preview_len {
-                " ..."
-            } else {
-                ""
-            }
-        )
-    }
-}
-
- */
 
 impl Frame {
     /// Convert a YUV I420 frame stored in `self.data` to RGB bytes.

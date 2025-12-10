@@ -251,7 +251,7 @@ impl MediaTransport {
                         }
                     }
                 };
-
+                
                 if let Err(e) = protected_tx.send(protected_data) {
                     logger.error(&Error::ChannelSendError(e.to_string()).to_string());
                     break

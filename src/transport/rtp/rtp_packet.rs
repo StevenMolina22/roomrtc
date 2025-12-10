@@ -1,5 +1,5 @@
 use std::default::Default;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display};
 
 /// RTP packet used by the project transport layer.
 ///
@@ -48,7 +48,7 @@ impl RtpPacket {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(33 + self.payload.len());
 
-        buf.push(self.version);
+        buf.push(self.version << 6);
         buf.push(self.marker);
         buf.extend_from_slice(&self.total_chunks.to_be_bytes());
         buf.push(self.is_i_frame as u8);
@@ -69,7 +69,7 @@ impl RtpPacket {
             return None;
         }
 
-        let version = data[0];
+        let version = data[0] >> 6;
         let marker = data[1];
         let total_chunks = data[2];
         let is_i_frame = data[3];

@@ -18,11 +18,14 @@ pub enum ServerResponse {
     CallHangUpOk,
     CallHangUpError(String),
 
-    CallAccepted {
-        sdp_answer: SessionDescriptionProtocol,
-    },
+    CallRequestOk,
+    CallRequestError(String),
 
-    CallRejected,
+    CallAcceptOk,
+    CallAcceptError(String),
+
+    CallRejectOk,
+    CallRejectError(String),
 
     BadMessage,
 
@@ -57,9 +60,17 @@ impl ServerResponse {
 
             Self::CallHangUpError(msg) => format!("CALLHANGUPERROR|{msg}"),
 
-            Self::CallAccepted { sdp_answer } => format!("CALLACCEPTED|{sdp_answer}"),
+            Self::CallRequestOk => "CALLREQUESTOK".to_string(),
 
-            Self::CallRejected => "CALLREJECTED".to_string(),
+            Self::CallRequestError(msg) => format!("CALLREQUESTERROR|{msg}"),
+
+            Self::CallAcceptOk => "CALLACCEPTOK".to_string(),
+
+            Self::CallAcceptError(msg) => format!("CALLACCEPTERROR|{msg}"),
+
+            Self::CallRejectOk => "CALLREJECTOK".to_string(),
+
+            Self::CallRejectError(msg) => format!("CALLREJECTERROR|{msg}"),
 
             Self::BadMessage => "BADMSG".to_string(),
 
@@ -116,11 +127,17 @@ impl ServerResponse {
 
             "CALLHANGUPERROR" if parts.len() == 2 => Some(Self::CallHangUpError(parts[1].into())),
 
-            "CALLACCEPTED" if parts.len() == 2 => Some(Self::CallAccepted {
-                sdp_answer: parts[1].parse().ok()?,
-            }),
+            "CALLREQUESTOK" if parts.len() == 1 => Some(Self::CallRequestOk),
 
-            "CALLREJECTED" if parts.len() == 1 => Some(Self::CallRejected),
+            "CALLREQUESTERROR" if parts.len() == 2 => Some(Self::CallRequestError(parts[1].into())),
+
+            "CALLACCOK" if parts.len() == 1 => Some(Self::CallAcceptOk),
+
+            "CALLACCERROR" if parts.len() == 2 => Some(Self::CallAcceptError(parts[1].into())),
+
+            "CALLREJECTOK" if parts.len() == 1 => Some(Self::CallRejectOk),
+
+            "CALLREJECTERROR" if parts.len() == 2 => Some(Self::CallRejectError(parts[1].into())),
 
             "BADMSG" if parts.len() == 1 => Some(Self::BadMessage),
 

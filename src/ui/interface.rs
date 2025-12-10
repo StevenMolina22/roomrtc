@@ -318,7 +318,7 @@ impl RoomRTCApp {
                 }
 
                 if ui.button("Accept").clicked() {
-                    match self.controller.accept_call(&sdp_offer) {
+                    match self.controller.accept_call(peer_username.clone(), &sdp_offer) {
                         Ok((local_frame_rx, remote_frame_rx)) => {
                             match self.controller.get_username() {
                                 Ok(username) => {

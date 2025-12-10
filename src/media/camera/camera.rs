@@ -1,12 +1,12 @@
 use crate::config::Config;
 use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
-use opencv::{imgproc, prelude::*, videoio};
+use opencv::{imgproc, prelude::*, videoio, core};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc};
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
-use std::time::Duration;
 use crate::clock::Clock;
 
 pub trait FrameSource: Send {
@@ -64,50 +64,38 @@ impl Camera {
         let running = self.running.clone();
         let config = self.config.clone();
         let clock = self.clock.clone();
+
+        running.store(true, SeqCst);
+
+        let camera_index = if let Ok(index) = i32::try_from(config.media.camera_index) {
+            index
+        } else {
+            return Err(Error::IndexError);
+        };
+
+        let mut cam = match videoio::VideoCapture::new(camera_index, videoio::CAP_FFMPEG) {
+            Ok(cam) => cam,
+            Err(e) => {
+                return Err(Error::OpenError(e.to_string()))
+            }
+        };
+        if !videoio::VideoCapture::is_opened(&cam).map_err(|_| Error::ClosedCamera)? {
+            return Err(Error::ClosedCamera)
+        }
+
+
+        if cam.set(videoio::CAP_PROP_FRAME_WIDTH, config.media.frame_width).is_err()
+            || cam.set(videoio::CAP_PROP_FRAME_HEIGHT, config.media.frame_height).is_err()
+            ||cam.set(videoio::CAP_PROP_FPS, config.media.frame_rate as f64).is_err()
+        {
+            return Err(Error::CameraConfigFailed)
+        }
         
-        running.store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut mat = Mat::default();
+        let mut rgb = Mat::default();
         
         thread::spawn(move || {
-            let camera_index = if let Ok(index) = i32::try_from(config.media.camera_index) {
-                index
-            } else {
-                eprintln!("Camera index is too large for i32. Stopping camera thread.");
-                return;
-            };
-
-            let mut cam = match videoio::VideoCapture::new(camera_index, videoio::CAP_ANY) {
-                Ok(cam) => cam,
-                Err(e) => {
-                    eprintln!("Failed to open camera: {e}. Stopping camera thread.");
-                    return;
-                }
-            };
-
-            if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
-                eprintln!("Camera is not open. Stopping camera thread.");
-                return;
-            }
-            if cam
-                .set(videoio::CAP_PROP_FRAME_WIDTH, config.media.frame_width)
-                .is_err()
-            {
-                eprintln!("Failed to set camera width. Stopping camera thread.");
-                return;
-            }
-            if cam
-                .set(videoio::CAP_PROP_FRAME_HEIGHT, config.media.frame_height)
-                .is_err()
-            {
-                eprintln!("Failed to set camera height. Stopping camera thread.");
-                return;
-            }
-
-            let mut mat = Mat::default();
-            let mut rgb = Mat::default();
-
-            let frame_duration = Duration::from_millis(((1000f32)/ config.media.frame_rate) as u64);
-
-            while running.load(std::sync::atomic::Ordering::SeqCst) {
+            while running.load(SeqCst) {
                 if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
                     eprintln!("Failed to read camera frame.");
                     continue;
@@ -117,7 +105,8 @@ impl Camera {
                     &mat,
                     &mut rgb,
                     imgproc::COLOR_BGR2RGB,
-                    0
+                    0,
+                    core::AlgorithmHint::ALGO_HINT_DEFAULT
                 )
                 .is_err()
                 {
@@ -142,8 +131,6 @@ impl Camera {
                 if tx.send(frame).is_err() {
                     continue;
                 }
-
-                thread::sleep(frame_duration);
             }
         });
         Ok(rx)
@@ -152,7 +139,7 @@ impl Camera {
     /// Stop the capture thread by clearing the running flag. The
     /// capture thread will observe this and exit shortly.
     fn stop_internal(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running.store(false, SeqCst);
     }
 }
 

@@ -240,8 +240,14 @@ impl OperatingServer {
         to_usr: String,
         offer_sdp: SessionDescriptionProtocol,
     ) -> ServerResponse {
+
         self.logger
             .info(&format!("Call request from {from_usr} to {to_usr}"));
+
+        let stream = match get_stream_from_user(to_usr.clone(), &self.users) {
+            Ok(stream) => stream,
+            Err(e) => return ServerResponse::CallRequestError(e.to_string()),
+        };
 
         let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
@@ -280,6 +286,12 @@ impl OperatingServer {
         from_usr_data.update_status(UserStatus::Occupied(to_usr.clone()));
         to_usr_data.update_status(UserStatus::Occupied(from_usr.clone()));
 
+        {
+            let mut users = self.users.write().unwrap();
+            users.insert(to_usr_data.username.clone(), to_usr_data);
+            users.insert(from_usr_data.username.clone(), from_usr_data);
+        }
+
         notify_status_update(
             &self.users,
             from_usr.clone(),
@@ -293,38 +305,38 @@ impl OperatingServer {
             &self.logger,
         );
 
-        {
-            let mut users = self.users.write().unwrap();
-            users.insert(to_usr_data.username.clone(), to_usr_data);
-            users.insert(from_usr_data.username.clone(), from_usr_data);
-        }
+        let msg = ServerMessage::CallIncoming { from: from_usr, offer_sdp };
+        send_message(&stream, &msg);
 
-        let ans = match get_answer_from_peer(
-            from_usr.clone(),
-            to_usr.clone(),
-            offer_sdp,
-            &self.users,
-            &self.logger,
-        ) {
-            Ok(answer) => answer,
-            Err(err_event) => {
-                self.logger.error(&format!(
-                    "Failed to get answer from peer {to_usr}: {err_event}"
-                ));
-                return ServerResponse::Error(err_event.to_string());
-            }
-        };
 
-        match ans {
-            ClientResponse::CallAccept { sdp_answer } => {
-                self.call_accept(to_usr, from_usr, sdp_answer)
-            }
-            ClientResponse::CallReject => self.call_reject(to_usr, from_usr),
-            _ => {
-                self.logger.warn("Invalid answer received from peer");
-                ServerResponse::Error("Invalid answer".to_string())
-            }
-        }
+        ServerResponse::CallRequestOk
+
+        // let ans = match get_answer_from_peer(
+        //     from_usr.clone(),
+        //     to_usr.clone(),
+        //     offer_sdp,
+        //     &self.users,
+        //     &self.logger,
+        // ) {
+        //     Ok(answer) => answer,
+        //     Err(err_event) => {
+        //         self.logger.error(&format!(
+        //             "Failed to get answer from peer {to_usr}: {err_event}"
+        //         ));
+        //         return ServerResponse::Error(err_event.to_string());
+        //     }
+        // };
+        //
+        // match ans {
+        //     ClientResponse::CallAccept { sdp_answer } => {
+        //         self.call_accept(to_usr, from_usr, sdp_answer)
+        //     }
+        //     ClientResponse::CallReject => self.call_reject(to_usr, from_usr),
+        //     _ => {
+        //         self.logger.warn("Invalid answer received from peer");
+        //         ServerResponse::Error("Invalid answer".to_string())
+        //     }
+        // }
     }
 
     /// Handles a positive call answer.
@@ -342,38 +354,41 @@ impl OperatingServer {
         to_usr: String,
         sdp_answer: SessionDescriptionProtocol,
     ) -> ServerResponse {
-        let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
-            Ok(data) => data,
-            Err(err_event) => return ServerResponse::Error(err_event),
+
+        let stream = match get_stream_from_user(to_usr.clone(), &self.users) {
+            Ok(stream) => stream,
+            Err(e) => return ServerResponse::CallAcceptError(e.to_string()),
         };
 
-        let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
+        let from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
-            Err(err_event) => return ServerResponse::Error(err_event),
+            Err(err_event) => return ServerResponse::CallAcceptError(err_event),
+        };
+
+        let to_usr_data = match get_user_data(&to_usr, &self.users) {
+            Ok(data) => data,
+            Err(err_event) => return ServerResponse::CallAcceptError(err_event),
         };
 
         if from_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
-            return ServerResponse::Error(ServerError::UserNotAvailable(from_usr).to_string());
+            return ServerResponse::CallAcceptError(ServerError::UserNotAvailable(from_usr).to_string());
         }
 
         if to_usr_data.status != UserStatus::Occupied(from_usr.clone()) {
-            return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
-        }
-
-        from_usr_data.update_status(UserStatus::Occupied(to_usr_data.username.clone()));
-        to_usr_data.update_status(UserStatus::Occupied(from_usr_data.username.clone()));
-
-        {
-            let mut users = self.users.write().unwrap();
-            users.insert(to_usr_data.username.clone(), to_usr_data);
-            users.insert(from_usr_data.username.clone(), from_usr_data);
+            return ServerResponse::CallAcceptError(ServerError::UserNotAvailable(to_usr).to_string());
         }
 
         self.logger.info(&format!(
             "Call accepted: {from_usr} and {to_usr} are now OCCUPIED"
         ));
 
-        ServerResponse::CallAccepted { sdp_answer }
+        let msg = ServerMessage::CallAccepted {
+            sdp_answer
+        };
+
+        send_message(&stream, &msg);
+
+        ServerResponse::CallAcceptOk
     }
 
     /// Handles a call rejection.
@@ -381,23 +396,33 @@ impl OperatingServer {
     /// Both users must be `Available`; otherwise an error is returned.
     ///
     /// No state change occurs — both users remain `Available`.
-    pub fn call_reject(&mut self, from_usr: String, to_usr: String) -> ServerResponse {
+    pub fn call_reject(
+        &mut self,
+        from_usr: String,
+        to_usr: String
+    ) -> ServerResponse {
+
+        let stream = match get_stream_from_user(to_usr.clone(), &self.users) {
+            Ok(stream) => stream,
+            Err(e) => return ServerResponse::CallRejectError(e.to_string()),
+        };
+
         let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
-            Err(err_event) => return ServerResponse::Error(err_event),
+            Err(err_event) => return ServerResponse::CallRejectError(err_event),
         };
 
         let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
             Ok(data) => data,
-            Err(err_event) => return ServerResponse::Error(err_event),
+            Err(err_event) => return ServerResponse::CallRejectError(err_event),
         };
 
         if from_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
-            return ServerResponse::Error(ServerError::UserNotAvailable(from_usr).to_string());
+            return ServerResponse::CallRejectError(ServerError::UserNotAvailable(from_usr).to_string());
         }
 
         if to_usr_data.status != UserStatus::Occupied(from_usr.clone()) {
-            return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
+            return ServerResponse::CallRejectError(ServerError::UserNotAvailable(to_usr).to_string());
         }
 
         from_usr_data.update_status(UserStatus::Available);
@@ -424,7 +449,11 @@ impl OperatingServer {
 
         self.logger
             .warn(&format!("Call from {from_usr} rejected by {to_usr}"));
-        ServerResponse::CallRejected
+
+        let msg = ServerMessage::CallRejected;
+        send_message(&stream, &msg);
+
+        ServerResponse::CallRejectOk
     }
 
     /// Terminates an active call for the given user.
@@ -464,6 +493,7 @@ impl OperatingServer {
         );
         self.logger
             .info(&format!("Call hangup requested by {user}"));
+
         ServerResponse::CallHangUpOk
     }
 

@@ -10,9 +10,15 @@ pub enum ServerMessage {
         offer_sdp: SessionDescriptionProtocol,
     },
 
-    Error(String),
+    CallAccepted {
+        sdp_answer: SessionDescriptionProtocol,
+    },
+
+    CallRejected,
 
     UserStatusUpdate(String, UserStatus),
+
+    Error(String),
 }
 
 impl ServerMessage {
@@ -20,13 +26,16 @@ impl ServerMessage {
     pub fn to_bytes(&self) -> Vec<u8> {
         let s = match self {
             Self::UsernameRequest => "USERNAMEREQUEST".to_string(),
-            Self::CallIncoming { from, offer_sdp } => {
-                format!("CALLINCOMING|{from}|{offer_sdp}")
-            }
+            
+            Self::CallIncoming { from, offer_sdp } => format!("CALLINCOMING|{from}|{offer_sdp}"),
+            
+            Self::CallAccepted { sdp_answer } => format!("CALLACCEPTED|{sdp_answer}"),
+            
+            Self::CallRejected => "CALLREJECTED".to_string(),
+            
+            Self::UserStatusUpdate(user, status) => format!("USERSTATE|{user}|{status}"),
+            
             Self::Error(msg) => format!("ERROR|{msg}"),
-            Self::UserStatusUpdate(user, status) => {
-                format!("USERSTATE|{user}|{status}")
-            }
         };
 
         let mut bytes = s.into_bytes();
@@ -41,17 +50,25 @@ impl ServerMessage {
 
         match parts[0] {
             "USERNAMEREQUEST" if parts.len() == 1 => Some(Self::UsernameRequest),
+            
             "CALLINCOMING" if parts.len() == 3 => Some(Self::CallIncoming {
                 from: parts[1].into(),
                 offer_sdp: parts[2].to_string().parse().ok()?,
             }),
-
-            "ERROR" if parts.len() == 2 => Some(Self::Error(parts[1].into())),
-
+            
+            "CALLACCEPTED" if parts.len() == 2 => Some(Self::CallAccepted {
+                sdp_answer: parts[1].parse().ok()?,
+            }),
+            
+            "CALLREJECTED" if parts.len() == 1 => Some(Self::CallRejected),
+            
             "USERSTATE" if parts.len() == 3 => Some(Self::UserStatusUpdate(
                 parts[1].into(),
                 UserStatus::from_bytes(parts[2].as_ref())?,
             )),
+            
+            "ERROR" if parts.len() == 2 => Some(Self::Error(parts[1].into())),
+
 
             _ => None,
         }

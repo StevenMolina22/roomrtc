@@ -89,8 +89,8 @@ impl Controller {
             to: peer_username.clone(),
         };
         match send_message(msg, &mut self.client_server_stream)? {
-            ServerResponse::CallAccepted { sdp_answer } => {
-                self.logger.info("Call accepted by peer");
+            ServerResponse::CallRequestOk => {
+                self.logger.info("Call request ok");
                 self.call_session
                     .process_answer(&sdp_answer)
                     .map_err(|e| Error::MapError(e.to_string()))?;
@@ -102,8 +102,7 @@ impl Controller {
                 self.logger.info("Joining call...");
                 self.join_call()
             }
-            ServerResponse::CallRejected => Err(Error::CallRefused),
-            ServerResponse::Error(e) => Err(Error::CallError(e)),
+            ServerResponse::CallRequestError(e) => Err(Error::CallError(e)),
             _ => Err(Error::BadResponse),
         }
     }
@@ -147,13 +146,15 @@ impl Controller {
 
     pub fn accept_call(
         &mut self,
+        to_usr: String,
         offer_sdp: &SessionDescriptionProtocol,
     ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         let sdp_answer = self
             .call_session
             .process_offer(offer_sdp)
             .map_err(|e| Error::MapError(e.to_string()))?;
-        let response = ClientResponse::CallAccept { sdp_answer };
+        let token = self.get_token()?;
+        let msg = ClientMessage::CallAccept { from_usr: token, to_usr, sdp_answer };
 
         self.give_response_to_thread(response)?;
 
@@ -441,6 +442,18 @@ fn get_response_for_server_message(
                 Ok(response) => Ok(Some(response)),
                 Err(e) => Err(Error::MapError(e.to_string())),
             }
+        }
+        ServerMessage::CallAccepted {sdp_answer} => {
+            if let Err(e) = event_tx.send(AppEvent::CallAccepted(sdp_answer)) {
+                return Err(Error::MapError(e.to_string()));
+            }
+            Ok(None)
+        }
+        ServerMessage::CallRejected => {
+            if let Err(e) = event_tx.send(AppEvent::CallRejected) {
+                return Err(Error::MapError(e.to_string()));
+            }
+            Ok(None)
         }
         ServerMessage::Error(e) => {
             if let Err(e) = event_tx.send(AppEvent::Error(e)) {

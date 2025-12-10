@@ -106,21 +106,37 @@ impl UserHandler {
     /// Returns a `ServerResponse` that is sent back to the client.
     fn handle_client_message(&mut self, event: ClientMessage) -> ServerResponse {
         match event {
-            ClientMessage::LogIn { username, password } => {
-                self.op_server.login_user(username, password)
-            }
+            ClientMessage::LogIn { 
+                username, 
+                password 
+            } => self.op_server.login_user(username, password),
 
-            ClientMessage::SignUp { username, password } => {
-                self.op_server.signup_user(username, password)
-            }
+            ClientMessage::SignUp { 
+                username, 
+                password 
+            } => self.op_server.signup_user(username, password),
+            
 
-            ClientMessage::LogOut { token } => self.op_server.logout_user(token),
+            ClientMessage::LogOut { 
+                token 
+            } => self.op_server.logout_user(token),
 
             ClientMessage::CallRequest {
                 token,
                 offer_sdp,
                 to,
             } => self.op_server.call_request(token, to, offer_sdp),
+            
+            ClientMessage::CallAccept { 
+                from_usr, 
+                to_usr, 
+                sdp_answer 
+            } => self.op_server.call_accept(from_usr, to_usr, sdp_answer),
+            
+            ClientMessage::CallReject {
+                from_usr,
+                to_usr,
+            } => self.op_server.call_reject(from_usr, to_usr),
 
             ClientMessage::CallHangup { token } => self.op_server.call_hangup(token),
         }

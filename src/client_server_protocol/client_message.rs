@@ -20,6 +20,17 @@ pub enum ClientMessage {
         offer_sdp: SessionDescriptionProtocol,
         to: String,
     },
+    
+    CallAccept {
+        from_usr: String,
+        to_usr: String,
+        sdp_answer: SessionDescriptionProtocol,
+    },
+    
+    CallReject {
+        from_usr: String,
+        to_usr: String
+    },
 
     CallHangup {
         token: String,
@@ -41,6 +52,12 @@ impl ClientMessage {
                 offer_sdp,
                 to,
             } => format!("CALLREQ|{token}|{offer_sdp}|{to}"),
+            
+            Self::CallAccept { from_usr, to_usr, sdp_answer } => 
+                format!("CALLACC|{from_usr}|{to_usr}|{sdp_answer}"),
+            
+            Self::CallReject { from_usr, to_usr } => 
+                format!("CALLREJECT|{from_usr}|{to_usr}"),
 
             Self::CallHangup { token } => format!("CALLHANG|{token}"),
         };
@@ -75,7 +92,18 @@ impl ClientMessage {
                 offer_sdp: parts[2].parse().ok()?,
                 to: parts[3].into(),
             }),
-
+            
+            "CALLACC" if parts.len() == 4 => Some(Self::CallAccept {
+                from_usr: parts[1].into(),
+                to_usr: parts[2].into(),
+                sdp_answer: parts[3].parse().ok()?,
+            }),
+            
+            "CALLREJECT" if parts.len() == 3 => Some(Self::CallReject {
+                from_usr: parts[1].into(),
+                to_usr: parts[2].into(),
+            }),
+            
             "CALLHANG" if parts.len() == 2 => Some(Self::CallHangup {
                 token: parts[1].into(),
             }),

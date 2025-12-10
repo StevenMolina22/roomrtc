@@ -396,7 +396,7 @@ impl OperatingServer {
             return ServerResponse::Error(ServerError::UserNotAvailable(from_usr).to_string());
         }
 
-        if to_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
+        if to_usr_data.status != UserStatus::Occupied(from_usr.clone()) {
             return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
         }
 
@@ -671,35 +671,33 @@ fn notify_status_update(
 ) {
     let users = users.clone();
     let logger = logger.clone();
-    thread::spawn(move || {
-        logger.debug(&format!(
-            "Broadcasting status update for {username}: {status:?}"
-        ));
-        let mut streams: Vec<Arc<Mutex<StreamOwned<ServerConnection, TcpStream>>>> = Vec::new();
-        {
-            let users_guard = match users.read() {
-                Ok(guard) => guard,
-                Err(e) => {
-                    logger.error(&format!(
-                        "Failed to acquire users lock for status update: {e}"
-                    ));
-                    return;
-                }
-            };
-            for (name, user_data) in users_guard.iter() {
-                if *name == username {
-                    continue;
-                }
-                if let Some(stream_arc) = &user_data.server_client_stream {
-                    streams.push(stream_arc.clone());
-                }
+    logger.debug(&format!(
+        "Broadcasting status update for {username}: {status:?}"
+    ));
+    let mut streams: Vec<Arc<Mutex<StreamOwned<ServerConnection, TcpStream>>>> = Vec::new();
+    {
+        let users_guard = match users.read() {
+            Ok(guard) => guard,
+            Err(e) => {
+                logger.error(&format!(
+                    "Failed to acquire users lock for status update: {e}"
+                ));
+                return;
+            }
+        };
+        for (name, user_data) in users_guard.iter() {
+            if *name == username {
+                continue;
+            }
+            if let Some(stream_arc) = &user_data.server_client_stream {
+                streams.push(stream_arc.clone());
             }
         }
-        let msg = ServerMessage::UserStatusUpdate(username.clone(), status);
-        for stream in streams {
-            send_message(&stream, &msg);
-        }
-    });
+    }
+    let msg = ServerMessage::UserStatusUpdate(username.clone(), status);
+    for stream in streams {
+        send_message(&stream, &msg);
+    }
 }
 
 fn setup_logger() -> Logger {

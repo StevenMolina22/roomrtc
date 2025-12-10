@@ -3,9 +3,11 @@ use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
 use opencv::{core, imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
+use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
+use crate::clock::Clock;
 
 pub trait FrameSource: Send {
     /// Start the capture thread.
@@ -13,7 +15,7 @@ pub trait FrameSource: Send {
     fn start(&mut self) -> Result<Receiver<Frame>, Error>;
 
     /// Signal the capture thread to stop.
-    fn stop(&self) -> Result<(), Error>;
+    fn stop(&self);
 }
 
 /// A camera that runs a capture thread and produces
@@ -25,11 +27,13 @@ pub trait FrameSource: Send {
 /// produce incremental frame ids.
 pub struct Camera {
     /// Flag used to signal the capture thread to keep running.
-    running: Arc<RwLock<bool>>,
+    running: Arc<AtomicBool>,
 
-    /// Monotonic counter used to assign `Frame.id` values.
-    frame_id: Arc<RwLock<usize>>,
+    /// Config file 
     config: Arc<Config>,
+    
+    /// Clock of the program
+    clock: Arc<Clock>
 }
 
 impl Camera {
@@ -39,11 +43,11 @@ impl Camera {
     /// - `media_config`: media capture configuration (camera index,
     ///   frame size and frame rate).
     #[must_use]
-    pub fn new(media_config: &Arc<Config>) -> Self {
+    pub fn new(clock: Arc<Clock>, media_config: &Arc<Config>) -> Self {
         Self {
-            running: Arc::new(RwLock::new(false)),
-            frame_id: Arc::new(RwLock::new(0)),
+            running: Arc::new(AtomicBool::new(false)),
             config: Arc::clone(media_config),
+            clock
         }
     }
 
@@ -58,11 +62,11 @@ impl Camera {
     fn start_internal(&mut self) -> Result<Receiver<Frame>, Error> {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
-        *running.write().map_err(|_| Error::PoisonedLock)? = true;
-        let frame_id = self.frame_id.clone();
-
         let config = self.config.clone();
-
+        let clock = self.clock.clone();
+        
+        running.store(true, std::sync::atomic::Ordering::SeqCst);
+        
         thread::spawn(move || {
             let camera_index = if let Ok(index) = i32::try_from(config.media.camera_index) {
                 index
@@ -101,17 +105,9 @@ impl Camera {
             let mut mat = Mat::default();
             let mut rgb = Mat::default();
 
-            let frame_duration = Duration::from_millis(1000 / u64::from(config.media.frame_rate));
+            let frame_duration = Duration::from_millis(((1000f32)/ config.media.frame_rate) as u64);
 
-            while {
-                match running.read() {
-                    Ok(guard) => *guard,
-                    Err(e) => {
-                        eprintln!("Failed to read running flag: {e}");
-                        false
-                    }
-                }
-            } {
+            while running.load(std::sync::atomic::Ordering::SeqCst) {
                 if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
                     eprintln!("Failed to read camera frame.");
                     continue;
@@ -135,43 +131,28 @@ impl Camera {
                     continue;
                 };
 
-                let id = {
-                    let mut id_lock = if let Ok(lock) = frame_id.write() {
-                        lock
-                    } else {
-                        eprintln!("Failed to acquire frame ID lock.");
-                        continue;
-                    };
-                    let id = *id_lock;
-                    *id_lock = id + 1;
-                    id
-                };
-
                 #[allow(clippy::cast_sign_loss)]
                 let frame = Frame {
                     data,
                     width: rgb.cols() as usize,
                     height: rgb.rows() as usize,
-                    id: id as u64,
+                    frame_time: clock.now()
                 };
 
                 if tx.send(frame).is_err() {
-                    break;
+                    continue;
                 }
 
                 thread::sleep(frame_duration);
             }
         });
-
         Ok(rx)
     }
 
     /// Stop the capture thread by clearing the running flag. The
     /// capture thread will observe this and exit shortly.
-    fn stop_internal(&self) -> Result<(), Error> {
-        let mut run = self.running.write().map_err(|_| Error::PoisonedLock)?;
-        *run = false;
-        Ok(())
+    fn stop_internal(&self) {
+        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -180,7 +161,7 @@ impl FrameSource for Camera {
         self.start_internal()
     }
 
-    fn stop(&self) -> Result<(), Error> {
+    fn stop(&self) {
         self.stop_internal()
     }
 }

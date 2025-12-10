@@ -55,10 +55,10 @@ pub struct MediaConfig {
     pub frame_height: f64,
 
     /// Capture frame rate.
-    pub frame_rate: u32,
+    pub frame_rate: f32,
 
     /// H.264 IDR interval (keyframe frequency) in frames.
-    pub h264_idr_interval: usize,
+    pub h264_idr_interval: u32,
 
     /// Maximum size (bytes) of RTP payload chunks.
     pub rtp_max_chunk_size: usize,
@@ -83,6 +83,9 @@ pub struct MediaConfig {
 
     /// SDP media protocol (e.g. "RTP/AVP").
     pub media_protocol: String,
+
+    /// Jitter buffer size
+    pub jitter_buffer_size: usize
 }
 
 #[derive(Debug, Clone)]
@@ -276,6 +279,10 @@ impl Config {
                     .get("media_protocol")
                     .ok_or("Missing media_protocol")?
                     .to_string(),
+                jitter_buffer_size: media_section
+                    .get("jitter_buffer_size")
+                    .ok_or("Missing jitter_buffer_size")?
+                    .parse()?,
             },
             rtcp: RtcpConfig {
                 report_period_millis: rtcp_section

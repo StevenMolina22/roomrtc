@@ -71,12 +71,11 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     break;
                 }
             }
-
-            if connected.load(Ordering::SeqCst) {
-                connected.store(false, Ordering::SeqCst);
-                event_tx.send(AppEvent::CallEnded);
-            }
-            logger.info("RtpSender thread terminated");
+            
+            // if connected.load(Ordering::SeqCst) {
+            //     connected.store(false, Ordering::SeqCst);
+            //     event_tx.send(AppEvent::CallEnded);
+            // }
         });
 
         Ok(tx)

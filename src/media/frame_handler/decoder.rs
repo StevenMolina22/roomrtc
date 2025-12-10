@@ -1,3 +1,4 @@
+use std::time::Instant;
 use super::error::FrameError as Error;
 use openh264::decoder::Decoder as H264Decoder;
 use openh264::formats::YUVSource;
@@ -40,17 +41,38 @@ impl Decoder {
     /// - [`Error::DecodingError`] — if decoding fails due to invalid or
     ///   corrupted data.
     pub fn decode_frame(&mut self, encoded_data: &[u8]) -> Result<(Vec<u8>, usize, usize), Error> {
+        let clock = Instant::now();
         match self.decoder.decode(encoded_data) {
             Ok(Some(yuv)) => {
                 let (width, height) = yuv.dimensions();
+                let (y_stride, u_stride, v_stride)  = yuv.strides();
 
-                let mut rgb8_data = vec![0u8; width * height * 3];
-                yuv.write_rgb8(&mut rgb8_data);
+                let yuv_img = yuv::YuvPlanarImage {
+                    y_plane: yuv.y(),
+                    y_stride: y_stride as u32,
+                    u_plane: yuv.u(),
+                    u_stride: u_stride as u32,
+                    v_plane: yuv.v(),
+                    v_stride: v_stride as u32,
+                    width: width as u32,
+                    height: height as u32,
+                };
 
-                Ok((rgb8_data, width, height))
+                let mut rgb = vec![0u8; width * height * 3];
+
+                yuv::yuv420_to_rgb(
+                    &yuv_img,
+                    &mut rgb,
+                    (width * 3) as u32,
+                    yuv::YuvRange::Limited,
+                    yuv::YuvStandardMatrix::Bt709
+                ).map_err(|e| Error::DecodingError(e.to_string()))?;
+
+                println!("\nDECODE TIME {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", clock.elapsed().as_millis());
+                Ok((rgb, width, height))
             }
             Ok(None) => Err(Error::EmptyFrameError),
-            Err(_) => Err(Error::DecodingError),
+            Err(e) => Err(Error::DecodingError(e.to_string())),
         }
     }
 }

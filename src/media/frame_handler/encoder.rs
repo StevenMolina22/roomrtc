@@ -1,8 +1,11 @@
+use std::time::Instant;
 use crate::config::MediaConfig;
+use crate::media::frame_handler::YuvImgSource;
 
 use super::{EncodedFrame, error::FrameError as Error, frame::Frame};
-use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
-use openh264::formats::{RgbSliceU8, YUVBuffer};
+use openh264::encoder::{BitRate, Complexity, EncodedBitStream, Encoder as H264Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode, UsageType};
+use openh264::OpenH264API;
+use yuv::{YuvChromaSubsampling, YuvConversionMode, YuvPlanarImageMut, YuvRange, YuvStandardMatrix};
 
 /// A basic H.264 video encoder using the `OpenH264` library.
 ///
@@ -14,8 +17,6 @@ use openh264::formats::{RgbSliceU8, YUVBuffer};
 pub struct Encoder {
     encoder: H264Encoder,
     max_chunk_size: usize,
-    frame_count: usize,
-    key_frame_interval: usize,
 }
 
 impl Encoder {
@@ -30,13 +31,21 @@ impl Encoder {
     /// Returns [`Error::EncoderInitializationError`] if the encoder cannot
     /// be created by the `OpenH264` library.
     pub fn new(media_config: &MediaConfig) -> Result<Self, Error> {
-        let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
+        let config = EncoderConfig::new()
+            .bitrate(BitRate::from_bps(2_500_000))
+            .max_frame_rate(FrameRate::from_hz(media_config.frame_rate))
+            .usage_type(UsageType::CameraVideoRealTime)
+            .intra_frame_period(IntraFramePeriod::from_num_frames(media_config.h264_idr_interval))
+            .complexity(Complexity::Low)
+            .rate_control_mode(RateControlMode::Off)
+            .skip_frames(true);
+
+        let encoder = H264Encoder::with_api_config(OpenH264API::from_source(), config)
+            .map_err(|_| Error::EncoderInitializationError)?;
 
         Ok(Self {
             encoder,
             max_chunk_size: media_config.rtp_max_chunk_size,
-            frame_count: 0,
-            key_frame_interval: 18,
         })
     }
 
@@ -51,26 +60,43 @@ impl Encoder {
     ///
     /// - [`Error::EncodingError`] — if encoding fails due to invalid frame data.
     pub fn encode_frame(&mut self, frame: &Frame) -> Result<EncodedFrame, Error> {
-        let rgb_source = RgbSliceU8::new(&frame.data, (frame.width, frame.height));
-        let yuv = YUVBuffer::from_rgb8_source(rgb_source);
+        let clock = Instant::now();
+        let mut yuv_img = YuvPlanarImageMut::alloc(
+            frame.width as u32,
+            frame.height as u32,
+            YuvChromaSubsampling::Yuv420
+        );
 
-        self.frame_count += 1;
+        yuv::rgb_to_yuv420(
+            &mut yuv_img,
+            &frame.data,
+            (frame.width as u32) * 3,
+            YuvRange::Limited,
+            YuvStandardMatrix::Bt709,
+            YuvConversionMode::Balanced,
+        ).map_err(|e| Error::EncodingError(e.to_string()))?;
 
-        if self.frame_count.is_multiple_of(self.key_frame_interval) {
-            self.encoder.force_intra_frame();
-        }
+        let yuv_source = YuvImgSource { img: &yuv_img };
+        println!("\nPRE ENCODE TIME {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", clock.elapsed().as_millis());
 
+        let clock = Instant::now();
         let nalus = self
             .encoder
-            .encode(&yuv)
-            .map_err(|_| Error::EncodingError)?;
+            .encode(&yuv_source)
+            .map_err(|e| Error::EncodingError(e.to_string()))?;
+
+        println!("\nENCODE TIME {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", clock.elapsed().as_millis());
+
         let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
+        let frame_type = nalus.frame_type();
+        let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
 
         Ok(EncodedFrame {
-            id: frame.id,
             chunks,
+            frame_time: frame.frame_time,
             width: frame.width,
             height: frame.height,
+            is_i_frame,
         })
     }
 }

@@ -304,3 +304,114 @@ fn get_server_ip() -> Result<String, Error> {
 
     Err(Error::IPNotFound(String::new()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use std::path::Path;
+
+    fn with_temp_file<F>(content: &str, test_fn: F)
+    where
+        F: FnOnce(&String),
+    {
+        let filename = format!("test_users_{}.txt", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0));
+        
+        if let Ok(mut file) = File::create(&filename) {
+            let _ = file.write_all(content.as_bytes());
+        }
+
+        test_fn(&filename);
+
+        let _ = fs::remove_file(filename);
+    }
+
+
+    #[test]
+    fn test_load_users_valid_entries() {
+        let content = "alice:1234\nbob:secret\ncharlie:pass";
+        
+        with_temp_file(content, |filename| {
+            let result = load_users_from_mem(filename);
+            
+            match result {
+                Ok(users) => {
+                    assert_eq!(users.len(), 3);
+                    
+                    if let Some(u) = users.get("alice") {
+                        assert_eq!(u.password, "1234");
+                        assert_eq!(u.status, UserStatus::Offline);
+                    } else {
+                        assert!(false, "Falta el usuario alice");
+                    }
+
+                    if let Some(u) = users.get("bob") {
+                        assert_eq!(u.password, "secret");
+                    } else {
+                        assert!(false, "Falta el usuario bob");
+                    }
+                },
+                Err(e) => assert!(false, "Falló la carga: {}", e),
+            }
+        });
+    }
+
+    #[test]
+    fn test_load_users_ignores_malformed_lines() {
+        let content = "valid:pass\nmalformed\n\ncomplex:pass:word";
+
+        with_temp_file(content, |filename| {
+            let result = load_users_from_mem(filename);
+
+            if let Ok(users) = result {
+                assert_eq!(users.len(), 2);
+                assert!(users.contains_key("valid"));
+                
+                if let Some(u) = users.get("complex") {
+                    assert_eq!(u.password, "pass:word"); 
+                }
+            } else {
+                assert!(false, "No debería fallar por líneas mal formadas, solo ignorarlas");
+            }
+        });
+    }
+
+    #[test]
+    fn test_load_users_creates_file_if_missing() {
+        let filename = "test_users_missing.txt";
+        let _ = fs::remove_file(filename);
+
+        let result = load_users_from_mem(&filename.to_string());
+
+        match result {
+            Ok(users) => {
+                assert!(users.is_empty());
+                assert!(Path::new(filename).exists(), "El archivo debería haber sido creado");
+            },
+            Err(e) => assert!(false, "Error inesperado: {}", e),
+        }
+
+        let _ = fs::remove_file(filename);
+    }
+
+
+    #[test]
+    fn test_get_server_ip_returns_valid_result() {
+        let result = get_server_ip();
+        
+        match result {
+            Ok(ip) => {
+                assert!(!ip.is_empty());
+                assert!(ip.contains('.'));
+            },
+            Err(Error::IPNotFound(_)) => {
+                assert!(true);
+            },
+            Err(e) => assert!(false, "Error desconocido obteniendo IP: {}", e),
+        }
+    }
+}

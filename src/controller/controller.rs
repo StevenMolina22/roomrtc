@@ -134,7 +134,7 @@ impl Controller {
     }
 
     pub fn stop_media_components(&mut self) -> Result<(), Error> {
-        self.media_pipeline.stop().map_err(|e| Error::MapError(e.to_string()))?;
+        self.media_pipeline.stop();
         self.transport
             .stop()
             .map_err(|e| Error::MapError(e.to_string()))

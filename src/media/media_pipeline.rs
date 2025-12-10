@@ -48,11 +48,9 @@ impl MediaPipeline {
         Ok((local_frame_rx, remote_frame_rx))
     }
 
-    pub fn stop(&self) -> Result<(), Error> {
+    pub fn stop(&self) {
         self.logger.info("Stopping MediaPipeline...");
-        self.camera
-            .stop()
-            .map_err(|e| Error::MapError(e.to_string()))
+        self.camera.stop();
     }
 
     fn start_remote_frame_pipeline(
@@ -194,8 +192,8 @@ fn send_encoded_frame(
     encoded_frame: EncodedFrame,
     rtp_tx: &Sender<RtpPacket>,
     ssrc: u32,
-    sequence_number: &mut u64,
     connected: &Arc<AtomicBool>,
+    sequence_number: &mut u64,
     config: &Arc<Config>,
 ) -> Result<(), Error> {
     if !connected.load(Ordering::SeqCst) {

@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
-use opencv::{core, imgproc, prelude::*, videoio};
+use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc};
 use std::sync::atomic::AtomicBool;
@@ -117,8 +117,7 @@ impl Camera {
                     &mat,
                     &mut rgb,
                     imgproc::COLOR_BGR2RGB,
-                    0,
-                    core::AlgorithmHint::ALGO_HINT_DEFAULT
+                    0
                 )
                 .is_err()
                 {

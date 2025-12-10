@@ -42,7 +42,6 @@ pub struct RoomRTCApp {
     remote_texture: Option<TextureHandle>,
 
     // Error handling
-    fatal_error_msg: Option<String>,
     error_msg: Option<String>,
     warning_msg: Option<String>,
     logger: Logger,
@@ -84,7 +83,6 @@ impl RoomRTCApp {
             password_buff: String::new(),
             local_texture: None,
             remote_texture: None,
-            fatal_error_msg: None,
             error_msg: None,
             warning_msg: None,
             logger,
@@ -101,7 +99,6 @@ impl eframe::App for RoomRTCApp {
                     Ok(event) => self.handle_event(event),
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        self.fatal_error_msg = Some(Error::ControllerDisconnected.to_string());
                         self.view = View::FatalError;
                         break;
                     }
@@ -220,8 +217,7 @@ impl RoomRTCApp {
             ui.horizontal(|ui| {
                 let username = match self.controller.get_username() {
                     Ok(username) => username,
-                    Err(e) => {
-                        self.fatal_error_msg = Some(e.to_string());
+                    Err(_) => {
                         self.view = View::FatalError;
                         return;
                     }
@@ -234,8 +230,7 @@ impl RoomRTCApp {
                         Ok(()) => {
                             self.view = View::Welcome;
                         }
-                        Err(e) => {
-                            self.fatal_error_msg = Some(e.to_string());
+                        Err(_) => {
                             self.view = View::Error;
                         }
                     }
@@ -251,8 +246,7 @@ impl RoomRTCApp {
 
                     let users_status = match self.controller.get_users_status() {
                         Ok(users_status) => users_status,
-                        Err(e) => {
-                            self.fatal_error_msg = Some(Error::MapError(e.to_string()).to_string());
+                        Err(_) => {
                             self.view = View::FatalError;
                             return;
                         }
@@ -356,8 +350,7 @@ impl RoomRTCApp {
 
             if let Err(e) = self.update_video_textures(ctx) {
                 self.warning_msg = Some(e.to_string());
-                if let Err(e) = self.controller.hang_up() {
-                    self.fatal_error_msg = Some(e.to_string());
+                if let Err(_) = self.controller.hang_up() {
                     self.view = View::FatalError;
                 } else {
                     self.reset_after_call();
@@ -385,8 +378,7 @@ impl RoomRTCApp {
 
             let exit_btn = egui::Button::new("End call").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
-                if let Err(e) = self.controller.hang_up() {
-                    self.fatal_error_msg = Some(e.to_string());
+                if let Err(_) = self.controller.hang_up() {
                     self.view = View::FatalError;
                 } else {
                     self.reset_after_call();
@@ -507,12 +499,8 @@ impl RoomRTCApp {
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
 
-            let error_text = self
-                .fatal_error_msg
-                .as_deref()
-                .unwrap_or("An unknown error occurred");
             ui.label(
-                RichText::new(error_text)
+                RichText::new("An unexpected error occurred")
                     .color(Color32::RED)
                     .font(FontId::proportional(24.0)),
             );
@@ -542,8 +530,7 @@ impl RoomRTCApp {
                 self.view = View::CallIncoming(peer, offer_sdp);
             }
             AppEvent::CallEnded => {
-                if let Err(e) = self.controller.hang_up() {
-                    self.fatal_error_msg = Some(e.to_string());
+                if let Err(_) = self.controller.hang_up() {
                     self.view = View::FatalError;
                 } else {
                     self.view = View::CallEnded;
@@ -551,8 +538,7 @@ impl RoomRTCApp {
                 self.reset_after_call();
             }
             AppEvent::Error(e) => {
-                if let Err(hangup_err) = self.controller.hang_up() {
-                    self.fatal_error_msg = Some(hangup_err.to_string());
+                if let Err(_) = self.controller.hang_up() {
                     self.view = View::FatalError;
                 } else {
                     self.warning_msg = Some(e);
@@ -560,8 +546,7 @@ impl RoomRTCApp {
                 }
                 self.reset_after_call();
             }
-            AppEvent::FatalError(e) => {
-                self.fatal_error_msg = Some(e);
+            AppEvent::FatalError(_) => {
                 self.view = View::FatalError;
             }
         }

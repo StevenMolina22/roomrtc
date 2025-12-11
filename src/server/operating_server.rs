@@ -131,7 +131,13 @@ impl OperatingServer {
         }
 
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!("Failed to acquire users lock during signup: {e}"));
+                    return ServerResponse::SignupError(e.to_string());
+                }
+            };
 
             if users.contains_key(&username) {
                 self.logger.warn(&format!(
@@ -168,7 +174,13 @@ impl OperatingServer {
     pub fn logout_user(&mut self, username: String) -> ServerResponse {
         let status_to_notify;
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!("Failed to acquire users lock during logout: {e}"));
+                    return ServerResponse::LogoutError(e.to_string());
+                }
+            };
             if let Some(user_data) = users.get_mut(&username) {
                 user_data.update_status(UserStatus::Offline);
                 let stream = if let Some(ref stream) = user_data.server_client_stream { stream } else {
@@ -287,7 +299,13 @@ impl OperatingServer {
         to_usr_data.update_status(UserStatus::Occupied(from_usr.clone()));
 
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!("Failed to acquire users lock during call_request inner: {e}"));
+                    return ServerResponse::CallRequestError(e.to_string());
+                }
+            };
             users.insert(to_usr_data.username.clone(), to_usr_data);
             users.insert(from_usr_data.username.clone(), from_usr_data);
         }
@@ -443,7 +461,13 @@ impl OperatingServer {
         );
 
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!("Failed to acquire users lock during call_reject: {e}"));
+                    return ServerResponse::CallRejectError(e.to_string());
+                }
+            };
             users.insert(to_usr_data.username.clone(), to_usr_data);
             users.insert(from_usr_data.username.clone(), from_usr_data);
         }
@@ -469,7 +493,13 @@ impl OperatingServer {
     /// Returns `CallHangUpOk` on success, otherwise an appropriate error.
     pub fn call_hangup(&mut self, user: String) -> ServerResponse {
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!("Failed to acquire users lock during call_hangup: {e}"));
+                    return ServerResponse::CallHangUpError(e.to_string());
+                }
+            };
 
             let data = if let Some(data) = users.get_mut(&user) { data } else {
                 self.logger
@@ -505,7 +535,13 @@ impl OperatingServer {
     /// their current status is.
     pub fn get_clients_for_user(&mut self, own_username: String) -> HashMap<String, UserStatus> {
         let users = {
-            let usr = self.users.read().unwrap();
+            let usr = match self.users.read() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!("Failed to acquire users lock during get_clients_for_user: {e}"));
+                    return HashMap::new();
+                }
+            };
             usr.clone()
         };
 
@@ -544,7 +580,13 @@ impl OperatingServer {
         };
 
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!("Failed to acquire users lock during make_user_offline: {e}"));
+                    return Err(ServerError::MapError(e.to_string()));
+                }
+            };
             let user_data = users
                 .get_mut(username)
                 .ok_or(ServerError::UserNotAvailable(username.to_string()))?;
@@ -617,7 +659,11 @@ fn get_answer_from_peer(
 
     let mut buff = [0u8; 1024];
 
-    let n = match stream.lock().unwrap().read(&mut buff) {
+    let mut stream_guard = match stream.lock() {
+        Ok(guard) => guard,
+        Err(e) => return Err(ServerError::MapError(format!("Failed to lock stream: {e}"))),
+    };
+    let n = match stream_guard.read(&mut buff) {
         Ok(0) => return Err(ServerError::MapError("Connection closed".to_string())),
         Ok(n) => n,
         Err(err) => return Err(ServerError::MapError(err.to_string())),

@@ -137,7 +137,10 @@ impl CentralServer {
                 let thread_logger = logger.context("UserHandler");
 
                 thread::spawn(move || {
-                    let tls_conn = ServerConnection::new(tls_config).unwrap();
+                    let tls_conn = match ServerConnection::new(tls_config) {
+                        Ok(conn) => conn,
+                        Err(_) => return,
+                    };
                     let tls_stream = StreamOwned::new(tls_conn, stream);
 
                     let mut user_handler = UserHandler::new(
@@ -173,7 +176,10 @@ impl CentralServer {
         let users = self.users.clone();
 
         thread::spawn(move || {
-            let listener = TcpListener::bind(sc_addr).unwrap();
+            let listener = match TcpListener::bind(sc_addr) {
+                Ok(l) => l,
+                Err(_) => return,
+            };
 
             for incoming in listener.incoming() {
                 let stream = match incoming {
@@ -185,7 +191,10 @@ impl CentralServer {
                 let users = users.clone();
 
                 thread::spawn(move || {
-                    let tls_conn = ServerConnection::new(tls_config).unwrap();
+                    let tls_conn = match ServerConnection::new(tls_config) {
+                        Ok(conn) => conn,
+                        Err(_) => return,
+                    };
                     let tls_stream = StreamOwned::new(tls_conn, stream);
                     map_stream_to_user(users, tls_stream);
                 });
@@ -234,15 +243,16 @@ fn generate_certs_and_key(
     config: Arc<Config>,
 ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), Error> {
     let mut certs = Vec::new();
-    for item in
-        CertificateDer::pem_file_iter(config.server.server_certification_file.clone()).unwrap()
-    {
+    let cert_iter = CertificateDer::pem_file_iter(config.server.server_certification_file.clone())
+        .map_err(|e| Error::MapError(e.to_string()))?;
+    for item in cert_iter {
         match item {
             Ok(item) => certs.push(item),
             Err(e) => return Err(Error::MapError(e.to_string())),
         }
     }
-    let key = PrivateKeyDer::from_pem_file(config.server.server_private_key_file.clone()).unwrap();
+    let key = PrivateKeyDer::from_pem_file(config.server.server_private_key_file.clone())
+        .map_err(|e| Error::MapError(e.to_string()))?;
 
     Ok((certs, key))
 }
@@ -284,7 +294,10 @@ pub fn map_stream_to_user(
         _ => return,
     };
 
-    let mut users = users.write().unwrap();
+    let mut users = match users.write() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
     if let Some(mut user_data) = users.get(&username).cloned() {
         user_data.update_server_client_stream(stream);
         users.insert(username, user_data);

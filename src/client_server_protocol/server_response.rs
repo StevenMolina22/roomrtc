@@ -183,7 +183,7 @@ impl ServerResponse {
         match parts[0] {
             "LOGINOK" if parts.len() >= 4 => {
                 let token = parts[1].to_string();
-                let address = SocketAddr::from_str(parts[2]).unwrap();
+                let address = SocketAddr::from_str(parts[2]).ok()?;
                 let users_status_list = parts[3];
 
                 let mut users_status = HashMap::new();

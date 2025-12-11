@@ -8,13 +8,12 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize};
 use std::sync::{Arc, Mutex, RwLock};
 
 /// Core server logic for user authentication and call signaling.
 pub struct OperatingServer {
     users: Arc<RwLock<HashMap<String, UserData>>>,
-    users_connected: Arc<AtomicUsize>,
     server_client_socket_address: SocketAddr,
     users_file_path: String,
     username: Option<String>,
@@ -25,7 +24,6 @@ pub struct OperatingServer {
 impl OperatingServer {
     pub const fn new(
         users: Arc<RwLock<HashMap<String, UserData>>>,
-        users_connected: Arc<AtomicUsize>,
         server_client_socket_address: SocketAddr,
         users_file_path: String,
         max_users: usize,
@@ -33,7 +31,6 @@ impl OperatingServer {
     ) -> Self {
         Self {
             users,
-            users_connected,
             server_client_socket_address,
             users_file_path,
             username: None,
@@ -77,14 +74,7 @@ impl OperatingServer {
                     }
 
                     UserStatus::Offline => {
-                        if self.users_connected.load(Ordering::SeqCst) == self.max_users {
-                            return ServerResponse::LoginError(
-                                "Server capacity is full".to_string(),
-                            );
-                        }
                         data.update_status(UserStatus::Available);
-                        self.users_connected.fetch_add(1, Ordering::SeqCst);
-
                         status_to_notify = (username.clone(), UserStatus::Available);
                     }
                 }
@@ -210,12 +200,6 @@ impl OperatingServer {
                         "Failed to shutdown socket during logout for {username}: {e}"
                     ));
                 }
-
-                self.users_connected
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
-                        if v == 0 { Some(0) } else { Some(v - 1) }
-                    })
-                    .ok();
                 status_to_notify = (username.clone(), UserStatus::Offline);
             } else {
                 self.logger
@@ -791,11 +775,9 @@ mod tests {
 
     fn setup() -> OperatingServer {
         let users = setup_users();
-        let users_connected = setup_users_connected(0);
         let logger = setup_logger();
         OperatingServer::new(
             users,
-            users_connected,
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
             128,
@@ -810,13 +792,11 @@ mod tests {
             let data = UserData::new(name.to_string().clone(), passwd.to_string().clone(), status);
             users.insert(name.to_string(), data);
         }
-        let users_connected = setup_users_connected(amount);
 
         let logger = setup_logger();
 
         OperatingServer::new(
             Arc::new(RwLock::new(users)),
-            users_connected,
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
             128,
@@ -931,16 +911,6 @@ mod tests {
             ServerResponse::LoginError(msg) => assert!(msg.contains("not found")),
             _ => panic!("Expected LoginError"),
         }
-    }
-
-    #[test]
-    fn test_login_adds_one_to_users_connected() {
-        let mut op_s = setup();
-
-        op_s.signup_user("alice".into(), "1234".into());
-        let _ = op_s.login_user("alice".into(), "1234".into());
-        let usr = op_s.users_connected.load(Ordering::SeqCst);
-        assert_eq!(usr, 1);
     }
 
     #[test]

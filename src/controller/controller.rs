@@ -127,7 +127,7 @@ impl Controller {
             offer_sdp: self.call_session.get_offer(),
             to: peer_username.to_owned(),
         };
-        match send_message(msg, &mut self.client_server_stream)? {
+        match send_message(msg, &mut self.client_server_stream, &self.event_tx)? {
             ServerResponse::CallRequestOk => Ok(()),
             ServerResponse::CallRequestError(e) => Err(Error::CallError(e)),
             _ => Err(Error::BadResponse),
@@ -175,7 +175,7 @@ impl Controller {
             token: self.get_token()?,
         };
 
-        match send_message(msg, &mut self.client_server_stream)? {
+        match send_message(msg, &mut self.client_server_stream, &self.event_tx)? {
             ServerResponse::CallHangUpOk => {}
             ServerResponse::CallHangUpError(e) => return Err(Error::CallError(e)),
             _ => return Err(Error::BadResponse),
@@ -241,7 +241,7 @@ impl Controller {
         let token = self.get_token()?;
         let msg = ClientMessage::CallAccept { from_usr: token.clone(), to_usr: to_usr.clone(), sdp_answer: sdp_answer.clone() };
 
-        let response = send_message(msg, &mut self.client_server_stream)?;
+        let response = send_message(msg, &mut self.client_server_stream, &self.event_tx)?;
         println!("response: {:?}", response);
 
         match response {
@@ -277,7 +277,7 @@ impl Controller {
             from_usr: token,
             to_usr,
         };
-        match send_message(msg, &mut self.client_server_stream)? {
+        match send_message(msg, &mut self.client_server_stream, &self.event_tx)? {
             ServerResponse::CallRejectOk => {
                 let event = AppEvent::CallRejected;
                 send_event_or_log_out(&self.event_tx, event, &self.logged_in);
@@ -313,7 +313,8 @@ impl Controller {
         
         let (local_to_remote_rtp_tx, 
             remote_to_local_rtp_rx, 
-            connected) = self
+            connected,
+            receiver_metrics) = self
             .transport
             .start(
                 remote_rtp_address,
@@ -330,7 +331,8 @@ impl Controller {
                 local_to_remote_rtp_tx,
                 remote_to_local_rtp_rx,
                 self.event_tx.clone(),
-                connected)
+                connected,
+                receiver_metrics)
             .map_err(|e| Error::MapError(e.to_string()))
     }
 
@@ -352,7 +354,7 @@ impl Controller {
     /// * `Err(Error)` - Registration failed.
     pub fn sign_up(&mut self, username: String, password: String) -> Result<(), Error> {
         let msg = ClientMessage::SignUp { username, password };
-        match send_message(msg, &mut self.client_server_stream)? {
+        match send_message(msg, &mut self.client_server_stream, &self.event_tx)? {
             ServerResponse::SignupOk => Ok(()),
             ServerResponse::SignupError(e) => Err(Error::MapError(e)),
             _ => Err(Error::BadResponse),
@@ -378,7 +380,7 @@ impl Controller {
             username: username.to_owned(),
             password: password.to_owned(),
         };
-        match send_message(msg, &mut self.client_server_stream)? {
+        match send_message(msg, &mut self.client_server_stream, &self.event_tx)? {
             ServerResponse::LoginOk(token, server_client_addr, users_status) => {
                 self.users_status = Arc::new(RwLock::new(users_status));
                 self.token = Some(token);
@@ -405,11 +407,12 @@ impl Controller {
         let token = self.get_token()?;
 
         let msg = ClientMessage::LogOut { token };
-        match send_message(msg, &mut self.client_server_stream)? {
+        match send_message(msg, &mut self.client_server_stream, &self.event_tx)? {
             ServerResponse::LogoutOk => {
                 self.logged_in.store(false, Ordering::SeqCst);
                 self.token = None;
                 self.users_status = Arc::new(RwLock::new(HashMap::new()));
+
                 Ok(())
             }
             ServerResponse::LogoutError(e) => Err(Error::LogOutFailed(e)),
@@ -548,15 +551,27 @@ fn send_event_or_log_out(
 fn send_message(
     msg: ClientMessage,
     stream: &mut StreamOwned<ClientConnection, TcpStream>,
+    event_tx: &Sender<AppEvent>,
 ) -> Result<ServerResponse, Error> {
-    stream
-        .write_all(&msg.to_bytes())
-        .map_err(|e| Error::IOError(e.to_string()))?;
+    if let Err(e) = stream.write_all(&msg.to_bytes()) {
+        let _ = event_tx.send(AppEvent::FullServerError);
+        return Err(Error::IOError(e.to_string()));
+    }
 
     let mut buff = [0u8; 1024];
+
     match stream.read(&mut buff) {
-        Ok(size) => ServerResponse::from_bytes(&buff[..size]).ok_or(Error::BadResponse),
-        Err(e) => Err(Error::IOError(e.to_string())),
+        Ok(0) => {
+            let _ = event_tx.send(AppEvent::FullServerError);
+            Err(Error::IOError("Connection closed by server".to_string()))
+        },
+        Ok(size) => {
+            ServerResponse::from_bytes(&buff[..size]).ok_or(Error::BadResponse)
+        },
+        Err(e) => {
+            let _ = event_tx.send(AppEvent::FullServerError);
+            Err(Error::IOError(e.to_string()))
+        }
     }
 }
 

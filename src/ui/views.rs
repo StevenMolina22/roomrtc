@@ -29,4 +29,6 @@ pub enum View {
     Error,
 
     FatalError,
+    
+    FullServer
 }

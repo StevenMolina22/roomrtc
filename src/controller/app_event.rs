@@ -1,4 +1,5 @@
 use crate::session::sdp::SessionDescriptionProtocol;
+use crate::transport::rtcp::metrics::CallStats;
 
 /// Events that can occur in the application and are sent to the UI.
 ///
@@ -15,6 +16,8 @@ use crate::session::sdp::SessionDescriptionProtocol;
 /// - `Error`: A recoverable error occurred.
 /// - `FatalError`: A fatal error occurred that may require user intervention.
 pub enum AppEvent {
+    FullServerError,
+    
     /// Incoming call notification with caller username and SDP offer.
     ///
     /// Contains the username of the caller and the SDP offer for establishing the call.
@@ -36,4 +39,6 @@ pub enum AppEvent {
     
     /// Fatal error occurred requiring user intervention.
     FatalError(String),
+    LocalStatsUpdate(CallStats),
+    RemoteStatsUpdate(CallStats),
 }

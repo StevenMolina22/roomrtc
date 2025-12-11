@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
+use crate::transport::rtcp::metrics::SenderStats;
 
 /// RTP sender that transmits `RtpPacket`s and manages RTCP reporting.
 ///
@@ -17,6 +18,7 @@ pub struct RtpSender<S: Socket + Send + Sync + 'static> {
     rtp_socket: S,
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
     connected: Arc<AtomicBool>,
+    metrics: Arc<Mutex<SenderStats>>,
     logger: Logger,
 }
 
@@ -30,17 +32,19 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         rtp_socket: S,
         report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
         connected: &Arc<AtomicBool>,
+        metrics: Arc<Mutex<SenderStats>>,
         logger: Logger,
     ) -> Result<Self, Error> {
         Ok(Self {
             rtp_socket,
             report_handler: Arc::clone(report_handler),
             connected: Arc::clone(connected),
+            metrics,
             logger,
         })
     }
 
-    pub fn start(&self, _event_tx: Sender<AppEvent>) -> Result<Sender<Vec<u8>>, Error> {
+    pub fn start(&self) -> Result<Sender<Vec<u8>>, Error> {
         let (tx, rx) = mpsc::channel();
 
         let rtp_socket = self
@@ -49,6 +53,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
             .map_err(|_| Error::SocketCloneFailed)?;
         let report_handler = Arc::clone(&self.report_handler);
         let connected = Arc::clone(&self.connected);
+        let metrics = Arc::clone(&self.metrics);
         let logger = self.logger.clone();
 
         thread::spawn(move || {
@@ -65,7 +70,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                 };
 
                 if let Err(e) =
-                    send_packet(&rtp_socket, &report_handler, &connected, protected_data)
+                    send_packet(&rtp_socket, &report_handler, &connected, protected_data, &metrics)
                 {
                     logger.error(&format!("RtpSender error: {e}"));
                     break;
@@ -87,6 +92,7 @@ fn send_packet<S: Socket + Send + Sync + 'static>(
     report_handler: &Arc<Mutex<RtcpReportHandler<S>>>,
     connected: &AtomicBool,
     protected_packet: Vec<u8>,
+    metrics: &Arc<Mutex<SenderStats>>,
 ) -> Result<(), Error> {
     if !connected.load(Ordering::SeqCst) {
         return Err(Error::ConnectionClosed);
@@ -99,6 +105,11 @@ fn send_packet<S: Socket + Send + Sync + 'static>(
             .report_goodbye()
             .map_err(|e| Error::RTCPError(e.to_string()))?;
         return Err(Error::SendFailed);
+    }
+
+    if let Ok(mut m) = metrics.lock() {
+        m.packets_sent += 1;
+        m.bytes_sent += protected_packet.len() as u64;
     }
     Ok(())
 }

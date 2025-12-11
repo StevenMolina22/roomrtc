@@ -172,7 +172,10 @@ impl MediaPipeline {
 
         thread::spawn(move || {
             for rgb_frame in rgb_rx {
-                let yuv = rgb_to_yuv420(&rgb_frame).unwrap();
+                let yuv = match rgb_to_yuv420(&rgb_frame) {
+                    Ok(yuv) => yuv,
+                    Err(_) => break,
+                };
 
                 if yuv_tx.send((yuv, rgb_frame.frame_time)).is_err() {
                     break

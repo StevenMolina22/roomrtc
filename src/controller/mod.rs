@@ -1,7 +1,7 @@
 mod app_event;
-mod control;
+mod controller;
 mod error;
 
 pub use app_event::AppEvent;
-pub use control::Controller;
+pub use controller::Controller;
 pub use error::ControllerError;

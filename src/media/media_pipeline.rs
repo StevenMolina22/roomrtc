@@ -86,7 +86,11 @@ impl MediaPipeline {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
         let logger = self.logger.clone();
 
-        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(self.clock.clone(), receiver_metrics, self.logger.clone());
+        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(
+            self.clock.clone(),
+            receiver_metrics,
+            self.logger.clone(),
+        );
 
         thread::spawn({
             move || {
@@ -200,7 +204,13 @@ impl MediaPipeline {
         Ok(yuv_rx)
     }
 
-    fn start_encoded_sender_thread(&mut self, rtp_tx: Sender<RtpPacket>, yuv_rx: Receiver<(YuvPlanarImageMut<'static, u8>, u128)>, event_tx: Sender<AppEvent>, connected: &Arc<AtomicBool>) -> Result<(), Error> {
+    fn start_encoded_sender_thread(
+        &mut self,
+        rtp_tx: Sender<RtpPacket>,
+        yuv_rx: Receiver<(YuvPlanarImageMut<'static, u8>, u128)>,
+        event_tx: Sender<AppEvent>,
+        connected: &Arc<AtomicBool>,
+    ) -> Result<(), Error> {
         let mut encoder = match Encoder::new(&self.config.media, self.logger.clone()) {
             Ok(d) => d,
             Err(e) => {

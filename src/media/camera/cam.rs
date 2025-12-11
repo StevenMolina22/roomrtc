@@ -1,14 +1,14 @@
+use crate::clock::Clock;
 use crate::config::Config;
+use crate::logger::Logger;
 use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
-use opencv::{imgproc, prelude::*, videoio};
-use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc};
-use std::sync::atomic::AtomicBool;
-use std::thread;
 use opencv::videoio::VideoWriter;
-use crate::clock::Clock;
-use crate::logger::Logger;
+use opencv::{imgproc, prelude::*, videoio};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 
 pub trait FrameSource: Send {
     /// Start the capture thread.
@@ -36,7 +36,7 @@ pub struct Camera {
     /// Clock of the program
     clock: Arc<Clock>,
 
-    logger: Logger
+    logger: Logger,
 }
 
 impl Camera {
@@ -51,7 +51,7 @@ impl Camera {
             running: Arc::new(AtomicBool::new(false)),
             config: Arc::clone(media_config),
             clock,
-            logger
+            logger,
         }
     }
 
@@ -93,14 +93,18 @@ impl Camera {
                 return;
             }
 
-            if cam.set(
-                videoio::CAP_PROP_FOURCC,
-                f64::from(VideoWriter::fourcc('M', 'J', 'P', 'G').unwrap())
-            ).is_err() {
+            if cam
+                .set(
+                    videoio::CAP_PROP_FOURCC,
+                    f64::from(VideoWriter::fourcc('M', 'J', 'P', 'G').unwrap()),
+                )
+                .is_err()
+            {
                 logger.error("Stopping camera thread.");
                 return;
             }
-            if cam.set(videoio::CAP_PROP_FPS, config.media.frame_rate as f64)
+            if cam
+                .set(videoio::CAP_PROP_FPS, config.media.frame_rate as f64)
                 .is_err()
             {
                 logger.error("Failed to set camera height. Stopping camera thread.");
@@ -121,7 +125,6 @@ impl Camera {
                 return;
             }
 
-
             let mut mat = Mat::default();
             let mut rgb = Mat::default();
 
@@ -131,14 +134,7 @@ impl Camera {
                     continue;
                 }
 
-                if imgproc::cvt_color(
-                    &mat,
-                    &mut rgb,
-                    imgproc::COLOR_BGR2RGB,
-                    0
-                )
-                    .is_err()
-                {
+                if imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).is_err() {
                     logger.error("Failed to convert frame color.");
                     continue;
                 }
@@ -154,7 +150,7 @@ impl Camera {
                     data,
                     width: rgb.cols() as usize,
                     height: rgb.rows() as usize,
-                    frame_time: clock.now()
+                    frame_time: clock.now(),
                 };
 
                 if tx.send(frame).is_err() {
@@ -168,7 +164,8 @@ impl Camera {
     /// Stop the capture thread by clearing the running flag. The
     /// capture thread will observe this and exit shortly.
     fn stop_internal(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

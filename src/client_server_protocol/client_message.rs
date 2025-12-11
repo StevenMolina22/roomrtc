@@ -16,7 +16,7 @@ use crate::session::sdp::SessionDescriptionProtocol;
 /// - `CallHangup`: Terminates an active call.
 pub enum ClientMessage {
     Hello,
-    
+
     /// Request to log in.
     ///
     /// # Fields
@@ -60,7 +60,7 @@ pub enum ClientMessage {
         offer_sdp: SessionDescriptionProtocol,
         to: String,
     },
-    
+
     /// Acceptance of an incoming RTC call.
     ///
     /// # Fields
@@ -73,7 +73,7 @@ pub enum ClientMessage {
         to_usr: String,
         sdp_answer: SessionDescriptionProtocol,
     },
-    
+
     /// Rejection of an incoming RTC call.
     ///
     /// # Fields
@@ -82,7 +82,7 @@ pub enum ClientMessage {
     /// * `to_usr` - Username of the user rejecting the call.
     CallReject {
         from_usr: String,
-        to_usr: String
+        to_usr: String,
     },
 
     /// Termination of an active call.
@@ -119,7 +119,7 @@ impl ClientMessage {
     pub fn to_bytes(&self) -> Vec<u8> {
         let s = match self {
             Self::Hello => "HELLO".to_string(),
-            
+
             Self::LogIn { username, password } => format!("LOGIN|{username}|{password}"),
 
             Self::SignUp { username, password } => format!("SIGNUP|{username}|{password}"),
@@ -131,12 +131,14 @@ impl ClientMessage {
                 offer_sdp,
                 to,
             } => format!("CALLREQUEST|{token}|{offer_sdp}|{to}"),
-            
-            Self::CallAccept { from_usr, to_usr, sdp_answer } => 
-                format!("CALLACCEPT|{from_usr}|{to_usr}|{sdp_answer}"),
-            
-            Self::CallReject { from_usr, to_usr } => 
-                format!("CALLREJECT|{from_usr}|{to_usr}"),
+
+            Self::CallAccept {
+                from_usr,
+                to_usr,
+                sdp_answer,
+            } => format!("CALLACCEPT|{from_usr}|{to_usr}|{sdp_answer}"),
+
+            Self::CallReject { from_usr, to_usr } => format!("CALLREJECT|{from_usr}|{to_usr}"),
 
             Self::CallHangup { token } => format!("CALLHANG|{token}"),
         };
@@ -176,7 +178,7 @@ impl ClientMessage {
 
         match parts[0] {
             "HELLO" if parts.len() == 1 => Some(Self::Hello),
-            
+
             "LOGIN" if parts.len() == 3 => Some(Self::LogIn {
                 username: parts[1].into(),
                 password: parts[2].into(),
@@ -196,18 +198,18 @@ impl ClientMessage {
                 offer_sdp: parts[2].parse().ok()?,
                 to: parts[3].into(),
             }),
-            
+
             "CALLACCEPT" if parts.len() == 4 => Some(Self::CallAccept {
                 from_usr: parts[1].into(),
                 to_usr: parts[2].into(),
                 sdp_answer: parts[3].parse().ok()?,
             }),
-            
+
             "CALLREJECT" if parts.len() == 3 => Some(Self::CallReject {
                 from_usr: parts[1].into(),
                 to_usr: parts[2].into(),
             }),
-            
+
             "CALLHANG" if parts.len() == 2 => Some(Self::CallHangup {
                 token: parts[1].into(),
             }),

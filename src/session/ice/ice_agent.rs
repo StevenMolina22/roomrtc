@@ -4,10 +4,10 @@ use super::connectivity_state::ConnectivityState;
 use super::error::IceError as Error;
 use crate::config::IceConfig;
 use crate::logger::Logger;
+use crate::session::ice::candidate_type::CandidateType;
 use crate::session::ice::stun_client;
 use if_addrs;
 use std::time::{Duration, Instant};
-use crate::session::ice::candidate_type::CandidateType;
 
 /// An ICE agent that gathers local candidates, accepts remote candidates
 /// and forms candidate pairs for connectivity checks.
@@ -171,29 +171,22 @@ impl IceAgent {
             .map_err(|_| Error::NetworkInterfaceError)?; // O el error que prefieras
 
         for (index, pair) in self.candidate_pairs.iter_mut().enumerate() {
-            if pair.local.candidate_type == CandidateType::ServerReflexive 
-                || pair.remote.candidate_type == CandidateType::ServerReflexive 
+            if pair.local.candidate_type == CandidateType::ServerReflexive
+                || pair.remote.candidate_type == CandidateType::ServerReflexive
             {
-                println!("[ICE] Skipping STUN (srflx) pair: {}", pair);
-                continue; 
+                continue;
             }
 
             pair.state = ConnectivityState::InProgress;
-            println!(
-                "[ICE] Checking pair: {} <-> {}",
-                pair.local.address, pair.remote.address
-            );
 
             let target = format!("{}:{}", pair.remote.address, pair.remote.port);
 
             if Self::verify_candidate_pair(socket, &target) {
                 pair.state = ConnectivityState::Succeeded;
-                println!("[ICE] Pair VALIDATED: {}", pair);
                 selected_index = Some(index);
                 break;
             } else {
                 pair.state = ConnectivityState::Failed;
-                println!("[ICE] Pair FAILED: {}", pair);
             }
         }
 
@@ -228,8 +221,7 @@ impl IceAgent {
         let mut buf = [0u8; 1024];
 
         while start.elapsed() < max_duration {
-            if let Err(e) = socket.send_to(b"PING", target) {
-                println!("[ICE] Send error: {}", e);
+            if socket.send_to(b"PING", target).is_err() {
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -243,11 +235,9 @@ impl IceAgent {
                     let msg = &buf[..amt];
 
                     if msg == b"PONG" {
-                        println!("[ICE] Received PONG from remote: {}", src);
                         return true;
                     } else if msg == b"PING" {
                         let _ = socket.send_to(b"PONG", target);
-                        println!("[ICE] Received PING from remote, sent PONG back.");
                     }
                 }
                 Err(_) => {
@@ -366,7 +356,6 @@ mod tests {
             result,
             Err(Error::NetworkInterfaceError | Error::NoNetworkInterfaceFound)
         ) {
-            eprintln!("Skipping gather_candidates test due to missing network interface");
             return;
         }
         assert!(result.is_ok());

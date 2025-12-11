@@ -25,7 +25,7 @@ pub enum ServerError {
     ServerOff,
     /// Input did not meet expected format.
     InvalidFormat,
-    ServerFull
+    ServerFull,
 }
 
 impl Display for ServerError {

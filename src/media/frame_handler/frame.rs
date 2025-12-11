@@ -1,6 +1,6 @@
 use super::FrameError as Error;
-use opencv::{imgproc};
 use opencv::prelude::*;
+use opencv::{core, imgproc};
 
 /// An in-memory video frame used by the frame handler.
 ///
@@ -20,7 +20,7 @@ pub struct Frame {
     pub height: usize,
 
     /// Instant when the frame was captured.
-    pub frame_time: u128
+    pub frame_time: u128,
 }
 
 impl Frame {
@@ -44,8 +44,14 @@ impl Frame {
 
         let mut rgb_mat = Mat::default();
 
-        imgproc::cvt_color(&yuv_mat, &mut rgb_mat, imgproc::COLOR_YUV2RGB_I420, 0)
-            .map_err(|_| Error::TypeConversionError)?;
+        imgproc::cvt_color(
+            &yuv_mat,
+            &mut rgb_mat,
+            imgproc::COLOR_YUV2RGB_I420,
+            0,
+            core::AlgorithmHint::ALGO_HINT_DEFAULT,
+        )
+        .map_err(|_| Error::TypeConversionError)?;
 
         Ok(Self {
             data: rgb_mat
@@ -176,11 +182,9 @@ mod tests {
         // frame_time = 1 (u128), width = 2 (u32), height = 3 (u32), no data
         let header_only_bytes: &[u8] = &[
             // frame_time (1 as little-endian u128)
-            1, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             // width (2 as little-endian u32)
-            2, 0, 0, 0,
-            // height (3 as little-endian u32)
+            2, 0, 0, 0, // height (3 as little-endian u32)
             3, 0, 0, 0,
         ];
 

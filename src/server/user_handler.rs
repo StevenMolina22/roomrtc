@@ -102,40 +102,34 @@ impl UserHandler {
     /// Returns a `ServerResponse` that is sent back to the client.
     fn handle_client_message(&mut self, event: ClientMessage) -> ServerResponse {
         match event {
-            ClientMessage::LogIn { 
-                username, 
-                password 
-            } => self.op_server.login_user(username, password),
+            ClientMessage::LogIn { username, password } => {
+                self.op_server.login_user(username, password)
+            }
 
-            ClientMessage::SignUp { 
-                username, 
-                password 
-            } => self.op_server.signup_user(username, password),
-            
+            ClientMessage::SignUp { username, password } => {
+                self.op_server.signup_user(username, password)
+            }
 
-            ClientMessage::LogOut { 
-                token 
-            } => self.op_server.logout_user(token),
+            ClientMessage::LogOut { token } => self.op_server.logout_user(token),
 
             ClientMessage::CallRequest {
                 token,
                 offer_sdp,
                 to,
             } => self.op_server.call_request(token, to, offer_sdp),
-            
-            ClientMessage::CallAccept { 
-                from_usr, 
-                to_usr, 
-                sdp_answer 
-            } => self.op_server.call_accept(from_usr, to_usr, sdp_answer),
-            
-            ClientMessage::CallReject {
+
+            ClientMessage::CallAccept {
                 from_usr,
                 to_usr,
-            } => self.op_server.call_reject(from_usr, to_usr),
+                sdp_answer,
+            } => self.op_server.call_accept(from_usr, to_usr, sdp_answer),
+
+            ClientMessage::CallReject { from_usr, to_usr } => {
+                self.op_server.call_reject(from_usr, to_usr)
+            }
 
             ClientMessage::CallHangup { token } => self.op_server.call_hangup(token),
-            
+
             _ => ServerResponse::BadMessage,
         }
     }
@@ -150,12 +144,14 @@ impl UserHandler {
             Ok(n) => n,
             Err(_) => return Err(Error::ConnectionError),
         };
-    
+
         let msg = ClientMessage::from_bytes(&buff[..n]);
-    
+
         match msg {
             Some(ClientMessage::Hello) => {
-                if users_connected.load(Ordering::SeqCst) >= config.server.max_amount_of_users_connected {
+                if users_connected.load(Ordering::SeqCst)
+                    >= config.server.max_amount_of_users_connected
+                {
                     send_response(tls_stream, ServerResponse::ServerFull)?;
                     let _ = tls_stream.flush();
                     Err(Error::ServerFull)
@@ -164,23 +160,22 @@ impl UserHandler {
                     users_connected.fetch_add(1, Ordering::SeqCst);
                     Ok(())
                 }
-            },
-            _ => {
-                Err(Error::ConnectionError)
             }
+            _ => Err(Error::ConnectionError),
         }
     }
 }
-
 
 /// Sends a serialized `ServerResponse` over the TCP stream.
 ///
 /// Any I/O error is logged but not returned to the caller.
 fn send_response(
-    stream: &mut StreamOwned<ServerConnection, TcpStream>, 
-    response: ServerResponse
+    stream: &mut StreamOwned<ServerConnection, TcpStream>,
+    response: ServerResponse,
 ) -> Result<(), Error> {
-    stream.write_all(&response.to_bytes()).map_err(|_| Error::ConnectionError)?;
+    stream
+        .write_all(&response.to_bytes())
+        .map_err(|_| Error::ConnectionError)?;
     Ok(())
 }
 
@@ -196,7 +191,7 @@ mod tests {
     fn setup_handler() -> (UserHandler, Arc<RwLock<HashMap<String, UserData>>>) {
         let users = Arc::new(RwLock::new(HashMap::new()));
         let users_ref = users.clone();
-        
+
         let _users_connected = Arc::new(AtomicUsize::new(0));
         let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
 
@@ -208,17 +203,10 @@ mod tests {
             },
         };
 
-        let op_server = OperatingServer::new(
-            users,
-            addr,
-            "test_handler_users.txt".into(),
-            logger.clone(),
-        );
+        let op_server =
+            OperatingServer::new(users, addr, "test_handler_users.txt".into(), logger.clone());
 
-        let handler = UserHandler {
-            op_server,
-            logger,
-        };
+        let handler = UserHandler { op_server, logger };
 
         (handler, users_ref)
     }
@@ -226,16 +214,18 @@ mod tests {
     #[test]
     fn test_dispatch_login() {
         let (mut handler, _) = setup_handler();
-        
-        handler.op_server.signup_user("tester".into(), "pass".into());
 
-        let msg = ClientMessage::LogIn { 
-            username: "tester".into(), 
-            password: "pass".into() 
+        handler
+            .op_server
+            .signup_user("tester".into(), "pass".into());
+
+        let msg = ClientMessage::LogIn {
+            username: "tester".into(),
+            password: "pass".into(),
         };
 
         let response = handler.handle_client_message(msg);
-        
+
         match response {
             ServerResponse::LoginOk(u, _, _) => assert_eq!(u, "tester"),
             _ => unreachable!("El mensaje LogIn no devolvió LoginOk"),
@@ -245,10 +235,10 @@ mod tests {
     #[test]
     fn test_dispatch_signup() {
         let (mut handler, _) = setup_handler();
-        
-        let msg = ClientMessage::SignUp { 
-            username: "newuser".into(), 
-            password: "123".into() 
+
+        let msg = ClientMessage::SignUp {
+            username: "newuser".into(),
+            password: "123".into(),
         };
 
         let response = handler.handle_client_message(msg);
@@ -258,53 +248,59 @@ mod tests {
     #[test]
     fn test_dispatch_logout() {
         let (mut handler, users_ref) = setup_handler();
-        
-        handler.op_server.signup_user("leaver".into(), "pass".into());
+
+        handler
+            .op_server
+            .signup_user("leaver".into(), "pass".into());
         handler.op_server.login_user("leaver".into(), "pass".into());
 
-        let msg = ClientMessage::LogOut { token: "leaver".into() };
+        let msg = ClientMessage::LogOut {
+            token: "leaver".into(),
+        };
         let response = handler.handle_client_message(msg);
-        
-        assert!(matches!(response, ServerResponse::Error(_))); 
-        
+
+        assert!(matches!(response, ServerResponse::Error(_)));
+
         if let Ok(users) = users_ref.read()
-            && let Some(user) = users.get("leaver") {
-                assert_eq!(user.status, UserStatus::Offline);
-            }
-        
+            && let Some(user) = users.get("leaver")
+        {
+            assert_eq!(user.status, UserStatus::Offline);
+        }
     }
 
     #[test]
     fn test_dispatch_call_hangup() {
         let (mut handler, users_ref) = setup_handler();
-        
+
         // Creamos usuario
         handler.op_server.signup_user("busy".into(), "pass".into());
-        
-        if let Ok(mut u) = users_ref.write()
-            && let Some(data) = u.get_mut("busy") {
-                data.status = UserStatus::Occupied("other".into());
-            }
-        
 
-        let msg = ClientMessage::CallHangup { token: "busy".into() };
+        if let Ok(mut u) = users_ref.write()
+            && let Some(data) = u.get_mut("busy")
+        {
+            data.status = UserStatus::Occupied("other".into());
+        }
+
+        let msg = ClientMessage::CallHangup {
+            token: "busy".into(),
+        };
         let response = handler.handle_client_message(msg);
-        
+
         assert!(matches!(response, ServerResponse::CallHangUpOk));
     }
 
     #[test]
     fn test_dispatch_call_request_validation() {
         let (mut handler, _) = setup_handler();
-        
-        let msg = ClientMessage::CallRequest { 
-            token: "origin".into(), 
-            to: "dest".into(), 
-            offer_sdp: SessionDescriptionProtocol::default() 
+
+        let msg = ClientMessage::CallRequest {
+            token: "origin".into(),
+            to: "dest".into(),
+            offer_sdp: SessionDescriptionProtocol::default(),
         };
 
         let response = handler.handle_client_message(msg);
-        
+
         assert!(matches!(response, ServerResponse::Error(_)));
     }
 }

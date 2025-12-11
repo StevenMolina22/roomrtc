@@ -75,17 +75,21 @@ impl ServerMessage {
     pub fn to_bytes(&self) -> Vec<u8> {
         let s = match self {
             Self::UsernameRequest => "USERNAMEREQUEST".to_string(),
-            
-            Self::CallIncoming { from_usr, offer_sdp } => 
-                format!("CALLINCOMING|{from_usr}|{offer_sdp}"),
-            
-            Self::CallAccepted { from_usr, sdp_answer } => 
-                format!("CALLACCEPTED|{from_usr}|{sdp_answer}"),
-            
+
+            Self::CallIncoming {
+                from_usr,
+                offer_sdp,
+            } => format!("CALLINCOMING|{from_usr}|{offer_sdp}"),
+
+            Self::CallAccepted {
+                from_usr,
+                sdp_answer,
+            } => format!("CALLACCEPTED|{from_usr}|{sdp_answer}"),
+
             Self::CallRejected => "CALLREJECTED".to_string(),
-            
+
             Self::UserStatusUpdate(user, status) => format!("USERSTATE|{user}|{status}"),
-            
+
             Self::Error(msg) => format!("ERROR|{msg}"),
         };
 
@@ -116,26 +120,25 @@ impl ServerMessage {
 
         match parts[0] {
             "USERNAMEREQUEST" if parts.len() == 1 => Some(Self::UsernameRequest),
-            
+
             "CALLINCOMING" if parts.len() == 3 => Some(Self::CallIncoming {
                 from_usr: parts[1].into(),
                 offer_sdp: parts[2].to_string().parse().ok()?,
             }),
-            
+
             "CALLACCEPTED" if parts.len() == 3 => Some(Self::CallAccepted {
                 from_usr: parts[1].to_string(),
                 sdp_answer: parts[2].parse().ok()?,
             }),
-            
+
             "CALLREJECTED" if parts.len() == 1 => Some(Self::CallRejected),
-            
+
             "USERSTATE" if parts.len() == 3 => Some(Self::UserStatusUpdate(
                 parts[1].into(),
                 UserStatus::from_bytes(parts[2].as_ref())?,
             )),
-            
-            "ERROR" if parts.len() == 2 => Some(Self::Error(parts[1].into())),
 
+            "ERROR" if parts.len() == 2 => Some(Self::Error(parts[1].into())),
 
             _ => None,
         }
@@ -145,7 +148,6 @@ impl ServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     // Helper function that serializes and deserializes a message to test encoding/decoding
     fn roundtrip(msg: ServerMessage) -> Option<ServerMessage> {

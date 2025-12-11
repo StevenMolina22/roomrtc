@@ -3,13 +3,13 @@ use crate::controller::AppEvent;
 use crate::tools::Socket;
 use crate::transport::rtcp::RtcpError as Error;
 use crate::transport::rtcp::RtcpPacket;
+use crate::transport::rtcp::metrics::{CallStats, ReceiverStats, SenderStats};
 use chrono::{DateTime, Local};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use crate::transport::rtcp::metrics::{CallStats, ReceiverStats, SenderStats};
 
 /// RTCP report handler that periodically sends connectivity reports and
 /// listens for incoming reports (or goodbye messages) from the peer.
@@ -60,7 +60,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         connected: Arc<AtomicBool>,
         config: RtcpConfig,
         local_sender_stats: Arc<Mutex<SenderStats>>,
-        local_receiver_stats: Arc<Mutex<ReceiverStats>>
+        local_receiver_stats: Arc<Mutex<ReceiverStats>>,
     ) -> Self {
         Self {
             socket: Arc::new(socket),
@@ -182,11 +182,11 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
                 let s_stats = match local_sender_stats.lock() {
                     Ok(s) => *s,
-                    Err(_) => break
+                    Err(_) => break,
                 };
                 let r_stats = match local_receiver_stats.lock() {
                     Ok(r) => *r,
-                    Err(_) => break
+                    Err(_) => break,
                 };
 
                 let packet_sr = RtcpPacket::SenderReport(s_stats);
@@ -196,7 +196,9 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                 }
 
                 let packet_rr = RtcpPacket::ReceiverReport(r_stats);
-                if report_socket.send(&packet_rr.to_bytes()).is_err() { break; }
+                if report_socket.send(&packet_rr.to_bytes()).is_err() {
+                    break;
+                }
 
                 let local_update = CallStats {
                     local_sender: s_stats,
@@ -259,7 +261,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     &*report_socket,
                     &mut last_valid_packet_time,
                     max_silence_duration,
-                    &event_tx
+                    &event_tx,
                 ) {
                     Ok(()) => timeouts_triggered = 0,
                     Err(Error::GoodbyeReceived) => {
@@ -321,22 +323,27 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
     report_socket: &S,
     last_report_time: &mut DateTime<Local>,
     receive_limit: Duration,
-    event_tx: &Sender<AppEvent>
+    event_tx: &Sender<AppEvent>,
 ) -> Result<(), Error> {
-
     let mut buf = [0u8; 1024];
 
     match report_socket.recv_from(&mut buf) {
         Ok((size, _src_addr)) => match RtcpPacket::from_bytes(&buf[..size]) {
             Some(RtcpPacket::SenderReport(s_stats)) => {
                 *last_report_time = Local::now();
-                let call_stats = CallStats { remote_sender: s_stats, ..Default::default() };
+                let call_stats = CallStats {
+                    remote_sender: s_stats,
+                    ..Default::default()
+                };
                 let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
                 Ok(())
             }
             Some(RtcpPacket::ReceiverReport(r_stats)) => {
                 *last_report_time = Local::now();
-                let call_stats = CallStats { remote_receiver: r_stats, ..Default::default() };
+                let call_stats = CallStats {
+                    remote_receiver: r_stats,
+                    ..Default::default()
+                };
                 let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
                 Ok(())
             }
@@ -347,8 +354,7 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
                     Ok(d) => d,
                     Err(_) => chrono::Duration::seconds(30),
                 };
-                if Local::now() - *last_report_time > duration
-                {
+                if Local::now() - *last_report_time > duration {
                     Err(Error::TimedOut)
                 } else {
                     Ok(())
@@ -358,7 +364,7 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
         Err(_) => {
             if Local::now() - *last_report_time
                 > chrono::Duration::from_std(receive_limit)
-                .map_err(|_| Error::InvalidConfigDuration)?
+                    .map_err(|_| Error::InvalidConfigDuration)?
             {
                 Err(Error::TimedOut)
             } else {

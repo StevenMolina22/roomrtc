@@ -1,11 +1,13 @@
-use std::time::Instant;
 use crate::config::MediaConfig;
 
 use super::{EncodedFrame, error::FrameError as Error};
-use openh264::encoder::{BitRate, Complexity, EncodedBitStream, Encoder as H264Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode, UsageType};
-use openh264::formats::YUVSlices;
 use openh264::OpenH264API;
-use yuv::{YuvPlanarImageMut};
+use openh264::encoder::{
+    BitRate, Complexity, EncodedBitStream, Encoder as H264Encoder, EncoderConfig, FrameRate,
+    FrameType, IntraFramePeriod, RateControlMode, UsageType,
+};
+use openh264::formats::YUVSlices;
+use yuv::YuvPlanarImageMut;
 
 /// A basic H.264 video encoder using the `OpenH264` library.
 ///
@@ -35,7 +37,9 @@ impl Encoder {
             .bitrate(BitRate::from_bps(2_500_000))
             .max_frame_rate(FrameRate::from_hz(media_config.frame_rate))
             .usage_type(UsageType::CameraVideoRealTime)
-            .intra_frame_period(IntraFramePeriod::from_num_frames(media_config.h264_idr_interval))
+            .intra_frame_period(IntraFramePeriod::from_num_frames(
+                media_config.h264_idr_interval,
+            ))
             .complexity(Complexity::Low)
             .rate_control_mode(RateControlMode::Off)
             .skip_frames(true);
@@ -59,24 +63,23 @@ impl Encoder {
     /// # Errors
     ///
     /// - [`Error::EncodingError`] — if encoding fails due to invalid frame data.
-    pub fn encode(&mut self, yuv: &YuvPlanarImageMut<u8>, frame_time: u128) -> Result<EncodedFrame, Error> {
-        let c = Instant::now();
-
+    pub fn encode(
+        &mut self,
+        yuv: &YuvPlanarImageMut<u8>,
+        frame_time: u128,
+    ) -> Result<EncodedFrame, Error> {
         let yuv_source = YUVSlices::new(
             (
                 yuv.y_plane.borrow(),
                 yuv.u_plane.borrow(),
                 yuv.v_plane.borrow(),
             ),
-            (
-                yuv.width as usize,
-                yuv.height as usize,
-            ),
+            (yuv.width as usize, yuv.height as usize),
             (
                 yuv.y_stride as usize,
                 yuv.u_stride as usize,
                 yuv.v_stride as usize,
-            )
+            ),
         );
 
         let bitstream = self
@@ -88,7 +91,6 @@ impl Encoder {
         let frame_type = bitstream.frame_type();
         let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
 
-        println!("ENCODER: {}", c.elapsed().as_millis());
         Ok(EncodedFrame {
             chunks,
             frame_time,

@@ -78,17 +78,13 @@ mod tests {
         assert_eq!(user.username, username);
         assert_eq!(user.password, password);
         assert_eq!(user.status, status);
-        
+
         assert!(user.server_client_stream.is_none());
     }
 
     #[test]
     fn test_update_status() {
-        let mut user = UserData::new(
-            "bob".to_string(), 
-            "pass".to_string(), 
-            UserStatus::Offline
-        );
+        let mut user = UserData::new("bob".to_string(), "pass".to_string(), UserStatus::Offline);
 
         assert_eq!(user.status, UserStatus::Offline);
 
@@ -101,13 +97,13 @@ mod tests {
     #[test]
     fn test_user_data_clone() {
         let user = UserData::new(
-            "charlie".to_string(), 
-            "1234".to_string(), 
-            UserStatus::Available
+            "charlie".to_string(),
+            "1234".to_string(),
+            UserStatus::Available,
         );
-        
+
         let mut user_clone = user.clone();
-        
+
         assert_eq!(user.username, user_clone.username);
         assert_eq!(user.status, user_clone.status);
 

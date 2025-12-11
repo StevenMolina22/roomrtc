@@ -1,12 +1,12 @@
 use crate::logger::Logger;
 use crate::tools::Socket;
 use crate::transport::rtcp::RtcpReportHandler;
+use crate::transport::rtcp::metrics::SenderStats;
 use crate::transport::rtp::error::RtpError as Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use crate::transport::rtcp::metrics::SenderStats;
 
 /// RTP sender that transmits encrypted RTP packets over a socket.
 ///
@@ -100,9 +100,13 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
                     }
                 };
 
-                if let Err(e) =
-                    send_packet(&rtp_socket, &report_handler, &connected, protected_data, &metrics)
-                {
+                if let Err(e) = send_packet(
+                    &rtp_socket,
+                    &report_handler,
+                    &connected,
+                    protected_data,
+                    &metrics,
+                ) {
                     logger.error(&format!("RtpSender error: {e}"));
                     break;
                 }

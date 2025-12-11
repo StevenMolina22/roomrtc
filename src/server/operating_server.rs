@@ -6,7 +6,7 @@ use crate::user::{UserData, UserStatus};
 use rustls::{ServerConnection, StreamOwned};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
-use std::io::{Write};
+use std::io::Write;
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -120,7 +120,8 @@ impl OperatingServer {
             let mut users = match self.users.write() {
                 Ok(u) => u,
                 Err(e) => {
-                    self.logger.error(&format!("Failed to acquire users lock during signup: {e}"));
+                    self.logger
+                        .error(&format!("Failed to acquire users lock during signup: {e}"));
                     return ServerResponse::SignupError(e.to_string());
                 }
             };
@@ -149,8 +150,7 @@ impl OperatingServer {
             ));
             return ServerResponse::Error(format!("Error loading user data: {e}"));
         }
-        self.logger
-            .info(&format!("New user signed up: {username}"));
+        self.logger.info(&format!("New user signed up: {username}"));
         ServerResponse::SignupOk
     }
 
@@ -163,13 +163,16 @@ impl OperatingServer {
             let mut users = match self.users.write() {
                 Ok(u) => u,
                 Err(e) => {
-                    self.logger.error(&format!("Failed to acquire users lock during logout: {e}"));
+                    self.logger
+                        .error(&format!("Failed to acquire users lock during logout: {e}"));
                     return ServerResponse::LogoutError(e.to_string());
                 }
             };
             if let Some(user_data) = users.get_mut(&username) {
                 user_data.update_status(UserStatus::Offline);
-                let stream = if let Some(ref stream) = user_data.server_client_stream { stream } else {
+                let stream = if let Some(ref stream) = user_data.server_client_stream {
+                    stream
+                } else {
                     self.logger
                         .warn(&format!("Logout failed for {username}: Stream not found"));
                     return ServerResponse::Error("User not found".to_string());
@@ -232,7 +235,6 @@ impl OperatingServer {
         to_usr: String,
         offer_sdp: SessionDescriptionProtocol,
     ) -> ServerResponse {
-
         self.logger
             .info(&format!("Call request from {from_usr} to {to_usr}"));
 
@@ -244,9 +246,8 @@ impl OperatingServer {
         let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => {
-                self.logger.warn(&format!(
-                    "Call request failed: Sender {from_usr} not found"
-                ));
+                self.logger
+                    .warn(&format!("Call request failed: Sender {from_usr} not found"));
                 return ServerResponse::Error(err_event);
             }
         };
@@ -254,9 +255,8 @@ impl OperatingServer {
         let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => {
-                self.logger.warn(&format!(
-                    "Call request failed: Receiver {to_usr} not found"
-                ));
+                self.logger
+                    .warn(&format!("Call request failed: Receiver {to_usr} not found"));
                 return ServerResponse::Error(err_event);
             }
         };
@@ -282,7 +282,9 @@ impl OperatingServer {
             let mut users = match self.users.write() {
                 Ok(u) => u,
                 Err(e) => {
-                    self.logger.error(&format!("Failed to acquire users lock during call_request inner: {e}"));
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during call_request inner: {e}"
+                    ));
                     return ServerResponse::CallRequestError(e.to_string());
                 }
             };
@@ -303,9 +305,11 @@ impl OperatingServer {
             &self.logger,
         );
 
-        let msg = ServerMessage::CallIncoming { from_usr, offer_sdp };
+        let msg = ServerMessage::CallIncoming {
+            from_usr,
+            offer_sdp,
+        };
         send_message(&stream, &msg);
-
 
         ServerResponse::CallRequestOk
 
@@ -352,7 +356,6 @@ impl OperatingServer {
         to_usr: String,
         sdp_answer: SessionDescriptionProtocol,
     ) -> ServerResponse {
-
         let stream = match get_stream_from_user(to_usr.clone(), &self.users) {
             Ok(stream) => stream,
             Err(e) => return ServerResponse::CallAcceptError(e.to_string()),
@@ -369,11 +372,15 @@ impl OperatingServer {
         };
 
         if from_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
-            return ServerResponse::CallAcceptError(ServerError::UserNotAvailable(from_usr).to_string());
+            return ServerResponse::CallAcceptError(
+                ServerError::UserNotAvailable(from_usr).to_string(),
+            );
         }
 
         if to_usr_data.status != UserStatus::Occupied(from_usr.clone()) {
-            return ServerResponse::CallAcceptError(ServerError::UserNotAvailable(to_usr).to_string());
+            return ServerResponse::CallAcceptError(
+                ServerError::UserNotAvailable(to_usr).to_string(),
+            );
         }
 
         self.logger.info(&format!(
@@ -382,7 +389,7 @@ impl OperatingServer {
 
         let msg = ServerMessage::CallAccepted {
             from_usr,
-            sdp_answer
+            sdp_answer,
         };
 
         send_message(&stream, &msg);
@@ -395,12 +402,7 @@ impl OperatingServer {
     /// Both users must be `Available`; otherwise an error is returned.
     ///
     /// No state change occurs — both users remain `Available`.
-    pub fn call_reject(
-        &mut self,
-        from_usr: String,
-        to_usr: String
-    ) -> ServerResponse {
-
+    pub fn call_reject(&mut self, from_usr: String, to_usr: String) -> ServerResponse {
         let stream = match get_stream_from_user(to_usr.clone(), &self.users) {
             Ok(stream) => stream,
             Err(e) => return ServerResponse::CallRejectError(e.to_string()),
@@ -417,11 +419,15 @@ impl OperatingServer {
         };
 
         if from_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
-            return ServerResponse::CallRejectError(ServerError::UserNotAvailable(from_usr).to_string());
+            return ServerResponse::CallRejectError(
+                ServerError::UserNotAvailable(from_usr).to_string(),
+            );
         }
 
         if to_usr_data.status != UserStatus::Occupied(from_usr.clone()) {
-            return ServerResponse::CallRejectError(ServerError::UserNotAvailable(to_usr).to_string());
+            return ServerResponse::CallRejectError(
+                ServerError::UserNotAvailable(to_usr).to_string(),
+            );
         }
 
         from_usr_data.update_status(UserStatus::Available);
@@ -444,7 +450,9 @@ impl OperatingServer {
             let mut users = match self.users.write() {
                 Ok(u) => u,
                 Err(e) => {
-                    self.logger.error(&format!("Failed to acquire users lock during call_reject: {e}"));
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during call_reject: {e}"
+                    ));
                     return ServerResponse::CallRejectError(e.to_string());
                 }
             };
@@ -476,21 +484,25 @@ impl OperatingServer {
             let mut users = match self.users.write() {
                 Ok(u) => u,
                 Err(e) => {
-                    self.logger.error(&format!("Failed to acquire users lock during call_hangup: {e}"));
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during call_hangup: {e}"
+                    ));
                     return ServerResponse::CallHangUpError(e.to_string());
                 }
             };
 
-            let data = if let Some(data) = users.get_mut(&user) { data } else {
+            let data = if let Some(data) = users.get_mut(&user) {
+                data
+            } else {
                 self.logger
                     .warn(&format!("Call hangup failed: User {user} does not exist"));
                 return ServerResponse::CallHangUpError("User does not exist".to_string());
             };
 
-            if let UserStatus::Occupied(_) = data.status {} else {
-                self.logger.warn(&format!(
-                    "Call hangup failed: User {user} is not occupied"
-                ));
+            if let UserStatus::Occupied(_) = data.status {
+            } else {
+                self.logger
+                    .warn(&format!("Call hangup failed: User {user} is not occupied"));
                 return ServerResponse::CallHangUpError("Unexpected user status".to_string());
             }
 
@@ -518,7 +530,9 @@ impl OperatingServer {
             let usr = match self.users.read() {
                 Ok(u) => u,
                 Err(e) => {
-                    self.logger.error(&format!("Failed to acquire users lock during get_clients_for_user: {e}"));
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during get_clients_for_user: {e}"
+                    ));
                     return HashMap::new();
                 }
             };
@@ -563,7 +577,9 @@ impl OperatingServer {
             let mut users = match self.users.write() {
                 Ok(u) => u,
                 Err(e) => {
-                    self.logger.error(&format!("Failed to acquire users lock during make_user_offline: {e}"));
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during make_user_offline: {e}"
+                    ));
                     return Err(ServerError::MapError(e.to_string()));
                 }
             };
@@ -974,7 +990,10 @@ mod tests {
             ServerResponse::CallAcceptError(msg) => {
                 assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            other => unreachable!("Expected CallAcceptError(UserNotAvailable), got {:?}", other),
+            other => unreachable!(
+                "Expected CallAcceptError(UserNotAvailable), got {:?}",
+                other
+            ),
         }
     }
 
@@ -995,7 +1014,10 @@ mod tests {
             ServerResponse::CallAcceptError(msg) => {
                 assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            other => unreachable!("Expected CallAcceptError(UserNotAvailable), got {:?}", other),
+            other => unreachable!(
+                "Expected CallAcceptError(UserNotAvailable), got {:?}",
+                other
+            ),
         }
     }
 
@@ -1087,7 +1109,10 @@ mod tests {
             ServerResponse::CallRejectError(msg) => {
                 assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            other => unreachable!("Expected CallRejectError because alice is not available, got {:?}", other),
+            other => unreachable!(
+                "Expected CallRejectError because alice is not available, got {:?}",
+                other
+            ),
         }
     }
 }

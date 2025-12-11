@@ -84,9 +84,8 @@ impl Logger {
                     msg.timestamp, msg.level, msg.context, msg.message
                 );
 
-                if let Err(e) = file.write_all(log_line.as_bytes()) {
-                    // Fallback to stderr if disk I/O fails, to avoid silent failures
-                    eprintln!("FATAL: Failed to write to log file: {e}");
+                if file.write_all(log_line.as_bytes()).is_err() {
+                    return;
                 }
             }
         });

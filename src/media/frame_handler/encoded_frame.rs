@@ -7,7 +7,7 @@
 pub struct EncodedFrame {
     /// The compressed frame split into one or more chunks.
     pub chunks: Vec<Vec<u8>>,
-    
+
     /// Frame time
     pub frame_time: u128,
 

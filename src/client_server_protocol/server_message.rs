@@ -6,11 +6,12 @@ pub enum ServerMessage {
     UsernameRequest,
 
     CallIncoming {
-        from: String,
+        from_usr: String,
         offer_sdp: SessionDescriptionProtocol,
     },
 
     CallAccepted {
+        from_usr: String,
         sdp_answer: SessionDescriptionProtocol,
     },
 
@@ -27,9 +28,11 @@ impl ServerMessage {
         let s = match self {
             Self::UsernameRequest => "USERNAMEREQUEST".to_string(),
             
-            Self::CallIncoming { from, offer_sdp } => format!("CALLINCOMING|{from}|{offer_sdp}"),
+            Self::CallIncoming { from_usr, offer_sdp } => 
+                format!("CALLINCOMING|{from_usr}|{offer_sdp}"),
             
-            Self::CallAccepted { sdp_answer } => format!("CALLACCEPTED|{sdp_answer}"),
+            Self::CallAccepted { from_usr, sdp_answer } => 
+                format!("CALLACCEPTED|{from_usr}|{sdp_answer}"),
             
             Self::CallRejected => "CALLREJECTED".to_string(),
             
@@ -52,12 +55,13 @@ impl ServerMessage {
             "USERNAMEREQUEST" if parts.len() == 1 => Some(Self::UsernameRequest),
             
             "CALLINCOMING" if parts.len() == 3 => Some(Self::CallIncoming {
-                from: parts[1].into(),
+                from_usr: parts[1].into(),
                 offer_sdp: parts[2].to_string().parse().ok()?,
             }),
             
-            "CALLACCEPTED" if parts.len() == 2 => Some(Self::CallAccepted {
-                sdp_answer: parts[1].parse().ok()?,
+            "CALLACCEPTED" if parts.len() == 4 => Some(Self::CallAccepted {
+                from_usr: parts[1].to_string(),
+                sdp_answer: parts[2].parse().ok()?,
             }),
             
             "CALLREJECTED" if parts.len() == 1 => Some(Self::CallRejected),

@@ -44,7 +44,6 @@ pub struct RoomRTCApp {
     // Error handling
     error_msg: Option<String>,
     warning_msg: Option<String>,
-    logger: Logger,
 }
 
 impl RoomRTCApp {
@@ -85,7 +84,6 @@ impl RoomRTCApp {
             remote_texture: None,
             error_msg: None,
             warning_msg: None,
-            logger,
         }
     }
 }
@@ -112,7 +110,6 @@ impl eframe::App for RoomRTCApp {
                 View::SignUp => self.show_sign_up(ui),
                 View::LogIn => self.show_log_in(ui),
                 View::Calling(peer_username) => self.show_calling(peer_username.clone(), ui),
-                View::PreCall(peer_username) => self.show_pre_call(peer_username.clone()),
                 View::CallIncoming(peer_username, sdp_offer) => {
                     self.show_call_incoming(peer_username.clone(), sdp_offer.clone(), ui);
                 }
@@ -215,11 +212,11 @@ impl RoomRTCApp {
     fn show_call_hub(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                let username = match self.controller.get_username() {
-                    Ok(username) => username,
-                    Err(_) => {
-                        self.view = View::FatalError;
-                        return;
+                    let username = match self.controller.get_username() {
+                        Ok(username) => username,
+                        Err(_) => {
+                            self.view = View::FatalError;
+                            return;
                     }
                 };
 
@@ -258,7 +255,11 @@ impl RoomRTCApp {
                             ui.label(status.to_string());
 
                             if *status == UserStatus::Available && ui.button("Call").clicked() {
-                                self.view = View::Calling(username.clone());
+                                if let Err(e) = self.controller.call(username) {
+                                    self.warning_msg = Some(e.to_string());
+                                } else {
+                                    self.view = View::Calling(username.clone());
+                                }
                             }
                         });
                         ui.separator();
@@ -274,28 +275,6 @@ impl RoomRTCApp {
             ui.label("Connecting…");
             ui.separator();
         });
-
-        self.view = View::PreCall(peer_username);
-    }
-
-    fn show_pre_call(&mut self, peer_username: String) {
-        match self.controller.call(&peer_username) {
-            Ok((local_frame_rx, remote_frame_rx)) => match self.controller.get_username() {
-                Ok(username) => {
-                    self.local_frame_rx = Some(local_frame_rx);
-                    self.remote_frame_rx = Some(remote_frame_rx);
-                    self.view = View::Call(username, peer_username);
-                }
-                Err(e) => {
-                    self.error_msg = Some(e.to_string());
-                    self.view = View::Error;
-                }
-            },
-            Err(e) => {
-                self.warning_msg = Some(e.to_string());
-                self.view = View::CallHub;
-            }
-        }
     }
 
     fn show_call_incoming(
@@ -310,13 +289,6 @@ impl RoomRTCApp {
             ui.separator();
 
             ui.horizontal(|ui| {
-                if ui.button("Decline").clicked() {
-                    match self.controller.reject_call() {
-                        Ok(()) => self.view = View::CallHub,
-                        Err(e) => self.warning_msg = Some(e.to_string()),
-                    }
-                }
-
                 if ui.button("Accept").clicked() {
                     match self.controller.accept_call(peer_username.clone(), &sdp_offer) {
                         Ok((local_frame_rx, remote_frame_rx)) => {
@@ -324,7 +296,7 @@ impl RoomRTCApp {
                                 Ok(username) => {
                                     self.local_frame_rx = Some(local_frame_rx);
                                     self.remote_frame_rx = Some(remote_frame_rx);
-                                    self.view = View::Call(username, peer_username);
+                                    self.view = View::Call(username, peer_username.clone());
                                 }
                                 Err(e) => {
                                     self.error_msg = Some(e.to_string());
@@ -336,6 +308,12 @@ impl RoomRTCApp {
                             self.warning_msg = Some(e.to_string());
                             self.view = View::CallHub;
                         }
+                    }
+                }
+                if ui.button("Decline").clicked() {
+                    match self.controller.reject_call(peer_username) {
+                        Ok(()) => self.view = View::CallHub,
+                        Err(e) => self.warning_msg = Some(e.to_string()),
                     }
                 }
             });
@@ -548,6 +526,22 @@ impl RoomRTCApp {
             }
             AppEvent::FatalError(_) => {
                 self.view = View::FatalError;
+            }
+            AppEvent::CallAccepted(answer_sdp, username, peer_username) => {
+                match self.controller.get_in_call(answer_sdp) {
+                    Ok((local_frame_rx, remote_frame_rx)) => {
+                        self.local_frame_rx = Some(local_frame_rx);
+                        self.remote_frame_rx = Some(remote_frame_rx);
+                        self.view = View::Call(username, peer_username);
+                    },
+                    Err(e) => {
+                        self.warning_msg = Some(e.to_string());
+                        self.view = View::CallHub;
+                    }
+                }
+            }
+            AppEvent::CallRejected => {
+                self.view = View::CallHub;
             }
         }
     }

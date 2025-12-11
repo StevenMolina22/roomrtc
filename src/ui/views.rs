@@ -16,8 +16,6 @@ pub enum View {
 
     CallHub,
 
-    PreCall(String),
-
     Calling(String),
 
     CallIncoming(String, SessionDescriptionProtocol),

@@ -10,7 +10,6 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::thread;
 
 pub struct OperatingServer {
     users: Arc<RwLock<HashMap<String, UserData>>>,
@@ -305,7 +304,7 @@ impl OperatingServer {
             &self.logger,
         );
 
-        let msg = ServerMessage::CallIncoming { from: from_usr, offer_sdp };
+        let msg = ServerMessage::CallIncoming { from_usr, offer_sdp };
         send_message(&stream, &msg);
 
 
@@ -383,6 +382,7 @@ impl OperatingServer {
         ));
 
         let msg = ServerMessage::CallAccepted {
+            from_usr,
             sdp_answer
         };
 
@@ -609,7 +609,7 @@ fn get_answer_from_peer(
     send_message(
         &mut stream,
         &ServerMessage::CallIncoming {
-            from: from_usr,
+            from_usr,
             offer_sdp,
         },
     );

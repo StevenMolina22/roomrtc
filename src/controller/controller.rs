@@ -16,7 +16,7 @@ use std::io::{BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, RwLock, mpsc};
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 pub struct Controller {
@@ -31,7 +31,6 @@ pub struct Controller {
     media_pipeline: MediaPipeline,
 
     event_tx: Sender<AppEvent>,
-    client_response_tx: Option<Sender<ClientResponse>>,
 
     client_server_stream: StreamOwned<ClientConnection, TcpStream>,
     logger: Logger,
@@ -70,7 +69,6 @@ impl Controller {
             call_session,
             media_pipeline,
             event_tx,
-            client_response_tx: None,
             client_server_stream,
             logger,
         })
@@ -81,30 +79,32 @@ impl Controller {
     pub fn call(
         &mut self,
         peer_username: &String,
-    ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
+    ) -> Result<(), Error> {
         let token = self.get_token()?;
         let msg = ClientMessage::CallRequest {
-            token,
+            token: token.clone(),
             offer_sdp: self.call_session.get_offer(),
             to: peer_username.clone(),
         };
         match send_message(msg, &mut self.client_server_stream)? {
-            ServerResponse::CallRequestOk => {
-                self.logger.info("Call request ok");
-                self.call_session
-                    .process_answer(&sdp_answer)
-                    .map_err(|e| Error::MapError(e.to_string()))?;
-                self.logger.info("Starting ICE checks...");
-                self.call_session
-                    .start_ice_checks()
-                    .map_err(|e| Error::MapError(e.to_string()))?;
-
-                self.logger.info("Joining call...");
-                self.join_call()
-            }
+            ServerResponse::CallRequestOk => Ok(()),
             ServerResponse::CallRequestError(e) => Err(Error::CallError(e)),
             _ => Err(Error::BadResponse),
         }
+    }
+    
+    pub fn get_in_call(&mut self, sdp_answer: SessionDescriptionProtocol) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
+        self.logger.info("Call request ok");
+        self.call_session
+            .process_answer(&sdp_answer)
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        self.logger.info("Starting ICE checks...");
+        self.call_session
+            .start_ice_checks()
+            .map_err(|e| Error::MapError(e.to_string()))?;
+
+        self.logger.info("Joining call...");
+        self.join_call()
     }
 
     pub fn hang_up(&mut self) -> Result<(), Error> {
@@ -154,9 +154,16 @@ impl Controller {
             .process_offer(offer_sdp)
             .map_err(|e| Error::MapError(e.to_string()))?;
         let token = self.get_token()?;
-        let msg = ClientMessage::CallAccept { from_usr: token, to_usr, sdp_answer };
+        let msg = ClientMessage::CallAccept { from_usr: token.clone(), to_usr: to_usr.clone(), sdp_answer: sdp_answer.clone() };
 
-        self.give_response_to_thread(response)?;
+        match send_message(msg, &mut self.client_server_stream)? {
+            ServerResponse::CallAcceptOk => {
+                let event = AppEvent::CallAccepted(sdp_answer, token.clone(), to_usr.clone());
+                send_event_or_log_out(&self.event_tx, event, &self.logged_in);
+            },
+            ServerResponse::CallAcceptError(e) => return Err(Error::CallError(e)),
+            _ => return Err(Error::BadResponse),
+        }
 
         self.logger.info("SDP Answer sent. Starting ICE checks...");
         self.call_session
@@ -167,11 +174,25 @@ impl Controller {
         self.join_call()
     }
 
-    pub fn reject_call(&mut self) -> Result<(), Error> {
-        self.give_response_to_thread(ClientResponse::CallReject)
+    pub fn reject_call(&mut self, to_usr: String) -> Result<(), Error> {
+        let token = self.get_token()?;
+        let msg = ClientMessage::CallReject {
+            from_usr: token,
+            to_usr,
+        };
+        match send_message(msg, &mut self.client_server_stream)? {
+            ServerResponse::CallRejectOk => {
+                let event = AppEvent::CallRejected;
+                send_event_or_log_out(&self.event_tx, event, &self.logged_in);
+            },
+            ServerResponse::CallRejectError(e) => return Err(Error::CallError(e)),
+            _ => return Err(Error::BadResponse),
+        }
+
+        Ok(())
     }
 
-    fn join_call(&mut self) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
+    pub(crate) fn join_call(&mut self) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         let pair = self
             .call_session
             .get_selected_pair()
@@ -237,9 +258,7 @@ impl Controller {
                 self.token = Some(token);
                 self.logged_in.store(true, Ordering::SeqCst);
                 self.username = Some(username.clone());
-                let (client_response_tx, client_response_rx) = mpsc::channel();
-                self.client_response_tx = Some(client_response_tx);
-                self.start_server_receiver(username, server_client_addr, client_response_rx)?;
+                self.start_server_receiver(username, server_client_addr)?;
                 Ok(())
             }
             ServerResponse::LoginError(e) => Err(Error::LogInFailed(e)),
@@ -255,7 +274,6 @@ impl Controller {
             ServerResponse::LogoutOk => {
                 self.logged_in.store(false, Ordering::SeqCst);
                 self.token = None;
-                self.client_response_tx = None;
                 self.users_status = Arc::new(RwLock::new(HashMap::new()));
                 Ok(())
             }
@@ -271,7 +289,6 @@ impl Controller {
         &self,
         username: &String,
         server_client_addr: SocketAddr,
-        client_response_rx: Receiver<ClientResponse>,
     ) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let logged_in = self.logged_in.clone();
@@ -317,7 +334,6 @@ impl Controller {
                 match get_response_for_server_message(
                     server_msg,
                     &event_tx,
-                    &client_response_rx,
                     username.clone(),
                     user_status.clone(),
                 ) {
@@ -345,18 +361,6 @@ impl Controller {
         });
 
         Ok(())
-    }
-
-    fn give_response_to_thread(&mut self, response: ClientResponse) -> Result<(), Error> {
-        if let Some(client_response_tx) = &self.client_response_tx {
-            client_response_tx
-                .send(response)
-                .map_err(|e| Error::IOError(e.to_string()))
-        } else {
-            self.logger
-                .warn("No podes obtener canal, no estas loggeado");
-            Err(Error::NotLoggedInError)
-        }
     }
 
     //----------------------------------------------------------------------------------------------------------------------------
@@ -422,7 +426,6 @@ fn send_response(
 fn get_response_for_server_message(
     server_msg: ServerMessage,
     event_tx: &Sender<AppEvent>,
-    client_response_rx: &Receiver<ClientResponse>,
     username: String,
     user_status: Arc<RwLock<HashMap<String, UserStatus>>>,
 ) -> Result<Option<ClientResponse>, Error> {
@@ -432,19 +435,14 @@ fn get_response_for_server_message(
             update_status(username, status, user_status)?;
             Ok(None)
         }
-        ServerMessage::CallIncoming { from, offer_sdp } => {
-            println!("call incoming received");
-            if let Err(e) = event_tx.send(AppEvent::CallIncoming(from, offer_sdp)) {
-                println!("error sending call incoming to ui");
+        ServerMessage::CallIncoming { from_usr, offer_sdp } => {
+            if let Err(e) = event_tx.send(AppEvent::CallIncoming(from_usr, offer_sdp)) {
                 return Err(Error::MapError(e.to_string()));
-            }
-            match client_response_rx.recv() {
-                Ok(response) => Ok(Some(response)),
-                Err(e) => Err(Error::MapError(e.to_string())),
-            }
+            };
+            Ok(None)
         }
-        ServerMessage::CallAccepted {sdp_answer} => {
-            if let Err(e) = event_tx.send(AppEvent::CallAccepted(sdp_answer)) {
+        ServerMessage::CallAccepted {from_usr, sdp_answer} => {
+            if let Err(e) = event_tx.send(AppEvent::CallAccepted(sdp_answer, username.clone(), from_usr)) {
                 return Err(Error::MapError(e.to_string()));
             }
             Ok(None)

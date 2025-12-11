@@ -7,7 +7,7 @@ use rustls::{ServerConnection, StreamOwned};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 /// Manages a single client connection and delegates to `OperatingServer`.
@@ -58,7 +58,7 @@ impl UserHandler {
     /// - the received bytes cannot be parsed into a valid message.
     pub fn handle_client(
         &mut self,
-        mut stream: StreamOwned<ServerConnection, TcpStream>,
+        stream: &mut StreamOwned<ServerConnection, TcpStream>,
         on: Arc<AtomicBool>,
     ) -> Result<(), Error> {
         let mut buff = [0; 1024];
@@ -76,7 +76,7 @@ impl UserHandler {
                 Err(e) => {
                     self.logger.error(&format!("Connection error: {e}"));
                     self.op_server.make_user_offline()?;
-                    return Err(Error::ConnectionError(e.to_string()));
+                    return Err(Error::ConnectionError);
                 }
             };
 
@@ -85,7 +85,7 @@ impl UserHandler {
                 None => ServerResponse::BadMessage,
             };
 
-            send_response(&mut stream, sv_response);
+            send_response(stream, sv_response)?;
         }
     }
 
@@ -135,15 +135,53 @@ impl UserHandler {
             } => self.op_server.call_reject(from_usr, to_usr),
 
             ClientMessage::CallHangup { token } => self.op_server.call_hangup(token),
+            
+            _ => ServerResponse::BadMessage,
+        }
+    }
+    pub fn client_server_handshake(
+        &mut self,
+        tls_stream: &mut StreamOwned<ServerConnection, TcpStream>,
+        users_connected: &Arc<AtomicUsize>,
+        config: &Arc<Config>,
+    ) -> Result<(), Error> {
+        let mut buff = [0u8; 1024];
+        let n = match tls_stream.read(&mut buff) {
+            Ok(n) => n,
+            Err(_) => return Err(Error::ConnectionError),
+        };
+    
+        let msg = ClientMessage::from_bytes(&buff[..n]);
+    
+        match msg {
+            Some(ClientMessage::Hello) => {
+                if users_connected.load(Ordering::SeqCst) >= config.server.max_amount_of_users_connected {
+                    send_response(tls_stream, ServerResponse::ServerFull)?;
+                    let _ = tls_stream.flush();
+                    Err(Error::ServerFull)
+                } else {
+                    send_response(tls_stream, ServerResponse::Welcome)?;
+                    users_connected.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+            },
+            _ => {
+                Err(Error::ConnectionError)
+            }
         }
     }
 }
 
+
 /// Sends a serialized `ServerResponse` over the TCP stream.
 ///
 /// Any I/O error is logged but not returned to the caller.
-fn send_response(stream: &mut StreamOwned<ServerConnection, TcpStream>, response: ServerResponse) {
-    let _ = stream.write_all(&response.to_bytes());
+fn send_response(
+    stream: &mut StreamOwned<ServerConnection, TcpStream>, 
+    response: ServerResponse
+) -> Result<(), Error> {
+    stream.write_all(&response.to_bytes()).map_err(|e| Error::ConnectionError)?;
+    Ok(())
 }
 
 #[cfg(test)]

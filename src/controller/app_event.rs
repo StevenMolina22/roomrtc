@@ -36,9 +36,7 @@ pub enum AppEvent {
     
     /// Recoverable error occurred during operation.
     Error(String),
-    
-    /// Fatal error occurred requiring user intervention.
-    FatalError(String),
+    FatalError,
     LocalStatsUpdate(CallStats),
     RemoteStatsUpdate(CallStats),
 }

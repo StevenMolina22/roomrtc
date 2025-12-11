@@ -1,8 +1,9 @@
+use std::time::Instant;
 use crate::config::MediaConfig;
-use crate::media::frame_handler::YuvImgSource;
 
 use super::{EncodedFrame, error::FrameError as Error, frame::Frame};
 use openh264::encoder::{BitRate, Complexity, EncodedBitStream, Encoder as H264Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode, UsageType};
+use openh264::formats::YUVSlices;
 use openh264::OpenH264API;
 use yuv::{YuvChromaSubsampling, YuvConversionMode, YuvPlanarImageMut, YuvRange, YuvStandardMatrix};
 
@@ -58,38 +59,39 @@ impl Encoder {
     /// # Errors
     ///
     /// - [`Error::EncodingError`] — if encoding fails due to invalid frame data.
-    pub fn encode_frame(&mut self, frame: &Frame) -> Result<EncodedFrame, Error> {
-        let mut yuv_img = YuvPlanarImageMut::alloc(
-            frame.width as u32,
-            frame.height as u32,
-            YuvChromaSubsampling::Yuv420
+    pub fn encode(&mut self, yuv: &YuvPlanarImageMut<u8>, frame_time: u128) -> Result<EncodedFrame, Error> {
+        let c = Instant::now();
+
+        let yuv_source = YUVSlices::new(
+            (
+                yuv.y_plane.borrow(),
+                yuv.u_plane.borrow(),
+                yuv.v_plane.borrow(),
+            ),
+            (
+                yuv.width as usize,
+                yuv.height as usize,
+            ),
+            (
+                yuv.y_stride as usize,
+                yuv.u_stride as usize,
+                yuv.v_stride as usize,
+            )
         );
 
-        yuv::rgb_to_yuv420(
-            &mut yuv_img,
-            &frame.data,
-            (frame.width as u32) * 3,
-            YuvRange::Limited,
-            YuvStandardMatrix::Bt709,
-            YuvConversionMode::Balanced,
-        ).map_err(|e| Error::EncodingError(e.to_string()))?;
-
-        let yuv_source = YuvImgSource { img: &yuv_img };
-        
-        let nalus = self
+        let bitstream = self
             .encoder
             .encode(&yuv_source)
             .map_err(|e| Error::EncodingError(e.to_string()))?;
 
-        let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
-        let frame_type = nalus.frame_type();
+        let chunks = generate_chunks_from_bitstream(&bitstream, self.max_chunk_size);
+        let frame_type = bitstream.frame_type();
         let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
 
+        println!("ENCODER: {}", c.elapsed().as_millis());
         Ok(EncodedFrame {
             chunks,
-            frame_time: frame.frame_time,
-            width: frame.width,
-            height: frame.height,
+            frame_time,
             is_i_frame,
         })
     }
@@ -100,7 +102,7 @@ impl Encoder {
 ///
 /// This helper ensures each chunk is at most `max_chunk_size` bytes,
 /// which is useful for transport over datagram protocols like UDP.
-fn generate_chunks_from_nalus(nalus: &EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
+fn generate_chunks_from_bitstream(nalus: &EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
     let nalu_units = nalus.to_vec();
     let mut chunks = Vec::new();
     for chunk in nalu_units.chunks(max_chunk_size) {

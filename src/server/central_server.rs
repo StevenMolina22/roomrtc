@@ -120,12 +120,6 @@ impl CentralServer {
                 if !on.load(Ordering::SeqCst) {
                     break;
                 }
-                if users_connected.load(Ordering::SeqCst) == config.server.max_amount_of_users_connected {
-                    println!("Max amount of users connected reached. Abort connection");
-                    continue;
-                }
-                users_connected.fetch_add(1, Ordering::SeqCst);
-                println!("User Connected. Total: {}", users_connected.load(Ordering::SeqCst));
                 let stream = match stream {
                     Ok(s) => s,
                     Err(_) => {
@@ -146,16 +140,21 @@ impl CentralServer {
                         Ok(conn) => conn,
                         Err(_) => return,
                     };
-                    let tls_stream = StreamOwned::new(tls_conn, stream);
+                    let mut tls_stream = StreamOwned::new(tls_conn, stream);
 
                     let mut user_handler = UserHandler::new(
                         users,
-                        config,
+                        config.clone(),
                         server_client_socket_addr,
                         thread_logger,
                     );
-                    match user_handler.handle_client(tls_stream, on) {
-                        Ok(())|Err(ServerError::ConnectionError(_)) => users_connected
+
+                    if let Err(_) = user_handler.client_server_handshake(&mut tls_stream, &users_connected, &config) {
+                        return
+                    }
+
+                    match user_handler.handle_client(&mut tls_stream, on) {
+                        Ok(())|Err(ServerError::ConnectionError) => users_connected
                             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
                                 if v == 0 { Some(0) } else { Some(v - 1) }
                             })

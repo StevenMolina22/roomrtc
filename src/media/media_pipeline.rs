@@ -8,12 +8,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc, Mutex};
 use std::thread;
+use yuv::YuvPlanarImageMut;
 use crate::controller::AppEvent;
 use crate::clock::Clock;
 use crate::transport::rtcp::ReceiverStats;
+use crate::media::frame_handler::color_space::rgb_to_yuv420;
 
 /// Maximum number of RTP packets buffered for jitter compensation.
-const JITTER_BUFF_SIZE: usize = 1024;
+const JITTER_BUFF_SIZE: usize = 2048;
 
 /// Coordinates camera capture, encoding/decoding, and RTP transport.
 ///
@@ -130,9 +132,9 @@ impl MediaPipeline {
         connected: Arc<AtomicBool>,
     ) -> Result<Receiver<Frame>, Error> {
         let (local_frame_tx, local_frame_rx) = mpsc::channel();
-        let (raw_tx, raw_rx) = mpsc::channel();
+        let (rgb_tx, rgb_rx) = mpsc::channel();
 
-        self.start_encoding_thread(raw_rx, event_tx.clone(), rtp_tx, connected.clone())?;
+        self.start_frame_sender_thread(rgb_rx, event_tx.clone(), rtp_tx, &connected)?;
         let camera_frame_rx = self
             .camera
             .start()
@@ -148,7 +150,7 @@ impl MediaPipeline {
                     break;
                 }
 
-                if raw_tx.send(frame.clone()).is_err() {
+                if rgb_tx.send(frame.clone()).is_err() {
                     break;
                 }
             }
@@ -158,7 +160,30 @@ impl MediaPipeline {
     }
 
     // Spawns the encoding thread that turns raw frames into RTP packets.
-    fn start_encoding_thread(&mut self, raw_rx: Receiver<Frame>, event_tx: Sender<AppEvent>, rtp_tx: Sender<RtpPacket>, connected: Arc<AtomicBool>) -> Result<(), Error> {
+    fn start_frame_sender_thread(&mut self, rgb_rx: Receiver<Frame>, event_tx: Sender<AppEvent>, rtp_tx: Sender<RtpPacket>, connected: &Arc<AtomicBool>) -> Result<(), Error> {
+        let yuv_rx = self.start_rgb_to_yuv_thread(rgb_rx)?;
+        self.start_encoded_sender_thread(rtp_tx, yuv_rx, event_tx.clone(), &connected)?;
+
+        Ok(())
+    }
+
+    fn start_rgb_to_yuv_thread(&mut self, rgb_rx: Receiver<Frame>) -> Result<Receiver<(YuvPlanarImageMut<'static, u8>, u128)>,Error> {
+        let (yuv_tx, yuv_rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            for rgb_frame in rgb_rx {
+                let yuv = rgb_to_yuv420(&rgb_frame).unwrap();
+
+                if let Err(_) = yuv_tx.send((yuv, rgb_frame.frame_time)) {
+                    break
+                }
+            }
+        });
+
+        Ok(yuv_rx)
+    }
+
+    fn start_encoded_sender_thread(&mut self, rtp_tx: Sender<RtpPacket>, yuv_rx: Receiver<(YuvPlanarImageMut<'static, u8>, u128)>, event_tx: Sender<AppEvent>, connected: &Arc<AtomicBool>) -> Result<(), Error> {
         let mut encoder = match Encoder::new(&self.config.media) {
             Ok(d) => d,
             Err(e) => {
@@ -169,14 +194,17 @@ impl MediaPipeline {
             }
         };
 
-        let ssrc = self.ssrc;
-        let config = Arc::clone(&self.config);
         let logger = self.logger.clone();
+        let ssrc = self.ssrc;
+        let config = self.config.clone();
+        let connected = connected.clone();
+        let mut seq_num: u64 = 0;
+
+
 
         thread::spawn(move || {
-            let mut seq_num: u64 = 0;
-            for frame in raw_rx {
-                let encoded_frame = match encoder.encode_frame(&frame) {
+            for (yuv, timestamp) in yuv_rx {
+                let encoded = match encoder.encode(&yuv, timestamp) {
                     Ok(f) => f,
                     Err(e) => {
                         logger.error(&format!("Failed to encode frame: {e}"));
@@ -184,16 +212,16 @@ impl MediaPipeline {
                     }
                 };
 
-                if let Err(e) = send_encoded_frame(encoded_frame, &rtp_tx, ssrc, &connected, &mut seq_num, &config) {
+                if let Err(e) = send_encoded_frame(encoded, &rtp_tx, ssrc, &connected, &mut seq_num, &config) {
                     logger.error(&Error::SendError(e.to_string()).to_string());
                     break
                 }
             };
         });
-
         Ok(())
     }
 }
+
 
 /// Sends an encoded frame as RTP packets over the provided channel.
 fn send_encoded_frame(
@@ -245,7 +273,7 @@ fn generate_frame_from_chunks(data: &[u8], decoder: &mut Decoder) -> Option<Fram
         data: decoded_data,
         width,
         height,
-        frame_time: 0,
+        frame_time: 0
     })
 }
 
@@ -299,7 +327,15 @@ mod tests {
         };
 
         // ------- Encode -------
-        let encoded = match encoder.encode_frame(&raw_frame) {
+        let yuv_frame = match rgb_to_yuv420(&raw_frame) {
+            Ok(img) => img,
+            Err(_) => {
+                eprintln!("Failed to convert RGB to YUV");
+                return;
+            }
+        };
+
+        let encoded = match encoder.encode(&yuv_frame, raw_frame.frame_time) {
             Ok(enc) => enc,
             Err(e) => {
                 eprintln!("Failed to encode frame: {}", e);

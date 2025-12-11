@@ -20,11 +20,12 @@ pub enum ServerError {
     /// Failed to bind a listening socket.
     FailedToBindAddress,
     /// Failed to establish a connection.
-    ConnectionError(String),
+    ConnectionError,
     /// Server has been turned off.
     ServerOff,
     /// Input did not meet expected format.
     InvalidFormat,
+    ServerFull
 }
 
 impl Display for ServerError {
@@ -40,9 +41,10 @@ impl Display for ServerError {
             Self::MapError(e) => write!(f, "Error: {e}"),
             Self::IPNotFound(e) => write!(f, "Error: IP not found: {e}"),
             Self::FailedToBindAddress => write!(f, "Error: failed to bind address"),
-            Self::ConnectionError(e) => write!(f, "Error: failed to connect: {e}"),
+            Self::ConnectionError => write!(f, "Error: failed to connect"),
             Self::ServerOff => write!(f, "Error: is no longer available"),
             Self::InvalidFormat => write!(f, "Error: invalid format"),
+            Self::ServerFull => write!(f, "Error: server full"),
         }
     }
 }

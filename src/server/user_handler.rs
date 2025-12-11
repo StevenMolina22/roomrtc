@@ -30,7 +30,6 @@ pub struct UserHandler {
 impl UserHandler {
     pub fn new(
         users: Arc<RwLock<HashMap<String, UserData>>>,
-        users_connected: Arc<AtomicUsize>,
         config: Arc<Config>,
         server_client_socket_addr: SocketAddr,
         max_users: usize,
@@ -39,7 +38,6 @@ impl UserHandler {
         Self {
             op_server: OperatingServer::new(
                 users,
-                users_connected,
                 server_client_socket_addr,
                 config.server.users_file.clone(),
                 max_users,
@@ -174,7 +172,6 @@ mod tests {
 
         let op_server = OperatingServer::new(
             users,
-            users_connected,
             addr,
             "test_handler_users.txt".into(),
             10,

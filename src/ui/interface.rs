@@ -12,6 +12,7 @@ use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
 use std::net::SocketAddr;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, mpsc};
+use crate::transport::rtcp::CallStats;
 
 /// Application state and UI controller for the `RoomRTC` GUI.
 ///
@@ -44,6 +45,8 @@ pub struct RoomRTCApp {
     // Error handling
     error_msg: Option<String>,
     warning_msg: Option<String>,
+
+    last_stats: Option<CallStats>
 }
 
 impl RoomRTCApp {
@@ -84,6 +87,7 @@ impl RoomRTCApp {
             remote_texture: None,
             error_msg: None,
             warning_msg: None,
+            last_stats: None
         }
     }
 }
@@ -120,6 +124,7 @@ impl eframe::App for RoomRTCApp {
                 View::CallEnded => self.show_call_ended(ui),
                 View::Error => self.show_error(ui),
                 View::FatalError => self.show_fatal_error(ui),
+                View::FullServer => self.show_full_server(ui)
             }
 
             ctx.request_repaint();
@@ -145,14 +150,11 @@ impl RoomRTCApp {
     }
 
     fn show_sign_up(&mut self, ui: &mut Ui) {
-        ui.heading("Sign Up");
-
         ui.vertical_centered(|ui| {
-            ui.label("Username:");
-            ui.add(egui::TextEdit::singleline(&mut self.username_buff));
+            ui.heading("Sign Up");
+            ui.add(egui::TextEdit::singleline(&mut self.username_buff).hint_text("Username"));
             ui.separator();
-            ui.label("Password:");
-            ui.add(egui::TextEdit::singleline(&mut self.password_buff));
+            ui.add(egui::TextEdit::singleline(&mut self.password_buff).password(true).hint_text("Password"));
         });
 
         if !self.username_buff.is_empty()
@@ -178,14 +180,11 @@ impl RoomRTCApp {
     }
 
     fn show_log_in(&mut self, ui: &mut Ui) {
-        ui.heading("Log In");
-
         ui.vertical_centered(|ui| {
-            ui.label("Username:");
-            ui.add(egui::TextEdit::singleline(&mut self.username_buff));
+            ui.heading("Log In");
+            ui.add(egui::TextEdit::singleline(&mut self.username_buff).hint_text("Username"));
             ui.separator();
-            ui.label("Password:");
-            ui.add(egui::TextEdit::singleline(&mut self.password_buff));
+            ui.add(egui::TextEdit::singleline(&mut self.password_buff).password(true).hint_text("Password"));
         });
 
         if !self.username_buff.is_empty()
@@ -363,6 +362,26 @@ impl RoomRTCApp {
                     self.view = View::CallHub;
                 }
             }
+
+            ui.separator();
+            if let Some(stats) = &self.last_stats {
+                ui.scope(|ui| {
+                    ui.style_mut().override_text_style = Some(egui::TextStyle::Small);
+                    ui.label(RichText::new("📊 Network Stats").strong());
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Jitter: {}ms", stats.remote_receiver.jitter));
+                        ui.label(format!("Lost: {} pkts", stats.remote_receiver.packets_lost));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Sent: {}", stats.local_sender.packets_sent));
+                        ui.label(format!("Received: {}", stats.local_receiver.packets_received));
+                    });
+                });
+            } else {
+                ui.label("Esperando reporte RTCP...");
+            }
         });
     }
 
@@ -373,6 +392,27 @@ impl RoomRTCApp {
 
             if ui.button("Back to menu").clicked() {
                 self.view = View::CallHub;
+            }
+        });
+    }
+
+    fn show_full_server(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(50.0);
+
+            ui.label(
+                RichText::new("Server is full. Try again soon!")
+                    .color(Color32::RED)
+                    .font(FontId::proportional(24.0)),
+            );
+
+            ui.add_space(20.0);
+
+            if ui
+                .add_sized([200.0, 40.0], egui::Button::new("Close App"))
+                .clicked()
+            {
+                std::process::exit(0);
             }
         });
     }
@@ -504,6 +544,9 @@ impl RoomRTCApp {
 
     fn handle_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::FullServerError => {
+                self.view = View::FullServer
+            }
             AppEvent::CallIncoming(peer, offer_sdp) => {
                 self.view = View::CallIncoming(peer, offer_sdp);
             }
@@ -543,6 +586,28 @@ impl RoomRTCApp {
             }
             AppEvent::CallRejected => {
                 self.view = View::CallHub;
+            }
+            AppEvent::LocalStatsUpdate(new_stats) => {
+                if let Some(current) = &mut self.last_stats {
+                    current.local_sender = new_stats.local_sender;
+                    current.local_receiver = new_stats.local_receiver;
+                } else {
+                    self.last_stats = Some(new_stats);
+                }
+            }
+            AppEvent::RemoteStatsUpdate(new_stats) => {
+                if let Some(current) = &mut self.last_stats {
+                    // Si el evento trae data de sender remoto, actualizamos eso
+                    if new_stats.remote_sender.packets_sent > 0 {
+                        current.remote_sender = new_stats.remote_sender;
+                    }
+                    // Si trae data de receiver remoto (Jitter/Loss), actualizamos eso
+                    if new_stats.remote_receiver.packets_received > 0 || new_stats.remote_receiver.jitter > 0 {
+                        current.remote_receiver = new_stats.remote_receiver;
+                    }
+                } else {
+                    self.last_stats = Some(new_stats);
+                }
             }
         }
     }

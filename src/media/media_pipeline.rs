@@ -6,11 +6,11 @@ use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
 use crate::transport::{rtp::RtpPacket, jitter_buffer::JitterBuffer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, mpsc, Mutex};
 use std::thread;
 use crate::controller::AppEvent;
 use crate::clock::Clock;
-
+use crate::transport::rtcp::ReceiverStats;
 
 const JITTER_BUFF_SIZE: usize = 1024;
 
@@ -41,9 +41,10 @@ impl MediaPipeline {
         rtp_rx: Receiver<RtpPacket>,
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
+        receiver_metrics: Arc<Mutex<ReceiverStats>>
     ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         let local_frame_rx = self.start_local_frame_pipeline(rtp_tx, event_tx.clone(), connected.clone())?;
-        let remote_frame_rx = self.start_remote_frame_pipeline(rtp_rx, event_tx.clone(), connected.clone())?;
+        let remote_frame_rx = self.start_remote_frame_pipeline(rtp_rx, event_tx.clone(), connected.clone(), receiver_metrics)?;
 
         Ok((local_frame_rx, remote_frame_rx))
     }
@@ -58,11 +59,12 @@ impl MediaPipeline {
         rtp_rx: Receiver<RtpPacket>,
         event_tx: Sender<AppEvent>,
         connected: Arc<AtomicBool>,
+        receiver_metrics: Arc<Mutex<ReceiverStats>>
     ) -> Result<Receiver<Frame>, Error> {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
         let logger = self.logger.clone();
 
-        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(self.clock.clone());
+        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(self.clock.clone(), receiver_metrics);
 
         thread::spawn({
             move || {

@@ -1,4 +1,4 @@
-use super::UserHandler;
+use super::{ServerError, UserHandler};
 use super::error::ServerError as Error;
 use crate::client_server_protocol::{ClientResponse, ServerMessage};
 use crate::config::Config;
@@ -87,7 +87,7 @@ impl CentralServer {
                     break;
                 }
                 Ok(_) => {}
-                Err(e) => {
+                Err(_) => {
                     self.on.store(false, Ordering::SeqCst);
                     break;
                 }
@@ -123,6 +123,12 @@ impl CentralServer {
                 if !on.load(Ordering::SeqCst) {
                     break;
                 }
+                if users_connected.load(Ordering::SeqCst) == config.server.max_amount_of_users_connected {
+                    println!("Max amount of users connected reached. Abort connection");
+                    continue;
+                }
+                users_connected.fetch_add(1, Ordering::SeqCst);
+                println!("User Connected. Total: {}", users_connected.load(Ordering::SeqCst));
                 let stream = match stream {
                     Ok(s) => s,
                     Err(_) => {
@@ -144,13 +150,20 @@ impl CentralServer {
 
                     let mut user_handler = UserHandler::new(
                         users,
-                        users_connected,
                         config,
                         server_client_socket_addr,
                         max_users,
                         thread_logger,
                     );
-                    if user_handler.handle_client(tls_stream, on).is_err() {}
+                    match user_handler.handle_client(tls_stream, on) {
+                        Ok(())|Err(ServerError::ConnectionError(_)) => users_connected
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+                                if v == 0 { Some(0) } else { Some(v - 1) }
+                            })
+                            .ok(),
+                        _ => Some(0),
+                    };
+                    println!("User disconnected. Total: {}", users_connected.load(Ordering::SeqCst));
                 });
             }
         });
@@ -280,8 +293,7 @@ pub fn map_stream_to_user(
     };
 
     let username = match response {
-        ClientResponse::Username(name) => name,
-        _ => return,
+        ClientResponse::Username(name) => name
     };
 
     let mut users = users.write().unwrap();

@@ -16,6 +16,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use udp_dtls::{DtlsAcceptor, DtlsConnector, DtlsStream, SignatureAlgorithm, UdpChannel};
+use crate::transport::rtcp::metrics::{ReceiverStats, SenderStats};
 
 pub struct MediaTransport {
     config: Arc<Config>,
@@ -72,6 +73,7 @@ impl MediaTransport {
             Sender<RtpPacket>,
             Receiver<RtpPacket>,
             Arc<AtomicBool>,
+            Arc<Mutex<ReceiverStats>>,
         ),
         Error,
     > {
@@ -105,7 +107,8 @@ impl MediaTransport {
         let srtp_context = SrtpContext::new(&key_material)
             .map_err(|e| Error::MapError(format!("SRTP context creation failed: {e}")))?;
 
-        let local_ssrc = self.config.media.default_ssrc;
+        let local_sender_stats = Arc::new(Mutex::new(SenderStats::default()));
+        let local_receiver_stats = Arc::new(Mutex::new(ReceiverStats::default()));
 
         let rtcp_handler = RtcpReportHandler::new(
             self.rtcp_socket
@@ -113,19 +116,21 @@ impl MediaTransport {
                 .map_err(|e| Error::CloningSocketError(e.to_string()))?,
             Arc::clone(&self.connected),
             self.config.rtcp.clone(),
-            local_ssrc,
+            local_sender_stats.clone(),
+            local_receiver_stats.clone(),
         );
         rtcp_handler
             .start(event_tx.clone())
             .map_err(|e| Error::MapError(e.to_string()))?;
         self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
 
-        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.spawn_rtp_threads(event_tx, srtp_context, local_setup_role)?;
+        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.spawn_rtp_threads(event_tx, srtp_context, local_setup_role, local_sender_stats)?;
 
         Ok((
             local_to_remote_rtp_tx,
             remote_to_local_rtp_rx,
             self.connected.clone(),
+            local_receiver_stats
         ))
     }
 
@@ -154,7 +159,8 @@ impl MediaTransport {
         &self,
         event_tx: Sender<AppEvent>,
         srtp_ctx: SrtpContext,
-        role: DtlsSetupRole
+        role: DtlsSetupRole,
+        sender_metrics: Arc<Mutex<SenderStats>>,
     ) -> Result<(Sender<RtpPacket>, Receiver<RtpPacket>), Error> {
         let rtcp_handler = match &self.rtcp_handler {
             Some(handler_lock) => Arc::clone(handler_lock),
@@ -163,12 +169,12 @@ impl MediaTransport {
 
         let local_protected_data_tx = self.start_srtp_sender(
             &rtcp_handler,
-            event_tx.clone()
+            sender_metrics
         )?;
         
         let remote_protected_data_rx= self.start_srtp_receiver(
             &rtcp_handler,
-            event_tx
+            event_tx,
         )?;
 
         let srtp_ctx = Arc::new(Mutex::new(srtp_ctx));
@@ -265,7 +271,7 @@ impl MediaTransport {
     fn start_srtp_sender(
         &self,
         rtcp_handler: &Arc<Mutex<RtcpReportHandler<UdpSocket>>>,
-        event_tx: Sender<AppEvent>,
+        sender_metrics: Arc<Mutex<SenderStats>>,
     ) -> Result<Sender<Vec<u8>>, Error> {
         let srtp_sender_socket = self
             .rtp_socket
@@ -276,12 +282,13 @@ impl MediaTransport {
             srtp_sender_socket,
             rtcp_handler,
             &self.connected,
+            sender_metrics,
             self.logger.context("RtpSender"),
         )
         .map_err(|e| Error::MapError(e.to_string()))?;
 
         srtp_sender
-            .start(event_tx)
+            .start()
             .map_err(|e| Error::MapError(e.to_string()))
     }
 

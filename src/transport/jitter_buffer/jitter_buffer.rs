@@ -1,8 +1,10 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::sleep;
-use std::time::{Duration};
+use std::time::{Duration, Instant};
 use crate::transport::rtp::RtpPacket;
 use crate::clock::Clock;
+use crate::transport::jitter_buffer::RrMetrics;
+use crate::transport::rtcp::ReceiverStats;
 
 const TOLERANCE_MILLIS: u128 = 120;
 
@@ -20,12 +22,16 @@ pub struct JitterBuffer<const N: usize> {
     last_frame_completed_timestamp: u128,
     last_deliver_timestamp: u128,
 
-    //metrics: RrMetrics,
     clock: Arc<Clock>,
+
+    metrics: Arc<Mutex<ReceiverStats>>,
+    last_transit: Option<i64>,
+    last_arrival: Option<Instant>,
+    max_seq_seen: u64,
 }
 
 impl<const N: usize> JitterBuffer<N>  {
-    pub fn new(clock: Arc<Clock>) -> Self {
+    pub fn new(clock: Arc<Clock>, metrics: Arc<Mutex<ReceiverStats>>) -> Self {
         Self {
             packets: std::array::from_fn(|_| None),
             read_idx: 0,
@@ -35,12 +41,17 @@ impl<const N: usize> JitterBuffer<N>  {
             i_frame_needed: true,
             last_frame_completed_timestamp: 0,
             last_deliver_timestamp: 0,
-            //metrics: RrMetrics::default(),
             clock,
+            metrics,
+            last_transit: None,
+            last_arrival: None,
+            max_seq_seen: 0,
         }
     }
 
     pub(crate) fn add(&mut self, packet: RtpPacket) {
+        self.update_stats(&packet);
+
         let seq = packet.sequence_number;
         if (self.i_frame_needed && !packet.is_i_frame)
         {
@@ -193,7 +204,6 @@ impl<const N: usize> JitterBuffer<N>  {
             if let Some(pkt) = &self.packets[self.read_idx]
                 && pkt.is_i_frame
                 && pkt.timestamp != read_timestamp
-            // deberia ademas checkear que sea despues del write_seq si hubo overwrite (idea, puedo recibir una flag de overwrite)
             {
                 self.read_seq = Some(pkt.sequence_number);
                 self.i_frame_needed = false;
@@ -243,77 +253,38 @@ impl<const N: usize> JitterBuffer<N>  {
         expiration_deadline >= actual
     }
 
-    /*
-    fn update_rr_metrics(&mut self, packet: &RtpPacket) {
-        let seq_num = packet.sequence_number;
-        let metrics = &mut self.metrics;
+    fn update_stats(&mut self, packet: &RtpPacket) {
+        let now = Instant::now();
+        let arrival_time_ms = self.clock.now();
 
-        // 1. Contar paquete recibido
-        metrics.packets_received = metrics.packets_received.wrapping_add(1);
+        let mut metrics = self.metrics.lock().unwrap();
 
-        // 2. Cálculo de Pérdida y Secuencia Máxima (Con corrección de Wrapping)
-        const MAX_DROPOUT: u64 = 3000;
-        const SEQ_MOD: u64 = 1 << 15; // 32768
+        metrics.packets_received += 1;
 
-        if metrics.max_sequence_number.is_none() {
-            // Initialization: first packet received
-            metrics.max_sequence_number = Some(seq_num);
-        } else {
-            let max_seq = metrics.max_sequence_number.unwrap();
-            // Calculamos la distancia modular entre el nuevo seq y el máximo visto
-            let delta = seq_num.wrapping_sub(max_seq);
+        if metrics.packets_received == 1 {
+            self.max_seq_seen = packet.sequence_number;
+        } else if packet.sequence_number > self.max_seq_seen {
 
-            // Si delta < 32768, asumimos que el paquete es "futuro" (nuevo)
-            if delta < SEQ_MOD {
-                if delta < MAX_DROPOUT {
-                    // Normal case: either the next packet arrived or there
-                    // was a small loss/gap.
-                    let gap = delta.wrapping_sub(1);
-
-                    metrics.cumulative_lost = metrics.cumulative_lost.wrapping_add(gap);
-                    metrics.packets_expected = metrics.packets_expected.wrapping_add(u32::from(delta));
-                    metrics.max_sequence_number = Some(seq_num); // Update maximum seen
-                } else {
-                    // Large jump: likely source restart or abrupt wrap; re-sync
-                    // without counting a massive loss.
-                    metrics.max_sequence_number = Some(seq_num);
-                }
-            } else {
-                // delta >= SEQ_MOD indicates an old or out-of-order packet
-                // We do not update max_sequence_number in this case.
+            let gap = packet.sequence_number - self.max_seq_seen - 1;
+            if gap > 0 && gap < 1000 {
+                metrics.packets_lost += gap as u32;
             }
+            self.max_seq_seen = packet.sequence_number;
         }
 
-        // 3. Calc of Jitter (RFC 3550 A.8)
-        let current_arrival_time = self.start_time.elapsed();
+        let transit = arrival_time_ms as i64 - (packet.timestamp as i64);
 
-        if metrics.last_arrival_time != Duration::ZERO && metrics.last_rtp_timestamp != 0 {
-            // Arrival time difference (ms)
-            let d_arrival_ms = current_arrival_time.as_millis();
-            let d_arrival_prev_ms = metrics.last_arrival_time.as_millis();
+        if let Some(last_transit) = self.last_transit {
+            let d = (transit - last_transit).abs();
+            let prev_jitter = metrics.jitter as f64;
 
-            let diff_arrival = d_arrival_ms as i64 - d_arrival_prev_ms as i64;
-
-            // Difference in RTP timestamps (clock units)
-            let diff_rtp = packet.timestamp as i64 - metrics.last_rtp_timestamp as i64;
-
-            let delay_diff = diff_arrival - diff_rtp;
-            let abs_delay_diff = delay_diff.unsigned_abs() as u32;
-
-            // RFC 3550 jitter update: J = J + (|D| - J)/16
-            let current_jitter = metrics.interarrival_jitter as f64;
-            let diff = abs_delay_diff as f64;
-
-            let new_jitter = current_jitter + ((diff - current_jitter) / 16.0);
-
-            metrics.interarrival_jitter = new_jitter.max(0.0) as u32;
+            let new_jitter = prev_jitter + ((d as f64 - prev_jitter) / 16.0);
+            metrics.jitter = new_jitter as u32;
         }
 
-        metrics.last_arrival_time = current_arrival_time;
-        metrics.last_rtp_timestamp = packet.timestamp;
+        self.last_transit = Some(transit);
+        self.last_arrival = Some(now);
     }
-
-     */
 }
 
 /*

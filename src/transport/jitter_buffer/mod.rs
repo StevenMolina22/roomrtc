@@ -1,3 +1,3 @@
-mod jitter_buffer;
+mod jitter;
 
-pub use jitter_buffer::JitterBuffer;
+pub use jitter::JitterBuffer;

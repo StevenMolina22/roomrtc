@@ -380,10 +380,8 @@ impl<const N: usize> JitterBuffer<N>  {
             }
             self.max_seq_seen = packet.sequence_number;
 
-        } else {
-            if metrics.packets_lost > 0 {
-                metrics.packets_lost -= 1;
-            }
+        } else if metrics.packets_lost > 0 {
+            metrics.packets_lost -= 1;
         }
         
         let transit = arrival_time_ms as i64 - (packet.timestamp as i64);

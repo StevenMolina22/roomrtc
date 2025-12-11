@@ -61,7 +61,7 @@ impl Socket for MockSocket {
 
         let addr = "127.0.0.1:1234"
             .parse()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("invalid mock socket addr: {}", e)))?;
+            .map_err(|e| std::io::Error::other(format!("invalid mock socket addr: {}", e)))?;
 
         Ok((len, addr))
     }

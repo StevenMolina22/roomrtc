@@ -240,7 +240,7 @@ impl ServerResponse {
 
             "CALLREJECTERROR" if parts.len() == 2 => Some(Self::CallRejectError(parts[1].into())),
 
-            "SERVERFULL" if parts.len() == 1 => Some(Self::ServerFull),
+            // "SERVERFULL" if parts.len() == 1 => Some(Self::ServerFull),
 
             "BADMSG" if parts.len() == 1 => Some(Self::BadMessage),
 

@@ -782,7 +782,7 @@ mod tests {
         let event = op_s.signup_user("bob".into(), "other".into());
         match event {
             ServerResponse::SignupError(msg) => assert!(msg.contains("already exists")),
-            other => assert!(false, "Expected SignupError, got {:?}", other),
+            other => unreachable!("Expected SignupError, got {:?}", other),
         }
     }
 
@@ -832,7 +832,7 @@ mod tests {
 
         match event {
             ServerResponse::LoginError(msg) => assert!(msg.contains("Wrong password")),
-            other => assert!(false, "Expected LoginError, got {:?}", other),
+            other => unreachable!("Expected LoginError, got {:?}", other),
         }
     }
 
@@ -844,7 +844,7 @@ mod tests {
 
         match event {
             ServerResponse::LoginError(msg) => assert!(msg.contains("not found")),
-            other => assert!(false, "Expected LoginError, got {:?}", other),
+            other => unreachable!("Expected LoginError, got {:?}", other),
         }
     }
 
@@ -941,12 +941,12 @@ mod tests {
             ServerResponse::CallRequestOk => {
                 match &alice.status {
                     UserStatus::Occupied(who) => assert_eq!(who, "bob"),
-                    other => assert!(false, "Alice should be occupied by Bob, got {:?}", other),
+                    other => unreachable!("Alice should be occupied by Bob, got {:?}", other),
                 }
 
                 match &bob.status {
                     UserStatus::Occupied(who) => assert_eq!(who, "alice"),
-                    other => assert!(false, "Bob should be occupied by Alice, got {:?}", other),
+                    other => unreachable!("Bob should be occupied by Alice, got {:?}", other),
                 }
             }
             ServerResponse::CallRequestError(_) => {
@@ -974,7 +974,7 @@ mod tests {
             ServerResponse::CallAcceptError(msg) => {
                 assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            other => assert!(false, "Expected CallAcceptError(UserNotAvailable), got {:?}", other),
+            other => unreachable!("Expected CallAcceptError(UserNotAvailable), got {:?}", other),
         }
     }
 
@@ -995,7 +995,7 @@ mod tests {
             ServerResponse::CallAcceptError(msg) => {
                 assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            other => assert!(false, "Expected CallAcceptError(UserNotAvailable), got {:?}", other),
+            other => unreachable!("Expected CallAcceptError(UserNotAvailable), got {:?}", other),
         }
     }
 
@@ -1013,7 +1013,7 @@ mod tests {
             ServerResponse::CallAcceptError(msg) => {
                 assert!(msg.contains("not found") || msg.contains("user does not exist"));
             }
-            other => assert!(false, "Expected CallAcceptError(UserNotFound), got {:?}", other),
+            other => unreachable!("Expected CallAcceptError(UserNotFound), got {:?}", other),
         }
     }
 
@@ -1031,7 +1031,7 @@ mod tests {
             ServerResponse::CallAcceptError(msg) => {
                 assert!(msg.contains("not found") || msg.contains("user does not exist"));
             }
-            other => assert!(false, "Expected CallAcceptError(UserNotFound), got {:?}", other),
+            other => unreachable!("Expected CallAcceptError(UserNotFound), got {:?}", other),
         }
     }
 
@@ -1087,7 +1087,7 @@ mod tests {
             ServerResponse::CallRejectError(msg) => {
                 assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            other => assert!(false, "Expected CallRejectError because alice is not available, got {:?}", other),
+            other => unreachable!("Expected CallRejectError because alice is not available, got {:?}", other),
         }
     }
 }

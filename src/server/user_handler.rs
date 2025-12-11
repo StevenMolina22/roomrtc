@@ -180,7 +180,7 @@ fn send_response(
     stream: &mut StreamOwned<ServerConnection, TcpStream>, 
     response: ServerResponse
 ) -> Result<(), Error> {
-    stream.write_all(&response.to_bytes()).map_err(|e| Error::ConnectionError)?;
+    stream.write_all(&response.to_bytes()).map_err(|_| Error::ConnectionError)?;
     Ok(())
 }
 

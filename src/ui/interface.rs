@@ -75,7 +75,7 @@ impl RoomRTCApp {
             Err(e) => panic!("Failed to initialize controller: {e}"),
         };
 
-        if let Err(_) =  controller.initial_handshake() {
+        if controller.initial_handshake().is_err() {
             std::process::exit(1);
         }
 
@@ -494,10 +494,7 @@ impl RoomRTCApp {
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
 
-            let error_text = match self.error_msg.as_deref() {
-                Some(msg) => msg,
-                None => "An unknown error occurred",
-            };
+            let error_text = self.error_msg.as_deref().unwrap_or("An unknown error occurred");
             ui.label(
                 RichText::new(error_text)
                     .color(Color32::RED)

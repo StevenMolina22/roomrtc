@@ -149,7 +149,7 @@ impl CentralServer {
                         thread_logger,
                     );
 
-                    if let Err(_) = user_handler.client_server_handshake(&mut tls_stream, &users_connected, &config) {
+                    if user_handler.client_server_handshake(&mut tls_stream, &users_connected, &config).is_err() {
                         return
                     }
 

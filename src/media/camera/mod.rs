@@ -1,6 +1,6 @@
-mod camera;
+mod cam;
 mod error;
 
-pub use camera::Camera;
-pub use camera::FrameSource;
+pub use cam::Camera;
+pub use cam::FrameSource;
 pub use error::CameraError;

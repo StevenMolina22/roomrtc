@@ -168,7 +168,7 @@ mod tests {
             .collect();
         
         // Pad with zeros if parsing failed or incomplete
-        let mut ip_bytes = vec![0u8; 4];
+        let mut ip_bytes = [0u8; 4];
         for (i, byte) in ip_parts.iter().take(4).enumerate() {
             ip_bytes[i] = *byte;
         }
@@ -223,7 +223,7 @@ mod tests {
             .filter_map(|s| s.parse::<u8>().ok())
             .collect();
         
-        let mut ip_bytes = vec![0u8; 4];
+        let mut ip_bytes = [0u8; 4];
         for (i, byte) in ip_parts.iter().take(4).enumerate() {
             ip_bytes[i] = *byte;
         }

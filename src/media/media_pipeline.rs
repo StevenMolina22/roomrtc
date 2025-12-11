@@ -162,7 +162,7 @@ impl MediaPipeline {
     // Spawns the encoding thread that turns raw frames into RTP packets.
     fn start_frame_sender_thread(&mut self, rgb_rx: Receiver<Frame>, event_tx: Sender<AppEvent>, rtp_tx: Sender<RtpPacket>, connected: &Arc<AtomicBool>) -> Result<(), Error> {
         let yuv_rx = self.start_rgb_to_yuv_thread(rgb_rx)?;
-        self.start_encoded_sender_thread(rtp_tx, yuv_rx, event_tx.clone(), &connected)?;
+        self.start_encoded_sender_thread(rtp_tx, yuv_rx, event_tx.clone(), connected)?;
 
         Ok(())
     }
@@ -174,7 +174,7 @@ impl MediaPipeline {
             for rgb_frame in rgb_rx {
                 let yuv = rgb_to_yuv420(&rgb_frame).unwrap();
 
-                if let Err(_) = yuv_tx.send((yuv, rgb_frame.frame_time)) {
+                if yuv_tx.send((yuv, rgb_frame.frame_time)).is_err() {
                     break
                 }
             }

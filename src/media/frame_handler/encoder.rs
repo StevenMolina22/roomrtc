@@ -1,11 +1,11 @@
 use std::time::Instant;
 use crate::config::MediaConfig;
 
-use super::{EncodedFrame, error::FrameError as Error, frame::Frame};
+use super::{EncodedFrame, error::FrameError as Error};
 use openh264::encoder::{BitRate, Complexity, EncodedBitStream, Encoder as H264Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode, UsageType};
 use openh264::formats::YUVSlices;
 use openh264::OpenH264API;
-use yuv::{YuvChromaSubsampling, YuvConversionMode, YuvPlanarImageMut, YuvRange, YuvStandardMatrix};
+use yuv::{YuvPlanarImageMut};
 
 /// A basic H.264 video encoder using the `OpenH264` library.
 ///

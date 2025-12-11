@@ -161,20 +161,17 @@ impl Controller {
 
         match response {
             ServerResponse::CallAcceptOk => {
-                let event = AppEvent::CallAccepted(sdp_answer, token.clone(), to_usr.clone());
-                send_event_or_log_out(&self.event_tx, event, &self.logged_in);
+                self.logger.info("SDP Answer sent. Starting ICE checks...");
+                self.call_session
+                    .start_ice_checks()
+                    .map_err(|e| Error::MapError(e.to_string()))?;
+
+                self.logger.info("Joining call...");
+                self.join_call()
             },
-            ServerResponse::CallAcceptError(e) => return Err(Error::CallError(e)),
-            _ => return Err(Error::BadResponse),
+            ServerResponse::CallAcceptError(e) => Err(Error::CallError(e)),
+            _ => Err(Error::BadResponse),
         }
-
-        self.logger.info("SDP Answer sent. Starting ICE checks...");
-        self.call_session
-            .start_ice_checks()
-            .map_err(|e| Error::MapError(e.to_string()))?;
-
-        self.logger.info("Joining call...");
-        self.join_call()
     }
 
     pub fn reject_call(&mut self, to_usr: String) -> Result<(), Error> {

@@ -1,14 +1,13 @@
 use super::ServerError;
-use crate::client_server_protocol::{ClientResponse, ServerMessage, ServerResponse};
+use crate::client_server_protocol::{ServerMessage, ServerResponse};
 use crate::logger::Logger;
 use crate::session::sdp::SessionDescriptionProtocol;
 use crate::user::{UserData, UserStatus};
 use rustls::{ServerConnection, StreamOwned};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
+use std::io::{Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicUsize};
 use std::sync::{Arc, Mutex, RwLock};
 
 /// Core server logic for user authentication and call signaling.
@@ -17,7 +16,6 @@ pub struct OperatingServer {
     server_client_socket_address: SocketAddr,
     users_file_path: String,
     username: Option<String>,
-    max_users: usize,
     logger: Logger,
 }
 
@@ -26,7 +24,6 @@ impl OperatingServer {
         users: Arc<RwLock<HashMap<String, UserData>>>,
         server_client_socket_address: SocketAddr,
         users_file_path: String,
-        max_users: usize,
         logger: Logger,
     ) -> Self {
         Self {
@@ -34,7 +31,6 @@ impl OperatingServer {
             server_client_socket_address,
             users_file_path,
             username: None,
-            max_users,
             logger,
         }
     }
@@ -607,60 +603,6 @@ fn get_user_data(
     }
 }
 
-/// Sends a `CallIncoming` notification to a user and waits for their reply.
-///
-/// This function writes a `ServerMessage::CallIncoming` to the target user's
-/// `server_client_stream`, then blocks until the user responds with a
-/// `ClientResponse`, such as:
-///
-/// - `CallAccept`
-/// - `CallReject`
-///
-/// # Errors
-/// Returns an `Error` if:
-/// - the user does not exist,
-/// - no stream is associated with the user,
-/// - writing fails,
-/// - the user disconnects,
-/// - the user sends an invalid or unparsable response.
-fn get_answer_from_peer(
-    from_usr: String,
-    to_usr: String,
-    offer_sdp: SessionDescriptionProtocol,
-    users: &RwLock<HashMap<String, UserData>>,
-    logger: &Logger,
-) -> Result<ClientResponse, ServerError> {
-    let mut stream = get_stream_from_user(to_usr.clone(), users)?;
-
-    logger.info(&format!("Sending CALLINCOMING to {to_usr}"));
-    send_message(
-        &mut stream,
-        &ServerMessage::CallIncoming {
-            from_usr,
-            offer_sdp,
-        },
-    );
-
-    let mut buff = [0u8; 1024];
-
-    let mut stream_guard = match stream.lock() {
-        Ok(guard) => guard,
-        Err(e) => return Err(ServerError::MapError(format!("Failed to lock stream: {e}"))),
-    };
-    let n = match stream_guard.read(&mut buff) {
-        Ok(0) => return Err(ServerError::MapError("Connection closed".to_string())),
-        Ok(n) => n,
-        Err(err) => return Err(ServerError::MapError(err.to_string())),
-    };
-
-    match ClientResponse::from_bytes(&buff[..n]) {
-        Some(ans) => Ok(ans),
-        None => Err(ServerError::MapError(
-            "Failed to parse user answer from server".to_string(),
-        )),
-    }
-}
-
 fn validate_string(s: String) -> Result<(), ServerError> {
     let trimmed = s.trim();
 
@@ -761,6 +703,7 @@ fn notify_status_update(
     }
 }
 
+#[cfg(test)]
 fn setup_logger() -> Logger {
     // We use unwrap here because panicking is acceptable in a test environment
     // We must pass a file path, even if we don't care about the output.
@@ -780,13 +723,12 @@ mod tests {
             users,
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
-            128,
             logger,
         )
     }
 
     fn setup_with_users(map: Vec<(&str, &str, UserStatus)>) -> OperatingServer {
-        let amount = map.len();
+        let _amount = map.len();
         let mut users = HashMap::new();
         for (name, passwd, status) in map {
             let data = UserData::new(name.to_string().clone(), passwd.to_string().clone(), status);
@@ -799,17 +741,12 @@ mod tests {
             Arc::new(RwLock::new(users)),
             SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
             "test_users.txt".to_string(),
-            128,
             logger,
         )
     }
 
     fn setup_users() -> Arc<RwLock<HashMap<String, UserData>>> {
         Arc::new(RwLock::new(HashMap::new()))
-    }
-
-    fn setup_users_connected(n: usize) -> Arc<AtomicUsize> {
-        Arc::new(AtomicUsize::new(n))
     }
 
     #[test]

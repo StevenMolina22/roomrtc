@@ -311,10 +311,7 @@ impl Controller {
             .clone()
             .ok_or(Error::NotLoggedInError)?;
         
-        let (local_to_remote_rtp_tx, 
-            remote_to_local_rtp_rx, 
-            connected,
-            receiver_metrics) = self
+        let handles = self
             .transport
             .start(
                 remote_rtp_address,
@@ -328,11 +325,11 @@ impl Controller {
 
         self.media_pipeline
             .start(
-                local_to_remote_rtp_tx,
-                remote_to_local_rtp_rx,
+                handles.rtp_tx,
+                handles.rtp_rx,
                 self.event_tx.clone(),
-                connected,
-                receiver_metrics)
+                handles.is_connected,
+                handles.receiver_stats)
             .map_err(|e| Error::MapError(e.to_string()))
     }
 

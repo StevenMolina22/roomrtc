@@ -415,7 +415,7 @@ mod tests {
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
 
-            while let Ok((amt, src)) = remote_socket.recv_from(&mut buf) {
+            while let Ok((_amt, _src)) = remote_socket.recv_from(&mut buf) {
                 if let Ok((amt, src)) = remote_socket.recv_from(&mut buf) {
                     let msg = &buf[..amt];
                     if msg == b"PING" {

@@ -1,4 +1,3 @@
-use crate::controller::AppEvent;
 use crate::logger::Logger;
 use crate::tools::Socket;
 use crate::transport::rtcp::RtcpReportHandler;

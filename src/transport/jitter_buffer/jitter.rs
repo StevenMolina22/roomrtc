@@ -3,7 +3,6 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 use crate::transport::rtp::RtpPacket;
 use crate::clock::Clock;
-use crate::transport::jitter_buffer::RrMetrics;
 use crate::transport::rtcp::ReceiverStats;
 
 const TOLERANCE_MILLIS: u128 = 120;
@@ -135,8 +134,8 @@ impl<const N: usize> JitterBuffer<N>  {
                     self.write_seq = Some(seq);
                     self.packets[pos] = Some(packet);
 
-                    if  self.read_idx > old_write_idx && self.read_idx <= self.write_idx {
-                    }
+                    // if self.read_idx > old_write_idx && self.read_idx <= self.write_idx {
+                    // }
 
                     if (self.read_idx <= old_write_idx && pos >= self.read_idx && pos <= old_write_idx)
                         || (self.read_idx > old_write_idx && (pos >= self.read_idx || pos <= old_write_idx)) {

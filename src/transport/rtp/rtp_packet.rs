@@ -159,8 +159,10 @@ mod tests {
 
     #[test]
     fn test_bool_false_serialization() {
-        let mut packet = RtpPacket::default();
-        packet.is_i_frame = false;
+        let packet = RtpPacket {
+            is_i_frame: false,
+            ..Default::default()
+        };
 
         let bytes = packet.to_bytes();
         assert_eq!(bytes[2], 0, "False in binary should be 0");

@@ -21,8 +21,6 @@ use std::time::Duration;
 /// The receiver operates in a background thread with a configured read timeout,
 /// allowing the application to receive packets asynchronously via a channel.
 pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
-    /// Application configuration (read timeouts, etc).
-    config: Arc<Config>,
     /// Socket for receiving RTP packets from the remote peer.
     rtp_socket: S,
     /// RTCP report handler for session management and goodbye signaling.
@@ -65,7 +63,6 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
             .map_err(|_| Error::SocketConfigFailed)?;
 
         Ok(Self {
-            config: Arc::clone(config),
             rtp_socket,
             report_handler: Arc::clone(report_handler),
             connected: Arc::clone(connected),

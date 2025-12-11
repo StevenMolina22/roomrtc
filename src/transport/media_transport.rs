@@ -18,6 +18,21 @@ use std::thread;
 use udp_dtls::{DtlsAcceptor, DtlsConnector, DtlsStream, SignatureAlgorithm, UdpChannel};
 use crate::transport::rtcp::metrics::{ReceiverStats, SenderStats};
 
+/// Transport handles returned from `MediaTransport::start()` containing all necessary channels and state.
+///
+/// This structure provides access to the RTP send/receive channels, connection status,
+/// and receiver statistics after starting the media transport.
+pub struct TransportHandles {
+    /// Channel for sending RTP packets to the remote peer
+    pub rtp_tx: Sender<RtpPacket>,
+    /// Channel for receiving RTP packets from the remote peer
+    pub rtp_rx: Receiver<RtpPacket>,
+    /// Shared flag indicating if the transport is connected
+    pub is_connected: Arc<AtomicBool>,
+    /// Receiver statistics for monitoring media quality
+    pub receiver_stats: Arc<Mutex<ReceiverStats>>,
+}
+
 /// Media transport layer managing RTP/RTCP communication over DTLS/SRTP.
 ///
 /// This struct orchestrates the complete media transport pipeline including:
@@ -109,11 +124,11 @@ impl MediaTransport {
     /// - `local_cert`: local certificate for DTLS handshake.
     ///
     /// # Returns
-    /// A tuple containing:
-    /// - Sender channel for outgoing RTP packets
-    /// - Receiver channel for incoming RTP packets
-    /// - Shared connection status flag
-    /// - Shared receiver statistics
+    /// A `TransportHandles` struct containing:
+    /// - `rtp_tx`: Sender channel for outgoing RTP packets
+    /// - `rtp_rx`: Receiver channel for incoming RTP packets
+    /// - `is_connected`: Shared connection status flag
+    /// - `receiver_stats`: Shared receiver statistics
     ///
     /// # Errors
     /// Returns an error if DTLS handshake, key export, SRTP setup, or thread spawning fails.
@@ -125,15 +140,7 @@ impl MediaTransport {
         local_setup_role: DtlsSetupRole,
         expected_fingerprint: Fingerprint,
         local_cert: &LocalCert,
-    ) -> Result<
-        (
-            Sender<RtpPacket>,
-            Receiver<RtpPacket>,
-            Arc<AtomicBool>,
-            Arc<Mutex<ReceiverStats>>,
-        ),
-        Error,
-    > {
+    ) -> Result<TransportHandles, Error> {
         self.logger.info(&format!(
             "Starting MediaTransport. Remote RTP: {remote_rtp_address}, Remote RTCP: {remote_rtcp_address}"
         ));
@@ -183,12 +190,12 @@ impl MediaTransport {
 
         let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.spawn_rtp_threads(event_tx, srtp_context, local_setup_role, local_sender_stats)?;
 
-        Ok((
-            local_to_remote_rtp_tx,
-            remote_to_local_rtp_rx,
-            self.connected.clone(),
-            local_receiver_stats
-        ))
+        Ok(TransportHandles {
+            rtp_tx: local_to_remote_rtp_tx,
+            rtp_rx: remote_to_local_rtp_rx,
+            is_connected: self.connected.clone(),
+            receiver_stats: local_receiver_stats,
+        })
     }
 
     /// Stop the media transport by closing the connection and sending RTCP goodbye.
@@ -472,6 +479,7 @@ impl MediaTransport {
     ///
     /// # Errors
     /// Returns an error if handshake or fingerprint verification fails.
+    #[allow(deprecated)]
     fn create_dtls_socket(
         &self,
         socket: UdpSocket,

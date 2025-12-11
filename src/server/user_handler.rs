@@ -7,7 +7,7 @@ use rustls::{ServerConnection, StreamOwned};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 /// Manages a single client connection and delegates to `OperatingServer`.
@@ -32,7 +32,6 @@ impl UserHandler {
         users: Arc<RwLock<HashMap<String, UserData>>>,
         config: Arc<Config>,
         server_client_socket_addr: SocketAddr,
-        max_users: usize,
         logger: Logger,
     ) -> Self {
         Self {
@@ -40,7 +39,6 @@ impl UserHandler {
                 users,
                 server_client_socket_addr,
                 config.server.users_file.clone(),
-                max_users,
                 logger.context("OperatingServer"),
             ),
             logger,
@@ -150,6 +148,8 @@ fn send_response(stream: &mut StreamOwned<ServerConnection, TcpStream>, response
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicUsize;
+
     use super::*;
     use crate::client_server_protocol::ClientMessage;
     use crate::session::sdp::SessionDescriptionProtocol;
@@ -159,7 +159,7 @@ mod tests {
         let users = Arc::new(RwLock::new(HashMap::new()));
         let users_ref = users.clone();
         
-        let users_connected = Arc::new(AtomicUsize::new(0));
+        let _users_connected = Arc::new(AtomicUsize::new(0));
         let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
 
         let logger = match Logger::new("/dev/null") {
@@ -174,7 +174,6 @@ mod tests {
             users,
             addr,
             "test_handler_users.txt".into(),
-            10,
             logger.clone(),
         );
 
@@ -201,7 +200,7 @@ mod tests {
         
         match response {
             ServerResponse::LoginOk(u, _, _) => assert_eq!(u, "tester"),
-            _ => assert!(false, "El mensaje LogIn no devolvió LoginOk"),
+            _ => unreachable!("El mensaje LogIn no devolvió LoginOk"),
         }
     }
 

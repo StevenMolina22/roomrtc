@@ -37,31 +37,31 @@ pub struct RrMetrics {
     pub clock: Arc<Clock>
 }
 
-impl RrMetrics {
-    /// Create a new `RrMetrics` instance initialized with default values.
-    ///
-    /// All counters start at zero, and the max sequence number is set to `None`
-    /// (uninitialized state). The provided clock is used for calculating jitter
-    /// and arrival times.
-    ///
-    /// # Parameters
-    /// - `clock`: shared reference to the clock for timestamp calculations.
-    ///
-    /// # Returns
-    /// A new `RrMetrics` instance ready to track incoming RTP packets.
-    pub(crate) fn new(clock: Arc<Clock>) -> RrMetrics {
-        Self {
-            max_sequence_number: None,
-            packets_received: 0u32,
-            packets_expected: 0u32,
-            cumulative_lost: 0u32,
-            interarrival_jitter: 0u32,
-            last_rtp_timestamp: 0u128,
-            last_arrival_time: 0u128,
-            clock
-        }
-    }
-}
+// impl RrMetrics {
+//     /// Create a new `RrMetrics` instance initialized with default values.
+//     ///
+//     /// All counters start at zero, and the max sequence number is set to `None`
+//     /// (uninitialized state). The provided clock is used for calculating jitter
+//     /// and arrival times.
+//     ///
+//     /// # Parameters
+//     /// - `clock`: shared reference to the clock for timestamp calculations.
+//     ///
+//     /// # Returns
+//     /// A new `RrMetrics` instance ready to track incoming RTP packets.
+//     pub(crate) fn new(clock: Arc<Clock>) -> RrMetrics {
+//         Self {
+//             max_sequence_number: None,
+//             packets_received: 0u32,
+//             packets_expected: 0u32,
+//             cumulative_lost: 0u32,
+//             interarrival_jitter: 0u32,
+//             last_rtp_timestamp: 0u128,
+//             last_arrival_time: 0u128,
+//             clock
+//         }
+//     }
+// }
 
 impl RrMetrics {
     /// Update receiver metrics based on a newly received RTP packet.

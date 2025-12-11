@@ -182,21 +182,21 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                 }
 
                 let s_stats = match local_sender_stats.lock() {
-                    Ok(s) => s.clone(),
+                    Ok(s) => *s,
                     Err(_) => break
                 };
                 let r_stats = match local_receiver_stats.lock() {
-                    Ok(r) => r.clone(),
+                    Ok(r) => *r,
                     Err(_) => break
                 };
 
-                let packet_sr = RtcpPacket::SenderReport(s_stats.clone());
+                let packet_sr = RtcpPacket::SenderReport(s_stats);
                 if report_socket.send(&packet_sr.to_bytes()).is_err() {
                     connected.store(false, Ordering::SeqCst);
                     break;
                 }
 
-                let packet_rr = RtcpPacket::ReceiverReport(r_stats.clone());
+                let packet_rr = RtcpPacket::ReceiverReport(r_stats);
                 if report_socket.send(&packet_rr.to_bytes()).is_err() { break; }
 
                 let local_update = CallStats {
@@ -327,43 +327,41 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
 
     let mut buf = [0u8; 1024];
 
-    loop {
-        match report_socket.recv_from(&mut buf) {
-            Ok((size, _src_addr)) => match RtcpPacket::from_bytes(&buf[..size]) {
-                Some(RtcpPacket::SenderReport(s_stats)) => {
-                    *last_report_time = Local::now();
-                    let call_stats = CallStats { remote_sender: s_stats, ..Default::default() };
-                    let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
-                    return Ok(())
-                }
-                Some(RtcpPacket::ReceiverReport(r_stats)) => {
-                    *last_report_time = Local::now();
-                    let call_stats = CallStats { remote_receiver: r_stats, ..Default::default() };
-                    let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
-                    return Ok(())
-                }
-                Some(RtcpPacket::Goodbye) => return Err(Error::GoodbyeReceived),
-                Some(_) => return Err(Error::UnexpectedMessage),
-                None => {
-                    return if Local::now() - *last_report_time
-                        > chrono::Duration::from_std(receive_limit)
-                        .unwrap_or_else(|_| chrono::Duration::seconds(30))
-                    {
-                        Err(Error::TimedOut)
-                    } else {
-                        Ok(())
-                    }
-                }
-            },
-            Err(_) => {
-                return if Local::now() - *last_report_time
+    match report_socket.recv_from(&mut buf) {
+        Ok((size, _src_addr)) => match RtcpPacket::from_bytes(&buf[..size]) {
+            Some(RtcpPacket::SenderReport(s_stats)) => {
+                *last_report_time = Local::now();
+                let call_stats = CallStats { remote_sender: s_stats, ..Default::default() };
+                let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
+                Ok(())
+            }
+            Some(RtcpPacket::ReceiverReport(r_stats)) => {
+                *last_report_time = Local::now();
+                let call_stats = CallStats { remote_receiver: r_stats, ..Default::default() };
+                let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
+                Ok(())
+            }
+            Some(RtcpPacket::Goodbye) => Err(Error::GoodbyeReceived),
+            Some(_) => Err(Error::UnexpectedMessage),
+            None => {
+                if Local::now() - *last_report_time
                     > chrono::Duration::from_std(receive_limit)
-                    .map_err(|_| Error::InvalidConfigDuration)?
+                    .unwrap_or_else(|_| chrono::Duration::seconds(30))
                 {
                     Err(Error::TimedOut)
                 } else {
                     Ok(())
                 }
+            }
+        },
+        Err(_) => {
+            if Local::now() - *last_report_time
+                > chrono::Duration::from_std(receive_limit)
+                .map_err(|_| Error::InvalidConfigDuration)?
+            {
+                Err(Error::TimedOut)
+            } else {
+                Ok(())
             }
         }
     }

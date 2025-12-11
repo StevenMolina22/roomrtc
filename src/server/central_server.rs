@@ -105,7 +105,6 @@ impl CentralServer {
         let users_connected = self.users_connected.clone();
         let on = self.on.clone();
         let server_client_socket_addr = self.server_client_socket_addr;
-        let max_users = self.config.server.max_amount_of_users_connected;
 
         let logger = self.logger.clone();
 
@@ -153,7 +152,6 @@ impl CentralServer {
                         users,
                         config,
                         server_client_socket_addr,
-                        max_users,
                         thread_logger,
                     );
                     match user_handler.handle_client(tls_stream, on) {
@@ -302,9 +300,7 @@ pub fn map_stream_to_user(
         None => return,
     };
 
-    let username = match response {
-        ClientResponse::Username(name) => name
-    };
+    let ClientResponse::Username(username) = response;
 
     let mut users = match users.write() {
         Ok(u) => u,
@@ -372,16 +368,16 @@ mod tests {
                         assert_eq!(u.password, "1234");
                         assert_eq!(u.status, UserStatus::Offline);
                     } else {
-                        assert!(false, "Falta el usuario alice");
+                        unreachable!("Falta el usuario alice");
                     }
 
                     if let Some(u) = users.get("bob") {
                         assert_eq!(u.password, "secret");
                     } else {
-                        assert!(false, "Falta el usuario bob");
+                        unreachable!("Falta el usuario bob");
                     }
                 },
-                Err(e) => assert!(false, "Falló la carga: {}", e),
+                Err(e) => unreachable!("Falló la carga: {}", e),
             }
         });
     }
@@ -401,7 +397,7 @@ mod tests {
                     assert_eq!(u.password, "pass:word"); 
                 }
             } else {
-                assert!(false, "No debería fallar por líneas mal formadas, solo ignorarlas");
+                unreachable!("No debería fallar por líneas mal formadas, solo ignorarlas");
             }
         });
     }
@@ -418,7 +414,7 @@ mod tests {
                 assert!(users.is_empty());
                 assert!(Path::new(filename).exists(), "El archivo debería haber sido creado");
             },
-            Err(e) => assert!(false, "Error inesperado: {}", e),
+            Err(e) => unreachable!("Error inesperado: {}", e),
         }
 
         let _ = fs::remove_file(filename);
@@ -434,10 +430,8 @@ mod tests {
                 assert!(!ip.is_empty());
                 assert!(ip.contains('.'));
             },
-            Err(Error::IPNotFound(_)) => {
-                assert!(true);
-            },
-            Err(e) => assert!(false, "Error desconocido obteniendo IP: {}", e),
+            Err(Error::IPNotFound(_)) => {},
+            Err(e) => unreachable!("Error desconocido obteniendo IP: {}", e),
         }
     }
 }

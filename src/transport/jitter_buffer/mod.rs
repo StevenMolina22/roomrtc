@@ -1,5 +1,5 @@
-mod jitter_buffer;
+mod jitter;
 mod rr_metrics;
 
 pub use rr_metrics::*;
-pub use jitter_buffer::JitterBuffer;
+pub use jitter::JitterBuffer;

@@ -231,7 +231,7 @@ fn send_encoded_frame(
 }
 
 /// Reassembles and decodes RTP chunks into a displayable frame.
-fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<Frame> {
+fn generate_frame_from_chunks(data: &[u8], decoder: &mut Decoder) -> Option<Frame> {
     let (decoded_data, width, height) = match decoder.decode_frame(data) {
         Ok(data) => {
             data

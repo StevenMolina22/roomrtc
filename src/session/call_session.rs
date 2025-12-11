@@ -35,8 +35,6 @@ pub struct CallSession {
 
     /// Local DTLS setup role negotiated from signaling.
     pub local_setup_role: DtlsSetupRole,
-
-    logger: Logger,
 }
 
 #[derive(Clone, Copy)]
@@ -122,7 +120,6 @@ impl CallSession {
             remote_fingerprint: None,
             remote_setup_role: None,
             local_setup_role,
-            logger,
         })
     }
 

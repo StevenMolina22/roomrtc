@@ -27,8 +27,8 @@ pub enum CallSessionError {
 impl Display for CallSessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            Self::SdpCreationError(e) | Self::IceConnectionError(e) => write!(f, "{e}"),
             Self::BadAddress => write!(f, "Error: \"Bad address\""),
+            
             Self::SdpCreationError(e)
             | Self::IceConnectionError(e)
             | Self::SecurityInitializationError(e) => {

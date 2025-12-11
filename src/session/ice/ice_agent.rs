@@ -174,7 +174,8 @@ impl IceAgent {
             if pair.local.candidate_type == CandidateType::ServerReflexive
                 || pair.remote.candidate_type == CandidateType::ServerReflexive
             {
-                self.logger.debug(&format!("[ICE] Skipping STUN (srflx) pair: {}", pair));
+                self.logger
+                    .debug(&format!("[ICE] Skipping STUN (srflx) pair: {}", pair));
                 continue;
             }
 
@@ -194,7 +195,6 @@ impl IceAgent {
             } else {
                 pair.state = ConnectivityState::Failed;
                 self.logger.debug(&format!("[ICE] Pair FAILED: {}", pair));
-
             }
         }
 
@@ -229,7 +229,7 @@ impl IceAgent {
         let mut buf = [0u8; 1024];
 
         while start.elapsed() < max_duration {
-            if socket.send_to(b"PING", target).is_err() {
+            if let Err(e) = socket.send_to(b"PING", target) {
                 logger.warn(&format!("[ICE] Send error: {}", e));
                 std::thread::sleep(Duration::from_millis(100));
                 continue;

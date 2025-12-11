@@ -93,7 +93,6 @@ impl Encoder {
         let chunks = generate_chunks_from_bitstream(&bitstream, self.max_chunk_size);
         let frame_type = bitstream.frame_type();
         let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
-        self.logger.debug(&format!("ENCODER: {}", c.elapsed().as_millis()));
 
         Ok(EncodedFrame {
             chunks,

@@ -1,13 +1,10 @@
 use crate::clock::Clock;
+use crate::logger::Logger;
 use crate::transport::rtcp::ReceiverStats;
 use crate::transport::rtp::RtpPacket;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use crate::transport::rtp::RtpPacket;
-use crate::clock::Clock;
-use crate::transport::rtcp::ReceiverStats;
-use crate::logger::Logger;
 
 const TOLERANCE_MILLIS: u128 = 120;
 
@@ -117,10 +114,12 @@ impl<const N: usize> JitterBuffer<N> {
         if self.i_frame_needed && !packet.is_i_frame {
             return;
         }
-        if packet.timestamp < self.last_frame_completed_timestamp
-        {
-            self.logger.warn(&format!("Discarding old packet: timestamp {} < last completed {}", packet.timestamp, self.last_frame_completed_timestamp));
-            return
+        if packet.timestamp < self.last_frame_completed_timestamp {
+            self.logger.warn(&format!(
+                "Discarding old packet: timestamp {} < last completed {}",
+                packet.timestamp, self.last_frame_completed_timestamp
+            ));
+            return;
         }
 
         if !self.valid_packet_seq_num(seq) {
@@ -278,7 +277,8 @@ impl<const N: usize> JitterBuffer<N> {
     /// - If an I-frame is found: move to it and continue streaming.
     /// - If no I-frame is found: clear all packets and reset read/write pointers.
     fn resync_or_clear(&mut self) {
-        self.logger.warn("JitterBuffer resync triggered: playout deadline exceeded or buffer overflow.");
+        self.logger
+            .warn("JitterBuffer resync triggered: playout deadline exceeded or buffer overflow.");
         // NO ESTOY CONSIDERANDO EL CASO DE QUE WRITE ESCRIBA DESPUES DEL READ, CONSIDERAR DESPUES
         let read_timestamp = self.packets[self.read_idx].as_ref().unwrap().timestamp;
 
@@ -432,7 +432,8 @@ mod tests {
     fn setup_buffer<const N: usize>() -> JitterBuffer<N> {
         let clock = Arc::new(Clock::new());
         let metrics = Arc::new(Mutex::new(ReceiverStats::default()));
-        JitterBuffer::new(clock, metrics)
+        let logger = Logger::new("test_logger.txt").unwrap();
+        JitterBuffer::new(clock, metrics, logger)
     }
 
     #[test]
@@ -499,7 +500,8 @@ mod tests {
     fn test_packet_loss_metrics() {
         let clock = Arc::new(Clock::new());
         let metrics = Arc::new(Mutex::new(ReceiverStats::default()));
-        let mut buffer = JitterBuffer::<10>::new(clock, metrics.clone());
+        let logger = Logger::new("test_logger.txt").unwrap();
+        let mut buffer = JitterBuffer::<10>::new(clock, metrics.clone(), logger);
 
         buffer.add(create_packet(10, 1000, true, 1, 1, vec![0xA]));
 

@@ -44,7 +44,7 @@ pub fn get_public_ip_and_port(socket: &UdpSocket, logger: &crate::logger::Logger
     ));
 
     for i in 1..=3 {
-        if socket.send_to(&packet, remote_addr).is_err() {
+        if let Err(e) = socket.send_to(&packet, remote_addr) {
             logger.warn(&format!("[STUN] Attempt {i}: Error sending: {e}"));
             continue;
         }

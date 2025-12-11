@@ -229,7 +229,7 @@ impl IceAgent {
         let mut buf = [0u8; 1024];
 
         while start.elapsed() < max_duration {
-            if socket.send_to(b"PING", target).is_err() {
+            if let Err(e) = socket.send_to(b"PING", target) {
                 logger.warn(&format!("[ICE] Send error: {}", e));
                 std::thread::sleep(Duration::from_millis(100));
                 continue;

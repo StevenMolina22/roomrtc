@@ -1,6 +1,5 @@
 use super::FrameError as Error;
 use opencv::prelude::*;
-use opencv::{core, imgproc};
 
 /// An in-memory video frame used by the frame handler.
 ///
@@ -24,46 +23,6 @@ pub struct Frame {
 }
 
 impl Frame {
-    /// Convert a YUV I420 frame stored in `self.data` to RGB bytes.
-    ///
-    /// The implementation uses `OpenCV` to reinterpret the provided
-    /// bytes as a single-channel Mat with height = 3/2 * height
-    /// (I420 layout) and then converts the color using
-    /// `cv::cvtColor`. On success returns a new `Frame` containing
-    /// RGB bytes and the same width/height/id.
-    pub fn to_rgb(&self) -> Result<Self, Error> {
-        let temp_mat =
-            Mat::from_slice(&self.data).map_err(|_| Error::UnableToCreateFrameFromYUVError)?;
-
-        let yuv_mat = temp_mat
-            .reshape(
-                1,
-                i32::try_from(self.height * 3 / 2).map_err(|_| Error::DimensionConversionError)?,
-            )
-            .map_err(|_| Error::ReshapingFrameError)?;
-
-        let mut rgb_mat = Mat::default();
-
-        imgproc::cvt_color(
-            &yuv_mat,
-            &mut rgb_mat,
-            imgproc::COLOR_YUV2RGB_I420,
-            0,
-            core::AlgorithmHint::ALGO_HINT_DEFAULT,
-        )
-        .map_err(|_| Error::TypeConversionError)?;
-
-        Ok(Self {
-            data: rgb_mat
-                .data_bytes()
-                .map_err(|_| Error::BytesConversionError)?
-                .to_vec(),
-            width: self.width,
-            height: self.height,
-            frame_time: self.frame_time,
-        })
-    }
-
     /// Try to create a `Frame` from a byte buffer produced by
     /// `to_bytes`. Returns `None` if the buffer is too small or not
     /// properly formatted.

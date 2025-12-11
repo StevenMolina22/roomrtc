@@ -1,11 +1,8 @@
 use crate::clock::Clock;
-use crate::transport::rtcp::ReceiverStats;
-use crate::transport::rtp::RtpPacket;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use crate::transport::rtp::RtpPacket;
-use crate::clock::Clock;
 use crate::transport::rtcp::ReceiverStats;
 use crate::logger::Logger;
 
@@ -432,7 +429,8 @@ mod tests {
     fn setup_buffer<const N: usize>() -> JitterBuffer<N> {
         let clock = Arc::new(Clock::new());
         let metrics = Arc::new(Mutex::new(ReceiverStats::default()));
-        JitterBuffer::new(clock, metrics)
+        let logger = Logger::new("test_logger.txt").unwrap();
+        JitterBuffer::new(clock, metrics, logger)
     }
 
     #[test]
@@ -499,7 +497,8 @@ mod tests {
     fn test_packet_loss_metrics() {
         let clock = Arc::new(Clock::new());
         let metrics = Arc::new(Mutex::new(ReceiverStats::default()));
-        let mut buffer = JitterBuffer::<10>::new(clock, metrics.clone());
+        let logger = Logger::new("test_logger.txt").unwrap();
+        let mut buffer = JitterBuffer::<10>::new(clock, metrics.clone(), logger);
 
         buffer.add(create_packet(10, 1000, true, 1, 1, vec![0xA]));
 

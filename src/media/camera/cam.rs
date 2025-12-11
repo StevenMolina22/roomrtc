@@ -4,6 +4,7 @@ use crate::media::frame_handler::Frame;
 use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc};
+use crate::logger::Logger;
 use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
@@ -49,9 +50,11 @@ pub struct Camera {
 
     /// Application configuration with camera parameters.
     config: Arc<Config>,
-    
+
     /// Clock for frame timestamping.
-    clock: Arc<Clock>
+    /// Clock for frame timestamping.
+    clock: Arc<Clock>,
+    logger: Logger,
 }
 
 impl Camera {
@@ -69,11 +72,12 @@ impl Camera {
     ///
     /// A new `Camera` instance ready to be started.
     #[must_use]
-    pub fn new(clock: Arc<Clock>, media_config: &Arc<Config>) -> Self {
+    pub fn new(clock: Arc<Clock>, media_config: &Arc<Config>, logger: Logger) -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             config: Arc::clone(media_config),
-            clock
+            clock,
+            logger
         }
     }
 
@@ -92,6 +96,7 @@ impl Camera {
         let running = self.running.clone();
         let config = self.config.clone();
         let clock = self.clock.clone();
+        let logger = self.logger.clone();
 
         running.store(true, std::sync::atomic::Ordering::SeqCst);
 
@@ -99,14 +104,14 @@ impl Camera {
             let camera_index = if let Ok(index) = i32::try_from(config.media.camera_index) {
                 index
             } else {
-                eprintln!("Camera index is too large for i32. Stopping camera thread.");
+                logger.error("Camera index is too large for i32. Stopping camera thread.");
                 return;
             };
 
             let mut cam = match videoio::VideoCapture::new(camera_index, videoio::CAP_ANY) {
                 Ok(cam) => cam,
                 Err(e) => {
-                    eprintln!("Failed to open camera: {e}. Stopping camera thread.");
+                    logger.error(&format!("Failed to open camera: {e}. Stopping camera thread."));
                     return;
                 }
             };
@@ -114,26 +119,26 @@ impl Camera {
             let is_opened = match videoio::VideoCapture::is_opened(&cam) {
                 Ok(opened) => opened,
                 Err(_) => {
-                    eprintln!("Failed to check if camera is open. Stopping camera thread.");
+                    logger.error("Failed to check if camera is open. Stopping camera thread.");
                     return;
                 }
             };
             if !is_opened {
-                eprintln!("Camera is not open. Stopping camera thread.");
+                logger.error("Camera is not open. Stopping camera thread.");
                 return;
             }
             if cam
                 .set(videoio::CAP_PROP_FRAME_WIDTH, config.media.frame_width)
                 .is_err()
             {
-                eprintln!("Failed to set camera width. Stopping camera thread.");
+                logger.error("Failed to set camera width. Stopping camera thread.");
                 return;
             }
             if cam
                 .set(videoio::CAP_PROP_FRAME_HEIGHT, config.media.frame_height)
                 .is_err()
             {
-                eprintln!("Failed to set camera height. Stopping camera thread.");
+                logger.error("Failed to set camera height. Stopping camera thread.");
                 return;
             }
 
@@ -146,12 +151,12 @@ impl Camera {
                 let frame_read = match cam.read(&mut mat) {
                     Ok(result) => result,
                     Err(_) => {
-                        eprintln!("Failed to read camera frame.");
+                        logger.error("Failed to read camera frame.");
                         continue;
                     }
                 };
                 if !frame_read || mat.empty() {
-                    eprintln!("Failed to read camera frame.");
+                    logger.error("Failed to read camera frame.");
                     continue;
                 }
 
@@ -163,13 +168,13 @@ impl Camera {
                 )
                     .is_err()
                 {
-                    eprintln!("Failed to convert frame color.");
+                    logger.error("Failed to convert frame color.");
                     continue;
                 }
                 let data = if let Ok(bytes) = rgb.data_bytes() {
                     bytes.to_vec()
                 } else {
-                    eprintln!("Failed to extract frame data.");
+                    logger.error("Failed to extract frame data.");
                     continue;
                 };
 

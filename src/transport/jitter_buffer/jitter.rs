@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use crate::transport::rtp::RtpPacket;
 use crate::clock::Clock;
 use crate::transport::rtcp::ReceiverStats;
+use crate::logger::Logger;
 
 const TOLERANCE_MILLIS: u128 = 120;
 
@@ -56,6 +57,8 @@ pub struct JitterBuffer<const N: usize> {
     last_arrival: Option<Instant>,
     /// Highest sequence number seen so far (for gap detection).
     max_seq_seen: u64,
+    /// Logger instance.
+    logger: Logger,
 }
 
 impl<const N: usize> JitterBuffer<N>  {
@@ -68,10 +71,11 @@ impl<const N: usize> JitterBuffer<N>  {
     /// # Parameters
     /// - `clock`: shared reference to the system clock for playout timing.
     /// - `metrics`: shared receiver statistics structure for tracking packet loss and jitter.
+    /// - `logger`: logger instance.
     ///
     /// # Returns
     /// A new `JitterBuffer` ready to accept incoming RTP packets.
-    pub fn new(clock: Arc<Clock>, metrics: Arc<Mutex<ReceiverStats>>) -> Self {
+    pub fn new(clock: Arc<Clock>, metrics: Arc<Mutex<ReceiverStats>>, logger: Logger) -> Self {
         Self {
             packets: std::array::from_fn(|_| None),
             read_idx: 0,
@@ -86,6 +90,7 @@ impl<const N: usize> JitterBuffer<N>  {
             last_transit: None,
             last_arrival: None,
             max_seq_seen: 0,
+            logger,
         }
     }
 
@@ -112,6 +117,7 @@ impl<const N: usize> JitterBuffer<N>  {
         }
         if packet.timestamp < self.last_frame_completed_timestamp
         {
+            self.logger.warn(&format!("Discarding old packet: timestamp {} < last completed {}", packet.timestamp, self.last_frame_completed_timestamp));
             return
         }
 
@@ -271,6 +277,7 @@ impl<const N: usize> JitterBuffer<N>  {
     /// - If an I-frame is found: move to it and continue streaming.
     /// - If no I-frame is found: clear all packets and reset read/write pointers.
     fn resync_or_clear(&mut self) {
+        self.logger.warn("JitterBuffer resync triggered: playout deadline exceeded or buffer overflow.");
         // NO ESTOY CONSIDERANDO EL CASO DE QUE WRITE ESCRIBA DESPUES DEL READ, CONSIDERAR DESPUES
         let read_timestamp = self.packets[self.read_idx].as_ref().unwrap().timestamp;
 
@@ -291,7 +298,7 @@ impl<const N: usize> JitterBuffer<N>  {
 
             self.read_idx = (self.read_idx + 1) % N;
         }
-        
+
         self.read_idx = 0;
         self.write_idx = 0;
         self.read_seq = None;
@@ -362,7 +369,7 @@ impl<const N: usize> JitterBuffer<N>  {
     fn update_stats(&mut self, packet: &RtpPacket) {
         let now = Instant::now();
         let arrival_time_ms = self.clock.now();
-        
+
         let mut metrics = match self.metrics.lock() {
             Ok(m) => m,
             Err(_) => return,
@@ -374,7 +381,7 @@ impl<const N: usize> JitterBuffer<N>  {
             self.max_seq_seen = packet.sequence_number;
         } else if packet.sequence_number > self.max_seq_seen {
             let gap = packet.sequence_number - self.max_seq_seen - 1;
-            
+
             if gap > 0 && gap < 1000 {
                 metrics.packets_lost += gap as u32;
             }
@@ -383,7 +390,7 @@ impl<const N: usize> JitterBuffer<N>  {
         } else if metrics.packets_lost > 0 {
             metrics.packets_lost -= 1;
         }
-        
+
         let transit = arrival_time_ms as i64 - (packet.timestamp as i64);
         if let Some(last_transit) = self.last_transit {
             let d = (transit - last_transit).abs();

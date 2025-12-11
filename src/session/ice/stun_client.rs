@@ -21,7 +21,7 @@ const STUN_SERVER: &str = "stun.l.google.com:19302";
 /// - `Ok(String)`: the public address `"ip:port"` on success.
 /// - `Err(String)`: an error string (e.g. timeouts, DNS errors, or send/recv
 ///   errors).
-pub fn get_public_ip_and_port(socket: &UdpSocket) -> Result<String, String> {
+pub fn get_public_ip_and_port(socket: &UdpSocket, logger: &crate::logger::Logger) -> Result<String, String> {
     socket
         .set_read_timeout(Some(Duration::from_millis(1500)))
         .map_err(|e| e.to_string())?;
@@ -37,15 +37,15 @@ pub fn get_public_ip_and_port(socket: &UdpSocket) -> Result<String, String> {
         .find(std::net::SocketAddr::is_ipv4)
         .ok_or("DNS Error: No IPv4 address found for STUN server")?;
 
-    println!(
+    logger.debug(&format!(
         "[STUN] Sending request to {} from local socket {:?}",
         remote_addr,
         socket.local_addr()
-    );
+    ));
 
     for i in 1..=3 {
         if let Err(e) = socket.send_to(&packet, remote_addr) {
-            println!("[STUN] Attempt {i}: Error sending: {e}");
+            logger.warn(&format!("[STUN] Attempt {i}: Error sending: {e}"));
             continue;
         }
 
@@ -56,7 +56,7 @@ pub fn get_public_ip_and_port(socket: &UdpSocket) -> Result<String, String> {
                 return parse_stun_response(&buf[..amt]);
             }
             Err(e) => {
-                println!("[STUN] Attempt {i}: Timeout or error receiving: {e}");
+                logger.warn(&format!("[STUN] Attempt {i}: Timeout or error receiving: {e}"));
             }
         }
     }
@@ -166,13 +166,13 @@ mod tests {
             .split('.')
             .filter_map(|s| s.parse::<u8>().ok())
             .collect();
-        
+
         // Pad with zeros if parsing failed or incomplete
         let mut ip_bytes = [0u8; 4];
         for (i, byte) in ip_parts.iter().take(4).enumerate() {
             ip_bytes[i] = *byte;
         }
-        
+
         let ip_u32 = u32::from_be_bytes([ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]]);
             let x_ip = ip_u32 ^ MAGIC_COOKIE;
             value.extend_from_slice(&x_ip.to_be_bytes());
@@ -222,12 +222,12 @@ mod tests {
             .split('.')
             .filter_map(|s| s.parse::<u8>().ok())
             .collect();
-        
+
         let mut ip_bytes = [0u8; 4];
         for (i, byte) in ip_parts.iter().take(4).enumerate() {
             ip_bytes[i] = *byte;
         }
-        
+
         let ip_u32 = u32::from_be_bytes([ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]]);
         let x_ip = ip_u32 ^ magic_cookie;
         packet.extend_from_slice(&x_ip.to_be_bytes());

@@ -1,5 +1,6 @@
 use std::time::Instant;
 use crate::config::MediaConfig;
+use crate::logger::Logger;
 
 use super::{EncodedFrame, error::FrameError as Error};
 use openh264::encoder::{BitRate, Complexity, EncodedBitStream, Encoder as H264Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode, UsageType};
@@ -17,6 +18,7 @@ use yuv::{YuvPlanarImageMut};
 pub struct Encoder {
     encoder: H264Encoder,
     max_chunk_size: usize,
+    logger: Logger,
 }
 
 impl Encoder {
@@ -30,7 +32,7 @@ impl Encoder {
     ///
     /// Returns [`Error::EncoderInitializationError`] if the encoder cannot
     /// be created by the `OpenH264` library.
-    pub fn new(media_config: &MediaConfig) -> Result<Self, Error> {
+    pub fn new(media_config: &MediaConfig, logger: Logger) -> Result<Self, Error> {
         let config = EncoderConfig::new()
             .bitrate(BitRate::from_bps(2_500_000))
             .max_frame_rate(FrameRate::from_hz(media_config.frame_rate))
@@ -46,6 +48,7 @@ impl Encoder {
         Ok(Self {
             encoder,
             max_chunk_size: media_config.rtp_max_chunk_size,
+            logger,
         })
     }
 
@@ -88,7 +91,7 @@ impl Encoder {
         let frame_type = bitstream.frame_type();
         let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
 
-        println!("ENCODER: {}", c.elapsed().as_millis());
+        self.logger.debug(&format!("ENCODER: {}", c.elapsed().as_millis()));
         Ok(EncodedFrame {
             chunks,
             frame_time,

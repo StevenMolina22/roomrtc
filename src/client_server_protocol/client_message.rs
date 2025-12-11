@@ -51,10 +51,10 @@ impl ClientMessage {
                 token,
                 offer_sdp,
                 to,
-            } => format!("CALLREQ|{token}|{offer_sdp}|{to}"),
+            } => format!("CALLREQUEST|{token}|{offer_sdp}|{to}"),
             
             Self::CallAccept { from_usr, to_usr, sdp_answer } => 
-                format!("CALLACC|{from_usr}|{to_usr}|{sdp_answer}"),
+                format!("CALLACCEPT|{from_usr}|{to_usr}|{sdp_answer}"),
             
             Self::CallReject { from_usr, to_usr } => 
                 format!("CALLREJECT|{from_usr}|{to_usr}"),
@@ -87,13 +87,13 @@ impl ClientMessage {
                 token: parts[1].into(),
             }),
 
-            "CALLREQ" if parts.len() == 4 => Some(Self::CallRequest {
+            "CALLREQUEST" if parts.len() == 4 => Some(Self::CallRequest {
                 token: parts[1].into(),
                 offer_sdp: parts[2].parse().ok()?,
                 to: parts[3].into(),
             }),
             
-            "CALLACC" if parts.len() == 4 => Some(Self::CallAccept {
+            "CALLACCEPT" if parts.len() == 4 => Some(Self::CallAccept {
                 from_usr: parts[1].into(),
                 to_usr: parts[2].into(),
                 sdp_answer: parts[3].parse().ok()?,

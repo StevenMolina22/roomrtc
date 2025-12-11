@@ -115,15 +115,15 @@ impl ServerResponse {
 
             "LOGINERROR" if parts.len() == 2 => Some(Self::LoginError(parts[1].into())),
 
-            "SIGNUPOK" => Some(Self::SignupOk),
+            "SIGNUPOK" if parts.len() == 1 => Some(Self::SignupOk),
 
             "SIGNUPERROR" if parts.len() == 2 => Some(Self::SignupError(parts[1].into())),
 
-            "LOGOUTOK" => Some(Self::LogoutOk),
+            "LOGOUTOK" if parts.len() == 1 => Some(Self::LogoutOk),
 
             "LOGOUTERROR" if parts.len() == 2 => Some(Self::LogoutError(parts[1].into())),
 
-            "CALLHANGUPOK" => Some(Self::CallHangUpOk),
+            "CALLHANGUPOK" if parts.len() == 1 => Some(Self::CallHangUpOk),
 
             "CALLHANGUPERROR" if parts.len() == 2 => Some(Self::CallHangUpError(parts[1].into())),
 

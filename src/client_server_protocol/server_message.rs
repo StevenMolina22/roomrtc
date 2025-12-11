@@ -59,7 +59,7 @@ impl ServerMessage {
                 offer_sdp: parts[2].to_string().parse().ok()?,
             }),
             
-            "CALLACCEPTED" if parts.len() == 4 => Some(Self::CallAccepted {
+            "CALLACCEPTED" if parts.len() == 3 => Some(Self::CallAccepted {
                 from_usr: parts[1].to_string(),
                 sdp_answer: parts[2].parse().ok()?,
             }),

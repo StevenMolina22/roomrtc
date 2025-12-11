@@ -275,6 +275,7 @@ impl Controller {
                 self.logged_in.store(false, Ordering::SeqCst);
                 self.token = None;
                 self.users_status = Arc::new(RwLock::new(HashMap::new()));
+
                 Ok(())
             }
             ServerResponse::LogoutError(e) => Err(Error::LogOutFailed(e)),

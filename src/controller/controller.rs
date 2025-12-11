@@ -92,7 +92,7 @@ impl Controller {
             _ => Err(Error::BadResponse),
         }
     }
-    
+
     pub fn get_in_call(&mut self, sdp_answer: SessionDescriptionProtocol) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         self.logger.info("Call request ok");
         self.call_session
@@ -156,7 +156,10 @@ impl Controller {
         let token = self.get_token()?;
         let msg = ClientMessage::CallAccept { from_usr: token.clone(), to_usr: to_usr.clone(), sdp_answer: sdp_answer.clone() };
 
-        match send_message(msg, &mut self.client_server_stream)? {
+        let response = send_message(msg, &mut self.client_server_stream)?;
+        println!("response: {:?}", response);
+
+        match response {
             ServerResponse::CallAcceptOk => {
                 let event = AppEvent::CallAccepted(sdp_answer, token.clone(), to_usr.clone());
                 send_event_or_log_out(&self.event_tx, event, &self.logged_in);
@@ -445,6 +448,7 @@ fn get_response_for_server_message(
             if let Err(e) = event_tx.send(AppEvent::CallAccepted(sdp_answer, username.clone(), from_usr)) {
                 return Err(Error::MapError(e.to_string()));
             }
+            println!("Sent call accepted event to UI");
             Ok(None)
         }
         ServerMessage::CallRejected => {

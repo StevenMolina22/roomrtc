@@ -528,6 +528,7 @@ impl RoomRTCApp {
                 self.view = View::FatalError;
             }
             AppEvent::CallAccepted(answer_sdp, username, peer_username) => {
+                println!("Received accepted call message");
                 match self.controller.get_in_call(answer_sdp) {
                     Ok((local_frame_rx, remote_frame_rx)) => {
                         self.local_frame_rx = Some(local_frame_rx);

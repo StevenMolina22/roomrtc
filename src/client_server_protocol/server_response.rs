@@ -131,9 +131,9 @@ impl ServerResponse {
 
             "CALLREQUESTERROR" if parts.len() == 2 => Some(Self::CallRequestError(parts[1].into())),
 
-            "CALLACCOK" if parts.len() == 1 => Some(Self::CallAcceptOk),
+            "CALLACCEPTOK" if parts.len() == 1 => Some(Self::CallAcceptOk),
 
-            "CALLACCERROR" if parts.len() == 2 => Some(Self::CallAcceptError(parts[1].into())),
+            "CALLACCEPTERROR" if parts.len() == 2 => Some(Self::CallAcceptError(parts[1].into())),
 
             "CALLREJECTOK" if parts.len() == 1 => Some(Self::CallRejectOk),
 

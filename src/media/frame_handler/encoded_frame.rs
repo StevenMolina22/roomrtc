@@ -7,9 +7,6 @@
 pub struct EncodedFrame {
     /// The compressed frame split into one or more chunks.
     pub chunks: Vec<Vec<u8>>,
-    
-    /// Time when frame was captured.
-    pub frame_time: u128,
 
     /// Frame width in pixels (decoded size).
     pub width: usize,

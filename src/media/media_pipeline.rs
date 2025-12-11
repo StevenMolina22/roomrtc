@@ -12,7 +12,7 @@ use crate::controller::AppEvent;
 use crate::clock::Clock;
 use crate::transport::rtcp::ReceiverStats;
 
-const JITTER_BUFF_SIZE: usize = 1024;
+const JITTER_BUFF_SIZE: usize = 2048;
 
 pub struct MediaPipeline {
     camera: Camera,
@@ -159,6 +159,7 @@ impl MediaPipeline {
         let ssrc = self.ssrc;
         let config = Arc::clone(&self.config);
         let logger = self.logger.clone();
+        let clock = self.clock.clone();
 
         thread::spawn(move || {
             let mut seq_num: u64 = 0;
@@ -170,8 +171,17 @@ impl MediaPipeline {
                         break;
                     }
                 };
-
-                if let Err(e) = send_encoded_frame(encoded_frame, &rtp_tx, ssrc, &connected, &mut seq_num, &config) {
+                
+                
+                if let Err(e) = send_encoded_frame(
+                    encoded_frame, 
+                    &rtp_tx, 
+                    ssrc, 
+                    &connected, 
+                    &mut seq_num, 
+                    &config, 
+                    &clock) 
+                {
                     logger.error(&Error::SendError(e.to_string()).to_string());
                     break
                 }
@@ -189,12 +199,14 @@ fn send_encoded_frame(
     connected: &Arc<AtomicBool>,
     sequence_number: &mut u64,
     config: &Arc<Config>,
+    clock: &Clock
 ) -> Result<(), Error> {
     if !connected.load(Ordering::SeqCst) {
         return Err(Error::SendError("Media pipeline turned off".into()));
     }
 
     let total_chunks = encoded_frame.chunks.len();
+    let timestamp = clock.now();
 
     for (i, payload) in encoded_frame.chunks.iter().enumerate() {
         let packet = RtpPacket {
@@ -204,7 +216,7 @@ fn send_encoded_frame(
             is_i_frame: encoded_frame.is_i_frame,
             sequence_number: *sequence_number,
             payload_type: config.media.rtp_payload_type,
-            timestamp: encoded_frame.frame_time,
+            timestamp,
             ssrc,
             payload: payload.clone(),
         };
@@ -230,7 +242,6 @@ fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<F
         data: decoded_data,
         width,
         height,
-        frame_time: 0,
     })
 }
 
@@ -260,7 +271,6 @@ mod tests {
             data: raw_data.clone(),
             width,
             height,
-            frame_time: 0,
         };
 
         // ------- Encode -------
@@ -281,7 +291,7 @@ mod tests {
                 is_i_frame: encoded.is_i_frame,
                 payload_type: config.media.rtp_payload_type,
                 sequence_number: i as u64,
-                timestamp: raw_frame.frame_time,
+                timestamp: 0,
                 ssrc: 55,
                 payload: chunk.clone(),
             });

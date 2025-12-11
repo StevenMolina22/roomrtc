@@ -1,6 +1,8 @@
 use crate::session::sdp::SessionDescriptionProtocol;
 
 pub enum ClientMessage {
+    Hello,
+    
     LogIn {
         username: String,
         password: String,
@@ -41,6 +43,8 @@ impl ClientMessage {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let s = match self {
+            Self::Hello => "HELLO".to_string(),
+            
             Self::LogIn { username, password } => format!("LOGIN|{username}|{password}"),
 
             Self::SignUp { username, password } => format!("SIGNUP|{username}|{password}"),
@@ -73,6 +77,8 @@ impl ClientMessage {
         let parts: Vec<&str> = s.split('|').collect();
 
         match parts[0] {
+            "HELLO" if parts.len() == 1 => Some(Self::Hello),
+            
             "LOGIN" if parts.len() == 3 => Some(Self::LogIn {
                 username: parts[1].into(),
                 password: parts[2].into(),

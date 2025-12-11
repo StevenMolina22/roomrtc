@@ -87,7 +87,6 @@ impl Encoder {
 
         Ok(EncodedFrame {
             chunks,
-            frame_time: frame.frame_time,
             width: frame.width,
             height: frame.height,
             is_i_frame,

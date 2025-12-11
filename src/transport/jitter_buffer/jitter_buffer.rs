@@ -81,9 +81,6 @@ impl<const N: usize> JitterBuffer<N>  {
                     self.write_seq = Some(seq);
                     self.packets[pos] = Some(packet);
 
-                    if  (self.read_idx > old_write_idx && self.read_idx <= self.write_idx) {
-                    }
-
                     if (self.read_idx <= old_write_idx && pos >= self.read_idx && pos <= old_write_idx)
                         || (self.read_idx > old_write_idx && (pos >= self.read_idx || pos <= old_write_idx)) {
                         self.resync_or_clear();

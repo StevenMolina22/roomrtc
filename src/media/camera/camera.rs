@@ -137,7 +137,6 @@ impl Camera {
                     data,
                     width: rgb.cols() as usize,
                     height: rgb.rows() as usize,
-                    frame_time: clock.now()
                 };
 
                 if tx.send(frame).is_err() {

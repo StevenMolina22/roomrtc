@@ -1,4 +1,3 @@
-use crate::session::sdp::SessionDescriptionProtocol;
 use crate::user::UserStatus;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -6,6 +5,9 @@ use std::str::FromStr;
 
 #[derive(Debug)]
 pub enum ServerResponse {
+    Welcome,
+    ServerFull,
+
     LoginOk(String, SocketAddr, HashMap<String, UserStatus>),
     LoginError(String),
 
@@ -36,6 +38,8 @@ impl ServerResponse {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let s = match self {
+            Self::Welcome => "WELCOME".to_string(),
+            Self::ServerFull => "SERVERFULL".to_string(),
             Self::LoginOk(token, address, users_status) => {
                 let kv = users_status
                     .iter()
@@ -88,6 +92,9 @@ impl ServerResponse {
         let parts: Vec<&str> = s.split('|').collect();
 
         match parts[0] {
+            "WELCOME" => Some(Self::Welcome),
+            "SERVERFULL" => Some(Self::ServerFull),
+
             "LOGINOK" if parts.len() >= 4 => {
                 let token = parts[1].to_string();
                 let address = SocketAddr::from_str(parts[2]).unwrap();
@@ -138,6 +145,8 @@ impl ServerResponse {
             "CALLREJECTOK" if parts.len() == 1 => Some(Self::CallRejectOk),
 
             "CALLREJECTERROR" if parts.len() == 2 => Some(Self::CallRejectError(parts[1].into())),
+
+            "SERVERFULL" if parts.len() == 1 => Some(Self::ServerFull),
 
             "BADMSG" if parts.len() == 1 => Some(Self::BadMessage),
 

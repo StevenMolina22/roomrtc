@@ -365,6 +365,22 @@ impl Controller {
 
         Ok(())
     }
+    
+    pub fn initial_handshake(&mut self) -> Result<(), Error> {
+        let msg = ClientMessage::Hello;
+        let ans = send_message(msg, &mut self.client_server_stream, &self.event_tx)?;
+        
+        match ans {
+            ServerResponse::Welcome => Ok(()),
+            ServerResponse::ServerFull => {
+                if let Err(e) = self.event_tx.send(AppEvent::FullServerError) {
+                    return Err(Error::MapError(e.to_string()))
+                };
+                Ok(())
+            },
+            _ => Err(Error::BadResponse),
+        }
+    }
 
     //----------------------------------------------------------------------------------------------------------------------------
     // GETTERS

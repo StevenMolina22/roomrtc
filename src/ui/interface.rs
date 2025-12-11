@@ -65,7 +65,7 @@ impl RoomRTCApp {
         let config = Arc::new(config);
         let (event_tx, event_rx) = mpsc::channel();
 
-        let controller = match Controller::new(
+        let mut controller = match Controller::new(
             event_tx,
             &config,
             server_address,
@@ -74,6 +74,10 @@ impl RoomRTCApp {
             Ok(c) => c,
             Err(e) => panic!("Failed to initialize controller: {e}"),
         };
+
+        if let Err(_) =  controller.initial_handshake() {
+            std::process::exit(1);
+        }
 
         Self {
             view: View::default(),

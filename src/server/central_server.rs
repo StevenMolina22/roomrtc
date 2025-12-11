@@ -222,8 +222,8 @@ fn load_users_from_mem(filename: &String) -> Result<HashMap<String, UserData>, E
         f
     } else {
         OpenOptions::new()
-            .truncate(true)
-            .write(true)
+            .create(true)
+            .append(true)
             .open(filename)
             .map_err(|e| Error::MapError(e.to_string()))?;
 

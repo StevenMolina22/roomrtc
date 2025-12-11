@@ -42,6 +42,7 @@ fn main() {
     let mut sv = match CentralServer::new(sv_config, logger.context("CentralServer")) {
         Ok(sv) => sv,
         Err(_) => {
+            println!("Failed to initialize Central Server");
             std::process::exit(1);
         }
     };

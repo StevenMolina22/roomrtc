@@ -59,7 +59,11 @@ impl Socket for MockSocket {
         let len = packet.len().min(buf.len());
         buf[..len].copy_from_slice(&packet[..len]);
 
-        Ok((len, "127.0.0.1:1234".parse().unwrap()))
+        let addr = "127.0.0.1:1234"
+            .parse()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("invalid mock socket addr: {}", e)))?;
+
+        Ok((len, addr))
     }
 
     /// Mock implementation that does nothing (timeout not simulated).

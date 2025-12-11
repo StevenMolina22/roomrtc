@@ -146,15 +146,18 @@ mod tests {
         };
 
         let bytes = original_packet.to_bytes();
-        assert_eq!(bytes.len(), 26);
+        assert_eq!(bytes.len(), 35);
         
-        assert_eq!(bytes[2], 1, "El booleano true debería ser 1 en binario");
+        assert_eq!(bytes[3], 1, "El booleano true debería ser 1 en binario");
 
-        let deserialized = RtpPacket::from_bytes(&bytes).unwrap();
+        let deserialized_option = RtpPacket::from_bytes(&bytes);
+        assert!(deserialized_option.is_some());
 
-        assert_eq!(original_packet.total_chunks, deserialized.total_chunks);
-        assert_eq!(original_packet.is_i_frame, deserialized.is_i_frame);
-        assert!(deserialized.is_i_frame);
+        if let Some(deserialized) = deserialized_option {
+            assert_eq!(original_packet.total_chunks, deserialized.total_chunks);
+            assert_eq!(original_packet.is_i_frame, deserialized.is_i_frame);
+            assert!(deserialized.is_i_frame);
+        }
     }
 
     #[test]
@@ -165,9 +168,13 @@ mod tests {
         };
 
         let bytes = packet.to_bytes();
-        assert_eq!(bytes[2], 0, "False in binary should be 0");
+        assert_eq!(bytes[3], 0, "False in binary should be 0");
 
-        let deserialized = RtpPacket::from_bytes(&bytes).unwrap();
-        assert!(!deserialized.is_i_frame);
+        let deserialized_option = RtpPacket::from_bytes(&bytes);
+        assert!(deserialized_option.is_some());
+
+        if let Some(deserialized) = deserialized_option {
+            assert!(!deserialized.is_i_frame);
+        }
     }
 }

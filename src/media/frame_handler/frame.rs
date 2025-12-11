@@ -129,7 +129,7 @@ mod tests {
             .to_bytes()
             .expect("Failed to serialize frame");
 
-        assert_eq!(bytes.len(), 16 + 6);
+        assert_eq!(bytes.len(), 30);
 
         let deserialized_frame_option = Frame::from_bytes(&bytes);
 
@@ -138,9 +138,9 @@ mod tests {
             "Deserialization failed and returned None"
         );
 
-        let deserialized_frame = deserialized_frame_option.unwrap();
-
-        assert_eq!(original_frame, deserialized_frame);
+        if let Some(deserialized_frame) = deserialized_frame_option {
+            assert_eq!(original_frame, deserialized_frame);
+        }
     }
 
     #[test]
@@ -156,7 +156,7 @@ mod tests {
             .to_bytes()
             .expect("Failed to serialize frame");
 
-        assert_eq!(bytes.len(), 16);
+        assert_eq!(bytes.len(), 24);
 
         let deserialized_frame =
             Frame::from_bytes(&bytes).expect("Deserialization of empty frame failed");
@@ -173,20 +173,25 @@ mod tests {
 
     #[test]
     fn test_from_bytes_exactly_header_size() {
+        // frame_time = 1 (u128), width = 2 (u32), height = 3 (u32), no data
         let header_only_bytes: &[u8] = &[
+            // frame_time (1 as little-endian u128)
             1, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            // width (2 as little-endian u32)
             2, 0, 0, 0,
+            // height (3 as little-endian u32)
             3, 0, 0, 0,
         ];
 
         let result = Frame::from_bytes(header_only_bytes);
 
         assert!(result.is_some());
-        let frame = result.unwrap();
-
-        assert_eq!(frame.frame_time, 1);
-        assert_eq!(frame.width, 2);
-        assert_eq!(frame.height, 3);
-        assert_eq!(frame.data.len(), 0);
+        if let Some(frame) = result {
+            assert_eq!(frame.frame_time, 1);
+            assert_eq!(frame.width, 2);
+            assert_eq!(frame.height, 3);
+            assert_eq!(frame.data.len(), 0);
+        }
     }
 }

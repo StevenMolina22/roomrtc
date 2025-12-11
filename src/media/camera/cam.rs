@@ -111,7 +111,14 @@ impl Camera {
                 }
             };
 
-            if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
+            let is_opened = match videoio::VideoCapture::is_opened(&cam) {
+                Ok(opened) => opened,
+                Err(_) => {
+                    eprintln!("Failed to check if camera is open. Stopping camera thread.");
+                    return;
+                }
+            };
+            if !is_opened {
                 eprintln!("Camera is not open. Stopping camera thread.");
                 return;
             }
@@ -136,7 +143,14 @@ impl Camera {
             let frame_duration = Duration::from_millis(((1000f32)/ config.media.frame_rate) as u64);
 
             while running.load(std::sync::atomic::Ordering::SeqCst) {
-                if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
+                let frame_read = match cam.read(&mut mat) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        eprintln!("Failed to read camera frame.");
+                        continue;
+                    }
+                };
+                if !frame_read || mat.empty() {
                     eprintln!("Failed to read camera frame.");
                     continue;
                 }

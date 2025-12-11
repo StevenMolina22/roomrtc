@@ -91,18 +91,19 @@ impl RrMetrics {
         if self.max_sequence_number.is_none() {
             self.max_sequence_number = Some(seq_num);
         } else {
-            let max_seq = self.max_sequence_number.unwrap();
-            let delta = seq_num.wrapping_sub(max_seq);
+            if let Some(max_seq) = self.max_sequence_number {
+                let delta = seq_num.wrapping_sub(max_seq);
 
-            if delta < SEQ_MOD {
-                if delta < MAX_DROPOUT {
-                    let gap = delta.wrapping_sub(1);
+                if delta < SEQ_MOD {
+                    if delta < MAX_DROPOUT {
+                        let gap = delta.wrapping_sub(1);
 
-                    self.cumulative_lost = self.cumulative_lost.wrapping_add(gap as u32);
-                    self.packets_expected = self.packets_expected.wrapping_add(delta as u32);
-                    self.max_sequence_number = Some(seq_num);
-                } else {
-                    self.max_sequence_number = Some(seq_num);
+                        self.cumulative_lost = self.cumulative_lost.wrapping_add(gap as u32);
+                        self.packets_expected = self.packets_expected.wrapping_add(delta as u32);
+                        self.max_sequence_number = Some(seq_num);
+                    } else {
+                        self.max_sequence_number = Some(seq_num);
+                    }
                 }
             }
         }

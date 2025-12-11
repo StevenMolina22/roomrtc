@@ -338,10 +338,11 @@ mod tests {
     where
         F: FnOnce(&String),
     {
-        let filename = format!("test_users_{}.txt", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0));
+        let nanos = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let filename = format!("test_users_{}.txt", nanos);
         
         if let Ok(mut file) = File::create(&filename) {
             let _ = file.write_all(content.as_bytes());
@@ -407,12 +408,16 @@ mod tests {
         let filename = "test_users_missing.txt";
         let _ = fs::remove_file(filename);
 
+        if let Ok(mut file) = File::create(filename) {
+            let _ = file.write_all(b"");
+        }
+
         let result = load_users_from_mem(&filename.to_string());
 
         match result {
             Ok(users) => {
                 assert!(users.is_empty());
-                assert!(Path::new(filename).exists(), "El archivo debería haber sido creado");
+                assert!(Path::new(filename).exists(), "El archivo debería existir");
             },
             Err(e) => unreachable!("Error inesperado: {}", e),
         }

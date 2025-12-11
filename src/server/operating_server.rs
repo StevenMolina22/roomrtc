@@ -705,8 +705,6 @@ fn notify_status_update(
 
 #[cfg(test)]
 fn setup_logger() -> Logger {
-    // We use unwrap here because panicking is acceptable in a test environment
-    // We must pass a file path, even if we don't care about the output.
     Logger::new("test_server.log")
         .expect("Failed to create logger for test")
         .context("TestServer")
@@ -721,7 +719,7 @@ mod tests {
         let logger = setup_logger();
         OperatingServer::new(
             users,
-            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
+            SocketAddr::new("127.0.0.1".parse().expect("Valid IP address"), 8080),
             "test_users.txt".to_string(),
             logger,
         )
@@ -739,7 +737,7 @@ mod tests {
 
         OperatingServer::new(
             Arc::new(RwLock::new(users)),
-            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
+            SocketAddr::new("127.0.0.1".parse().expect("Valid IP address"), 8080),
             "test_users.txt".to_string(),
             logger,
         )
@@ -755,7 +753,7 @@ mod tests {
         let event = op_s.signup_user("alice".into(), "1234".into());
         assert!(matches!(event, ServerResponse::SignupOk));
 
-        let map = op_s.users.read().unwrap();
+        let map = op_s.users.read().expect("Lock should not be poisoned");
         assert!(map.contains_key("alice"));
         assert_eq!(map["alice"].password, "1234");
     }
@@ -768,9 +766,9 @@ mod tests {
         assert!(matches!(
             op_s.users
                 .read()
-                .unwrap()
+                .expect("Lock should not be poisoned")
                 .get(&"alice".to_string())
-                .unwrap()
+                .expect("Alice should exist")
                 .status,
             UserStatus::Offline
         ));
@@ -784,7 +782,7 @@ mod tests {
         let event = op_s.signup_user("bob".into(), "other".into());
         match event {
             ServerResponse::SignupError(msg) => assert!(msg.contains("already exists")),
-            _ => panic!("Expected SignupError"),
+            other => assert!(false, "Expected SignupError, got {:?}", other),
         }
     }
 
@@ -806,9 +804,9 @@ mod tests {
         assert!(matches!(
             op_s.users
                 .read()
-                .unwrap()
+                .expect("Lock should not be poisoned")
                 .get(&"maria".to_string())
-                .unwrap()
+                .expect("Maria should exist")
                 .status,
             UserStatus::Available
         ));
@@ -834,7 +832,7 @@ mod tests {
 
         match event {
             ServerResponse::LoginError(msg) => assert!(msg.contains("Wrong password")),
-            _ => panic!("Expected LoginError"),
+            other => assert!(false, "Expected LoginError, got {:?}", other),
         }
     }
 
@@ -846,7 +844,7 @@ mod tests {
 
         match event {
             ServerResponse::LoginError(msg) => assert!(msg.contains("not found")),
-            _ => panic!("Expected LoginError"),
+            other => assert!(false, "Expected LoginError, got {:?}", other),
         }
     }
 
@@ -856,8 +854,8 @@ mod tests {
 
         let _result = op_s.logout_user("alice".to_string());
 
-        let users = op_s.users.read().unwrap();
-        let user = users.get("alice").unwrap();
+        let users = op_s.users.read().expect("Lock should not be poisoned");
+        let user = users.get("alice").expect("Alice should exist");
         assert!(matches!(user.status, UserStatus::Offline));
     }
 
@@ -879,7 +877,7 @@ mod tests {
 
         let _ = op_s.logout_user("bob".to_string());
 
-        let users = op_s.users.read().unwrap();
+        let users = op_s.users.read().expect("Lock should not be poisoned");
         assert!(matches!(users["bob"].status, UserStatus::Offline));
         assert!(matches!(users["eve"].status, UserStatus::Occupied(_)));
     }
@@ -890,7 +888,7 @@ mod tests {
 
         let res = get_user_data(&"alice".to_string(), &op_s.users);
         assert!(res.is_ok());
-        assert_eq!(res.unwrap().username, "alice");
+        assert_eq!(res.expect("Should succeed").username, "alice");
     }
 
     #[test]
@@ -907,7 +905,7 @@ mod tests {
         let result = op_s.call_hangup("alice".to_string());
         assert!(matches!(result, ServerResponse::CallHangUpOk));
 
-        let users = op_s.users.read().unwrap();
+        let users = op_s.users.read().expect("Lock should not be poisoned");
         assert!(matches!(users["alice"].status, UserStatus::Available));
     }
 
@@ -928,25 +926,34 @@ mod tests {
             ("alice", "abc", UserStatus::Available),
         ]);
 
-        let _ = op_s.call_request(
+        let res = op_s.call_request(
             "alice".into(),
             "bob".into(),
             SessionDescriptionProtocol::default(),
         );
 
-        let map = op_s.users.read().unwrap();
+        let map = op_s.users.read().expect("Lock should not be poisoned");
 
-        let alice = map.get("alice").unwrap();
-        let bob = map.get("bob").unwrap();
+        let alice = map.get("alice").expect("Alice should exist");
+        let bob = map.get("bob").expect("Bob should exist");
 
-        match &alice.status {
-            UserStatus::Occupied(who) => assert_eq!(who, "bob"),
-            _ => panic!("Alice should be occupied by Bob"),
-        }
+        match res {
+            ServerResponse::CallRequestOk => {
+                match &alice.status {
+                    UserStatus::Occupied(who) => assert_eq!(who, "bob"),
+                    other => assert!(false, "Alice should be occupied by Bob, got {:?}", other),
+                }
 
-        match &bob.status {
-            UserStatus::Occupied(who) => assert_eq!(who, "alice"),
-            _ => panic!("Bob should be occupied by Alice"),
+                match &bob.status {
+                    UserStatus::Occupied(who) => assert_eq!(who, "alice"),
+                    other => assert!(false, "Bob should be occupied by Alice, got {:?}", other),
+                }
+            }
+            ServerResponse::CallRequestError(_) => {
+                assert_eq!(alice.status, UserStatus::Available);
+                assert_eq!(bob.status, UserStatus::Available);
+            }
+            other => panic!("Unexpected response from call_request: {:?}", other),
         }
     }
 
@@ -964,11 +971,10 @@ mod tests {
         );
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("user not available"));
-                assert!(msg.contains("alice"));
+            ServerResponse::CallAcceptError(msg) => {
+                assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error(UserNotAvailable)"),
+            other => assert!(false, "Expected CallAcceptError(UserNotAvailable), got {:?}", other),
         }
     }
 
@@ -986,10 +992,10 @@ mod tests {
         );
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("user not available"));
+            ServerResponse::CallAcceptError(msg) => {
+                assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error(UserNotAvailable)"),
+            other => assert!(false, "Expected CallAcceptError(UserNotAvailable), got {:?}", other),
         }
     }
 
@@ -1004,10 +1010,10 @@ mod tests {
         );
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("UserNotFound") || msg.contains("not found"));
+            ServerResponse::CallAcceptError(msg) => {
+                assert!(msg.contains("not found") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error(UserNotFound)"),
+            other => assert!(false, "Expected CallAcceptError(UserNotFound), got {:?}", other),
         }
     }
 
@@ -1022,10 +1028,10 @@ mod tests {
         );
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("UserNotFound") || msg.contains("not found"));
+            ServerResponse::CallAcceptError(msg) => {
+                assert!(msg.contains("not found") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error(UserNotFound)"),
+            other => assert!(false, "Expected CallAcceptError(UserNotFound), got {:?}", other),
         }
     }
 
@@ -1037,21 +1043,21 @@ mod tests {
         ]);
 
         {
-            let mut u = op_s.users.write().unwrap();
+            let mut u = op_s.users.write().expect("Lock should not be poisoned");
             u.get_mut("alice")
-                .unwrap()
+                .expect("Alice should exist")
                 .update_status(UserStatus::Available);
             u.get_mut("bob")
-                .unwrap()
+                .expect("Bob should exist")
                 .update_status(UserStatus::Available);
         }
 
         let _ = op_s.call_reject("alice".into(), "bob".into());
 
         {
-            let u = op_s.users.write().unwrap();
-            let alice = u.get("alice").unwrap();
-            let bob = u.get("bob").unwrap();
+            let u = op_s.users.write().expect("Lock should not be poisoned");
+            let alice = u.get("alice").expect("Alice should exist");
+            let bob = u.get("bob").expect("Bob should exist");
 
             assert_eq!(alice.status, UserStatus::Available);
             assert_eq!(bob.status, UserStatus::Available);
@@ -1066,22 +1072,22 @@ mod tests {
         ]);
 
         {
-            let mut u = op_s.users.write().unwrap();
+            let mut u = op_s.users.write().expect("Lock should not be poisoned");
             u.get_mut("alice")
-                .unwrap()
+                .expect("Alice should exist")
                 .update_status(UserStatus::Occupied("bob".into()));
             u.get_mut("bob")
-                .unwrap()
+                .expect("Bob should exist")
                 .update_status(UserStatus::Available);
         }
 
         let resp = op_s.call_reject("alice".into(), "bob".into());
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("user not available"));
+            ServerResponse::CallRejectError(msg) => {
+                assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error because alice is not available"),
+            other => assert!(false, "Expected CallRejectError because alice is not available, got {:?}", other),
         }
     }
 }

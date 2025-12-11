@@ -66,7 +66,10 @@ impl IceAgent {
         ice_config: &IceConfig,
     ) -> Result<(), Error> {
         if let Ok(local_ip) = get_local_ip() {
-            let port = socket.local_addr().map(|a| a.port()).unwrap_or(0);
+            let port = match socket.local_addr() {
+                Ok(addr) => addr.port(),
+                Err(_) => 0,
+            };
             let mut host = Candidate::new_host(local_ip, ice_config.component_id, ice_config);
             host.port = port;
             self.local_candidates.push(host);
@@ -337,7 +340,7 @@ mod tests {
 
     #[test]
     fn test_new_agent_is_empty() {
-        let logger = Logger::new("/dev/null").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let agent = IceAgent::new(logger);
 
         assert!(agent.local_candidates.is_empty());
@@ -348,11 +351,14 @@ mod tests {
 
     #[test]
     fn test_gather_candidates_adds_local_candidate() {
-        let logger = Logger::new("/dev/null").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let mut agent = IceAgent::new(logger);
 
         let socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind test socket");
-        let assigned_port = socket.local_addr().unwrap().port();
+        let assigned_port = socket
+            .local_addr()
+            .expect("Failed to get socket local address")
+            .port();
 
         let result = agent.gather_candidates(&socket, &make_ice_config());
 
@@ -371,14 +377,14 @@ mod tests {
             .local_candidates
             .iter()
             .find(|c| c.candidate_type == CandidateType::Host)
-            .expect("Host candidate missing");
+            .expect("Host candidate should exist after gather_candidates");
 
         assert_eq!(host_candidate.port, assigned_port);
     }
 
     #[test]
     fn test_add_remote_candidate_creates_pairs() -> Result<(), Error> {
-        let logger = Logger::new("/dev/null").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let mut agent = IceAgent::new(logger);
 
         let socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind test socket");
@@ -400,20 +406,20 @@ mod tests {
 
     #[test]
     fn test_start_connectivity_checks_selects_pair() -> Result<(), Error> {
-        let logger = Logger::new("/dev/null").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let mut agent = IceAgent::new(logger);
 
         let local_socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind local socket");
         agent.gather_candidates(&local_socket, &make_ice_config())?;
 
         let remote_socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind remote socket");
-        let remote_addr = remote_socket.local_addr().unwrap();
+        let remote_addr = remote_socket
+            .local_addr()
+            .expect("Failed to get remote socket address");
 
         thread::spawn(move || {
             let mut buf = [0u8; 1024];
-            remote_socket
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
+            let _ = remote_socket.set_read_timeout(Some(Duration::from_secs(2)));
 
             while let Ok((_amt, _src)) = remote_socket.recv_from(&mut buf) {
                 if let Ok((amt, src)) = remote_socket.recv_from(&mut buf) {
@@ -445,10 +451,10 @@ mod tests {
 
     #[test]
     fn test_error_when_starting_checks_without_pairs() {
-        let logger = Logger::new("/dev/null").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let mut agent = IceAgent::new(logger);
 
-        let dummy_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let dummy_socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind socket");
 
         let result = agent.start_connectivity_checks(&dummy_socket);
 

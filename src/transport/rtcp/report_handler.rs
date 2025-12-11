@@ -344,9 +344,11 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
             Some(RtcpPacket::Goodbye) => Err(Error::GoodbyeReceived),
             Some(_) => Err(Error::UnexpectedMessage),
             None => {
-                if Local::now() - *last_report_time
-                    > chrono::Duration::from_std(receive_limit)
-                    .unwrap_or_else(|_| chrono::Duration::seconds(30))
+                let duration = match chrono::Duration::from_std(receive_limit) {
+                    Ok(d) => d,
+                    Err(_) => chrono::Duration::seconds(30),
+                };
+                if Local::now() - *last_report_time > duration
                 {
                     Err(Error::TimedOut)
                 } else {

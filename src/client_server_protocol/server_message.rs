@@ -148,22 +148,22 @@ mod tests {
     
 
     // Helper function that serializes and deserializes a message to test encoding/decoding
-    fn roundtrip(msg: ServerMessage) -> ServerMessage {
+    fn roundtrip(msg: ServerMessage) -> Option<ServerMessage> {
         let bytes = msg.to_bytes();
-        ServerMessage::from_bytes(&bytes).expect("failed to decode")
+        ServerMessage::from_bytes(&bytes)
     }
 
     #[test]
     fn test_username_request() {
         let msg = ServerMessage::UsernameRequest;
-        let decoded = roundtrip(msg.clone());
+        let decoded = roundtrip(msg.clone()).expect("roundtrip failed");
         assert_eq!(decoded, msg);
     }
 
     #[test]
     fn test_error_message() {
         let msg = ServerMessage::Error("SomethingBad".into());
-        let decoded = roundtrip(msg.clone());
+        let decoded = roundtrip(msg.clone()).expect("roundtrip failed");
         assert_eq!(decoded, msg);
     }
 
@@ -177,7 +177,7 @@ mod tests {
         let msg = ServerMessage::UserStatusUpdate("Bob".into(), status);
 
         let encoded = msg.to_bytes();
-        let decoded = ServerMessage::from_bytes(&encoded).unwrap();
+        let decoded = ServerMessage::from_bytes(&encoded).expect("failed to decode");
 
         assert_eq!(decoded, msg);
     }
@@ -188,7 +188,7 @@ mod tests {
         let msg = ServerMessage::UserStatusUpdate("Charlie".into(), status);
 
         let encoded = msg.to_bytes();
-        let decoded = ServerMessage::from_bytes(&encoded).unwrap();
+        let decoded = ServerMessage::from_bytes(&encoded).expect("failed to decode");
 
         assert_eq!(decoded, msg);
     }
@@ -199,7 +199,7 @@ mod tests {
         let msg = ServerMessage::UserStatusUpdate("Dave".into(), status);
 
         let encoded = msg.to_bytes();
-        let decoded = ServerMessage::from_bytes(&encoded).unwrap();
+        let decoded = ServerMessage::from_bytes(&encoded).expect("failed to decode");
 
         assert_eq!(decoded, msg);
     }

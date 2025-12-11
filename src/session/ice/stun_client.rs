@@ -158,12 +158,22 @@ mod tests {
         fn add_xor_address(self, ip: &str, port: u16) -> Self {
             let mut value = vec![0x00, 0x01]; // Reserved + Family (IPv4)
 
-            let magic_high_16 = (MAGIC_COOKIE >> 16) as u16;
-            let x_port = port ^ magic_high_16;
-            value.extend_from_slice(&x_port.to_be_bytes());
+        let magic_high_16 = (MAGIC_COOKIE >> 16) as u16;
+        let x_port = port ^ magic_high_16;
+        value.extend_from_slice(&x_port.to_be_bytes());
 
-            let ip_parts: Vec<u8> = ip.split('.').map(|s| s.parse().unwrap()).collect();
-            let ip_u32 = u32::from_be_bytes([ip_parts[0], ip_parts[1], ip_parts[2], ip_parts[3]]);
+        let ip_parts: Vec<u8> = ip
+            .split('.')
+            .filter_map(|s| s.parse::<u8>().ok())
+            .collect();
+        
+        // Pad with zeros if parsing failed or incomplete
+        let mut ip_bytes = vec![0u8; 4];
+        for (i, byte) in ip_parts.iter().take(4).enumerate() {
+            ip_bytes[i] = *byte;
+        }
+        
+        let ip_u32 = u32::from_be_bytes([ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]]);
             let x_ip = ip_u32 ^ MAGIC_COOKIE;
             value.extend_from_slice(&x_ip.to_be_bytes());
 
@@ -208,8 +218,17 @@ mod tests {
         let x_port = public_port ^ magic_high_16;
         packet.extend_from_slice(&x_port.to_be_bytes());
 
-        let ip_parts: Vec<u8> = public_ip.split('.').map(|s| s.parse().unwrap()).collect();
-        let ip_u32 = u32::from_be_bytes([ip_parts[0], ip_parts[1], ip_parts[2], ip_parts[3]]);
+        let ip_parts: Vec<u8> = public_ip
+            .split('.')
+            .filter_map(|s| s.parse::<u8>().ok())
+            .collect();
+        
+        let mut ip_bytes = vec![0u8; 4];
+        for (i, byte) in ip_parts.iter().take(4).enumerate() {
+            ip_bytes[i] = *byte;
+        }
+        
+        let ip_u32 = u32::from_be_bytes([ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]]);
         let x_ip = ip_u32 ^ magic_cookie;
         packet.extend_from_slice(&x_ip.to_be_bytes());
 
@@ -226,7 +245,10 @@ mod tests {
         let result = parse_stun_response(&packet);
 
         assert!(result.is_ok(), "El parser falló al leer un paquete válido");
-        assert_eq!(result.unwrap(), format!("{expected_ip}:{expected_port}"));
+        assert_eq!(
+            result.expect("failed to result"),
+            format!("{expected_ip}:{expected_port}")
+        );
     }
 
     #[test]
@@ -237,7 +259,7 @@ mod tests {
         let result = parse_stun_response(&packet);
         assert!(result.is_err());
         assert_eq!(
-            result.unwrap_err(),
+            result.expect_err("expected error"),
             "Invalid STUN response: Magic Cookie mismatch"
         );
     }
@@ -257,7 +279,10 @@ mod tests {
             .build();
 
         let result = parse_stun_response(&packet);
-        assert_eq!(result.unwrap(), "192.168.1.50:12345");
+        assert_eq!(
+            result.expect("failed to parse STUN response"),
+            "192.168.1.50:12345"
+        );
     }
 
     #[test]
@@ -268,7 +293,10 @@ mod tests {
             .build();
 
         let result = parse_stun_response(&packet);
-        assert_eq!(result.unwrap(), "10.0.0.1:8080");
+        assert_eq!(
+            result.expect("failed to parse STUN response"),
+            "10.0.0.1:8080"
+        );
     }
 
     #[test]
@@ -278,7 +306,10 @@ mod tests {
             .build();
 
         let result = parse_stun_response(&packet);
-        assert_eq!(result.unwrap(), "255.255.255.255:65535");
+        assert_eq!(
+            result.expect("failed to parse STUN response"),
+            "255.255.255.255:65535"
+        );
     }
 
     #[test]
@@ -292,7 +323,9 @@ mod tests {
 
         let result = parse_stun_response(&packet);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not found"));
+        assert!(result
+            .expect_err("expected error")
+            .contains("not found"));
     }
 
     #[test]

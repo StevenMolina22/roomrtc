@@ -42,7 +42,7 @@ impl Decoder {
         match self.decoder.decode(encoded_data) {
             Ok(Some(yuv)) => {
                 let (width, height) = yuv.dimensions();
-                let (y_stride, u_stride, v_stride)  = yuv.strides();
+                let (y_stride, u_stride, v_stride) = yuv.strides();
 
                 let yuv_img = yuv::YuvPlanarImage {
                     y_plane: yuv.y(),
@@ -62,8 +62,9 @@ impl Decoder {
                     &mut rgb,
                     (width * 3) as u32,
                     yuv::YuvRange::Limited,
-                    yuv::YuvStandardMatrix::Bt709
-                ).map_err(|e| Error::DecodingError(e.to_string()))?;
+                    yuv::YuvStandardMatrix::Bt709,
+                )
+                .map_err(|e| Error::DecodingError(e.to_string()))?;
 
                 Ok((rgb, width, height))
             }

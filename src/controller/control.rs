@@ -103,7 +103,7 @@ impl Controller {
 
     // ---------------------------------------------------------------------------------------------------------------------------
     // CALLS
-    
+
     /// Initiates an outgoing call to a peer.
     ///
     /// Sends a call request message to the server with the local SDP offer.
@@ -117,10 +117,7 @@ impl Controller {
     ///
     /// * `Ok(())` - Call request sent successfully.
     /// * `Err(Error)` - Failed to send call request.
-    pub fn call(
-        &mut self,
-        peer_username: &str,
-    ) -> Result<(), Error> {
+    pub fn call(&mut self, peer_username: &str) -> Result<(), Error> {
         let token = self.get_token()?;
         let msg = ClientMessage::CallRequest {
             token: token.clone(),
@@ -147,7 +144,10 @@ impl Controller {
     ///
     /// * `Ok((audio_rx, video_rx))` - Receivers for audio and video frames.
     /// * `Err(Error)` - Failed to process the answer or start media.
-    pub fn get_in_call(&mut self, sdp_answer: SessionDescriptionProtocol) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
+    pub fn get_in_call(
+        &mut self,
+        sdp_answer: SessionDescriptionProtocol,
+    ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         self.logger.info("Call request ok");
         self.call_session
             .process_answer(&sdp_answer)
@@ -239,10 +239,13 @@ impl Controller {
             .process_offer(offer_sdp)
             .map_err(|e| Error::MapError(e.to_string()))?;
         let token = self.get_token()?;
-        let msg = ClientMessage::CallAccept { from_usr: token.clone(), to_usr: to_usr.clone(), sdp_answer: sdp_answer.clone() };
+        let msg = ClientMessage::CallAccept {
+            from_usr: token.clone(),
+            to_usr: to_usr.clone(),
+            sdp_answer: sdp_answer.clone(),
+        };
 
         let response = send_message(msg, &mut self.client_server_stream, &self.event_tx)?;
-        println!("response: {:?}", response);
 
         match response {
             ServerResponse::CallAcceptOk => {
@@ -253,7 +256,7 @@ impl Controller {
 
                 self.logger.info("Joining call...");
                 self.join_call()
-            },
+            }
             ServerResponse::CallAcceptError(e) => Err(Error::CallError(e)),
             _ => Err(Error::BadResponse),
         }
@@ -281,7 +284,7 @@ impl Controller {
             ServerResponse::CallRejectOk => {
                 let event = AppEvent::CallRejected;
                 send_event_or_log_out(&self.event_tx, event, &self.logged_in);
-            },
+            }
             ServerResponse::CallRejectError(e) => return Err(Error::CallError(e)),
             _ => return Err(Error::BadResponse),
         }
@@ -310,7 +313,7 @@ impl Controller {
             .remote_fingerprint
             .clone()
             .ok_or(Error::NotLoggedInError)?;
-        
+
         let handles = self
             .transport
             .start(
@@ -329,7 +332,8 @@ impl Controller {
                 handles.rtp_rx,
                 self.event_tx.clone(),
                 handles.is_connected,
-                handles.receiver_stats)
+                handles.receiver_stats,
+            )
             .map_err(|e| Error::MapError(e.to_string()))
     }
 
@@ -439,11 +443,9 @@ impl Controller {
         )?;
 
         thread::spawn(move || {
-            println!("Starting server-client socket thread");
             let mut buff = [0u8; 65535];
             loop {
                 if !logged_in.load(Ordering::SeqCst) {
-                    println!("log out");
                     break;
                 }
 
@@ -507,10 +509,10 @@ impl Controller {
             ServerResponse::Welcome => Ok(()),
             ServerResponse::ServerFull => {
                 if let Err(e) = self.event_tx.send(AppEvent::FullServerError) {
-                    return Err(Error::MapError(e.to_string()))
+                    return Err(Error::MapError(e.to_string()));
                 };
                 Ok(())
-            },
+            }
             _ => Err(Error::BadResponse),
         }
     }
@@ -577,10 +579,8 @@ fn send_message(
         Ok(0) => {
             let _ = event_tx.send(AppEvent::FatalError);
             Err(Error::IOError("Connection closed by server".to_string()))
-        },
-        Ok(size) => {
-            ServerResponse::from_bytes(&buff[..size]).ok_or(Error::BadResponse)
-        },
+        }
+        Ok(size) => ServerResponse::from_bytes(&buff[..size]).ok_or(Error::BadResponse),
         Err(e) => {
             let _ = event_tx.send(AppEvent::FatalError);
             Err(Error::IOError(e.to_string()))
@@ -611,17 +611,26 @@ fn get_response_for_server_message(
             update_status(username, status, user_status)?;
             Ok(None)
         }
-        ServerMessage::CallIncoming { from_usr, offer_sdp } => {
+        ServerMessage::CallIncoming {
+            from_usr,
+            offer_sdp,
+        } => {
             if let Err(e) = event_tx.send(AppEvent::CallIncoming(from_usr, offer_sdp)) {
                 return Err(Error::MapError(e.to_string()));
             };
             Ok(None)
         }
-        ServerMessage::CallAccepted {from_usr, sdp_answer} => {
-            if let Err(e) = event_tx.send(AppEvent::CallAccepted(sdp_answer, username.clone(), from_usr)) {
+        ServerMessage::CallAccepted {
+            from_usr,
+            sdp_answer,
+        } => {
+            if let Err(e) = event_tx.send(AppEvent::CallAccepted(
+                sdp_answer,
+                username.clone(),
+                from_usr,
+            )) {
                 return Err(Error::MapError(e.to_string()));
             }
-            println!("Sent call accepted event to UI");
             Ok(None)
         }
         ServerMessage::CallRejected => {

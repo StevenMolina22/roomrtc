@@ -21,7 +21,7 @@ use std::default::Default;
 pub struct RtpPacket {
     /// Packet format version (typically 2).
     pub version: u8,
-    
+
     /// Marker flag: 1 if this is the last packet of a frame, 0 otherwise.
     pub marker: u8,
 
@@ -136,8 +136,8 @@ mod tests {
         let original_packet = RtpPacket {
             version: 2,
             marker: 0,
-            total_chunks: 15,      
-            is_i_frame: true,  
+            total_chunks: 15,
+            is_i_frame: true,
             payload_type: 96,
             sequence_number: 100,
             timestamp: 5000,
@@ -147,7 +147,7 @@ mod tests {
 
         let bytes = original_packet.to_bytes();
         assert_eq!(bytes.len(), 35);
-        
+
         assert_eq!(bytes[3], 1, "El booleano true debería ser 1 en binario");
 
         let deserialized_option = RtpPacket::from_bytes(&bytes);

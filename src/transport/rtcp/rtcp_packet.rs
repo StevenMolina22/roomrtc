@@ -26,7 +26,9 @@ impl Display for RtcpPacket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             Self::SenderReport(s) => write!(f, "SR (Sent: {})", s.packets_sent),
-            Self::ReceiverReport(r) => write!(f, "RR (Lost: {}, Jitter: {})", r.packets_lost, r.jitter),
+            Self::ReceiverReport(r) => {
+                write!(f, "RR (Lost: {}, Jitter: {})", r.packets_lost, r.jitter)
+            }
             Self::Goodbye => write!(f, "BYE"),
             Self::Hello => write!(f, "HELLO"),
             Self::Ready => write!(f, "READY"),
@@ -83,7 +85,10 @@ impl RtcpPacket {
         if data.starts_with(b"SR") && data.len() >= 14 {
             let packets_sent = u32::from_be_bytes(data[2..6].try_into().ok()?);
             let bytes_sent = u64::from_be_bytes(data[6..14].try_into().ok()?);
-            return Some(Self::SenderReport(SenderStats { packets_sent, bytes_sent }));
+            return Some(Self::SenderReport(SenderStats {
+                packets_sent,
+                bytes_sent,
+            }));
         }
 
         // Receiver Report: Header (2) + u32 (4) + u32 (4) + u32 (4) = 14 bytes

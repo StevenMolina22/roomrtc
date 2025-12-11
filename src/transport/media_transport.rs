@@ -7,16 +7,16 @@ use crate::session::sdp::{DtlsSetupRole, Fingerprint};
 use crate::srtp::context::SrtpContext;
 use crate::transport::MediaTransportError as Error;
 use crate::transport::rtcp::RtcpReportHandler;
+use crate::transport::rtcp::metrics::{ReceiverStats, SenderStats};
 use crate::transport::rtp::{RtpPacket, RtpReceiver, RtpSender};
 use openssl::pkcs12::Pkcs12;
 use openssl::ssl::{SslAcceptor, SslMethod, SslVerifyMode};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use udp_dtls::{DtlsAcceptor, DtlsConnector, DtlsStream, SignatureAlgorithm, UdpChannel};
-use crate::transport::rtcp::metrics::{ReceiverStats, SenderStats};
 
 /// Transport handles returned from `MediaTransport::start()` containing all necessary channels and state.
 ///
@@ -188,7 +188,8 @@ impl MediaTransport {
             .map_err(|e| Error::MapError(e.to_string()))?;
         self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
 
-        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) = self.spawn_rtp_threads(event_tx, srtp_context, local_setup_role, local_sender_stats)?;
+        let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) =
+            self.spawn_rtp_threads(event_tx, srtp_context, local_setup_role, local_sender_stats)?;
 
         Ok(TransportHandles {
             rtp_tx: local_to_remote_rtp_tx,
@@ -259,21 +260,17 @@ impl MediaTransport {
             None => return Err(Error::ConnectionNotStarted),
         };
 
-        let local_protected_data_tx = self.start_srtp_sender(
-            &rtcp_handler,
-            sender_metrics
-        )?;
-        
-        let remote_protected_data_rx= self.start_srtp_receiver(
-            &rtcp_handler,
-            event_tx,
-        )?;
+        let local_protected_data_tx = self.start_srtp_sender(&rtcp_handler, sender_metrics)?;
+
+        let remote_protected_data_rx = self.start_srtp_receiver(&rtcp_handler, event_tx)?;
 
         let srtp_ctx = Arc::new(Mutex::new(srtp_ctx));
         let is_client = matches!(role, DtlsSetupRole::Active);
-        
-        let remote_unprotected_data_rx = self.start_unprotection_layer(remote_protected_data_rx, srtp_ctx.clone(), is_client);
-        let local_unprotected_data_tx = self.start_protection_layer(local_protected_data_tx, srtp_ctx.clone(), is_client);
+
+        let remote_unprotected_data_rx =
+            self.start_unprotection_layer(remote_protected_data_rx, srtp_ctx.clone(), is_client);
+        let local_unprotected_data_tx =
+            self.start_protection_layer(local_protected_data_tx, srtp_ctx.clone(), is_client);
 
         Ok((local_unprotected_data_tx, remote_unprotected_data_rx))
     }
@@ -291,7 +288,12 @@ impl MediaTransport {
     ///
     /// # Returns
     /// A receiver channel for decrypted `RtpPacket` instances.
-    fn start_unprotection_layer(&self, protected_rx: Receiver<Vec<u8>>, srtp_ctx: Arc<Mutex<SrtpContext>>, is_client: bool) -> Receiver<RtpPacket> {
+    fn start_unprotection_layer(
+        &self,
+        protected_rx: Receiver<Vec<u8>>,
+        srtp_ctx: Arc<Mutex<SrtpContext>>,
+        is_client: bool,
+    ) -> Receiver<RtpPacket> {
         let (unprotected_tx, unprotected_rx) = mpsc::channel();
         let srtp_ctx = srtp_ctx.clone();
         let logger = self.logger.clone();
@@ -307,24 +309,20 @@ impl MediaTransport {
                     continue;
                 } else if (128..=191).contains(&first_byte) {
                     match srtp_ctx.lock() {
-                        Ok(mut srtp_ctx) => {
-                            match srtp_ctx.unprotect(&protected_data, is_client) {
-                                Ok(unprotected_packet) => {
-                                    if let Err(e) = unprotected_tx.send(unprotected_packet) {
-                                        logger.error(&format!(
-                                            "Failed to send unprotected RTP packet: {e}"
-                                        ));
-                                        break;
-                                    }
-                                },
-                                Err(e) => {
+                        Ok(mut srtp_ctx) => match srtp_ctx.unprotect(&protected_data, is_client) {
+                            Ok(unprotected_packet) => {
+                                if let Err(e) = unprotected_tx.send(unprotected_packet) {
                                     logger.error(&format!(
-                                        "SRTP unprotect failed: {e}"
+                                        "Failed to send unprotected RTP packet: {e}"
                                     ));
                                     break;
                                 }
                             }
-                        }
+                            Err(e) => {
+                                logger.error(&format!("SRTP unprotect failed: {e}"));
+                                break;
+                            }
+                        },
                         Err(e) => {
                             logger.error(&format!("SRTP context lock failed: {e}"));
                             break;
@@ -352,7 +350,12 @@ impl MediaTransport {
     ///
     /// # Returns
     /// A sender channel for unprotected `RtpPacket` instances from the application.
-    fn start_protection_layer(&self, protected_tx: Sender<Vec<u8>>, srtp_ctx: Arc<Mutex<SrtpContext>>, is_client: bool) -> Sender<RtpPacket> {
+    fn start_protection_layer(
+        &self,
+        protected_tx: Sender<Vec<u8>>,
+        srtp_ctx: Arc<Mutex<SrtpContext>>,
+        is_client: bool,
+    ) -> Sender<RtpPacket> {
         let (unprotected_tx, unprotected_rx) = mpsc::channel();
         let srtp_ctx = srtp_ctx.clone();
         let logger = self.logger.clone();
@@ -369,18 +372,18 @@ impl MediaTransport {
                         Ok(data) => data,
                         Err(e) => {
                             logger.error(&Error::ProtectionError(e.to_string()).to_string());
-                            break
+                            break;
                         }
                     }
                 };
-                
+
                 if let Err(e) = protected_tx.send(protected_data) {
                     logger.error(&Error::ChannelSendError(e.to_string()).to_string());
-                    break
+                    break;
                 }
             }
         });
-        
+
         unprotected_tx
     }
     /// Start the SRTP sender for transmitting encrypted RTP packets to the network.

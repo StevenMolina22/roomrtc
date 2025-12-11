@@ -24,7 +24,8 @@ pub struct DtlsSocket {
 
 impl DtlsSocket {
     /// Creates a new `DtlsSocket` from an established DTLS stream.
-    #[must_use] pub fn new(stream: DtlsStream<UdpChannel>, remote_addr: SocketAddr) -> Self {
+    #[must_use]
+    pub fn new(stream: DtlsStream<UdpChannel>, remote_addr: SocketAddr) -> Self {
         Self {
             stream: Arc::new(Mutex::new(stream)),
             remote_addr,

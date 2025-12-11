@@ -15,16 +15,16 @@ use std::fmt::Display;
 pub enum CameraError {
     /// A poisoned mutex or RwLock was encountered.
     PoisonedLock,
-    
+
     /// Camera device index is invalid or out of range.
     IndexError,
-    
+
     /// Failed to open the camera device with error details.
     OpenError(String),
-    
+
     /// Camera is closed or not available.
     ClosedCamera,
-    
+
     /// Failed to set camera configuration (resolution, FPS, etc.).
     CameraConfigFailed,
 }

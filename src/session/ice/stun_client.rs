@@ -44,7 +44,7 @@ pub fn get_public_ip_and_port(socket: &UdpSocket, logger: &crate::logger::Logger
     ));
 
     for i in 1..=3 {
-        if let Err(e) = socket.send_to(&packet, remote_addr) {
+        if socket.send_to(&packet, remote_addr).is_err() {
             logger.warn(&format!("[STUN] Attempt {i}: Error sending: {e}"));
             continue;
         }
@@ -158,9 +158,9 @@ mod tests {
         fn add_xor_address(self, ip: &str, port: u16) -> Self {
             let mut value = vec![0x00, 0x01]; // Reserved + Family (IPv4)
 
-        let magic_high_16 = (MAGIC_COOKIE >> 16) as u16;
-        let x_port = port ^ magic_high_16;
-        value.extend_from_slice(&x_port.to_be_bytes());
+            let magic_high_16 = (MAGIC_COOKIE >> 16) as u16;
+            let x_port = port ^ magic_high_16;
+            value.extend_from_slice(&x_port.to_be_bytes());
 
         let ip_parts: Vec<u8> = ip
             .split('.')
@@ -323,9 +323,7 @@ mod tests {
 
         let result = parse_stun_response(&packet);
         assert!(result.is_err());
-        assert!(result
-            .expect_err("expected error")
-            .contains("not found"));
+        assert!(result.expect_err("expected error").contains("not found"));
     }
 
     #[test]

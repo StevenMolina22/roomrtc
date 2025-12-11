@@ -14,7 +14,7 @@ use std::time::Instant;
 /// let elapsed = clock.now();
 /// println!("Elapsed: {} ms", elapsed);
 /// ```
-#[derive(Clone, Debug, )]
+#[derive(Clone, Debug)]
 pub struct Clock {
     /// The starting instant for time measurement.
     instant: Instant,

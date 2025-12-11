@@ -17,23 +17,23 @@ use crate::transport::rtcp::metrics::CallStats;
 /// - `FatalError`: A fatal error occurred that may require user intervention.
 pub enum AppEvent {
     FullServerError,
-    
+
     /// Incoming call notification with caller username and SDP offer.
     ///
     /// Contains the username of the caller and the SDP offer for establishing the call.
     CallIncoming(String, SessionDescriptionProtocol),
-    
+
     /// Call acceptance notification with SDP answer and user information.
     ///
     /// Contains the SDP answer, the username accepting the call, and the username of the caller.
     CallAccepted(SessionDescriptionProtocol, String, String),
-    
+
     /// Incoming call was rejected by the peer.
     CallRejected,
-    
+
     /// Active call has ended.
     CallEnded,
-    
+
     /// Recoverable error occurred during operation.
     Error(String),
     FatalError,

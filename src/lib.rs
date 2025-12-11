@@ -1,4 +1,5 @@
 pub mod client_server_protocol;
+pub mod clock;
 pub mod config;
 pub mod controller;
 pub mod dtls;
@@ -11,4 +12,3 @@ pub mod tools;
 pub mod transport;
 pub mod ui;
 pub mod user;
-pub mod clock;

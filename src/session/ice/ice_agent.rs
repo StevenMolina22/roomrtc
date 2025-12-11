@@ -4,10 +4,10 @@ use super::connectivity_state::ConnectivityState;
 use super::error::IceError as Error;
 use crate::config::IceConfig;
 use crate::logger::Logger;
+use crate::session::ice::candidate_type::CandidateType;
 use crate::session::ice::stun_client;
 use if_addrs;
 use std::time::{Duration, Instant};
-use crate::session::ice::candidate_type::CandidateType;
 
 /// An ICE agent that gathers local candidates, accepts remote candidates
 /// and forms candidate pairs for connectivity checks.
@@ -194,6 +194,7 @@ impl IceAgent {
             } else {
                 pair.state = ConnectivityState::Failed;
                 self.logger.debug(&format!("[ICE] Pair FAILED: {}", pair));
+
             }
         }
 
@@ -228,7 +229,7 @@ impl IceAgent {
         let mut buf = [0u8; 1024];
 
         while start.elapsed() < max_duration {
-            if let Err(e) = socket.send_to(b"PING", target) {
+            if socket.send_to(b"PING", target).is_err() {
                 logger.warn(&format!("[ICE] Send error: {}", e));
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
@@ -366,7 +367,6 @@ mod tests {
             result,
             Err(Error::NetworkInterfaceError | Error::NoNetworkInterfaceFound)
         ) {
-            eprintln!("Skipping gather_candidates test due to missing network interface");
             return;
         }
         assert!(result.is_ok());

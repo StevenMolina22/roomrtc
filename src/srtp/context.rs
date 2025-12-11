@@ -94,10 +94,14 @@ impl SrtpContext {
             return Err(SrtpError::AuthenticationFailed);
         }
 
-        let seq_bytes: [u8; 8] = packet_bytes[5..13].try_into().map_err(|_| SrtpError::PacketTooShort)?;
+        let seq_bytes: [u8; 8] = packet_bytes[5..13]
+            .try_into()
+            .map_err(|_| SrtpError::PacketTooShort)?;
         let sequence_number = u64::from_be_bytes(seq_bytes);
 
-        let ssrc_bytes: [u8; 4] = packet_bytes[29..33].try_into().map_err(|_| SrtpError::PacketTooShort)?;
+        let ssrc_bytes: [u8; 4] = packet_bytes[29..33]
+            .try_into()
+            .map_err(|_| SrtpError::PacketTooShort)?;
         let ssrc = u32::from_be_bytes(ssrc_bytes);
 
         let iv = Self::get_iv(salt, ssrc, sequence_number);

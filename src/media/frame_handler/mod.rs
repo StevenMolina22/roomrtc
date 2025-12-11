@@ -1,9 +1,9 @@
+pub mod color_space;
 mod decoder;
 mod encoded_frame;
 mod encoder;
 mod error;
 mod frame;
-pub mod color_space;
 
 pub use decoder::Decoder;
 pub use encoded_frame::EncodedFrame;

@@ -36,7 +36,9 @@ impl Display for MediaTransportError {
             Self::ConnectionNotStarted => write!(f, "Error: \"Connection not started yet\""),
             Self::SocketConfigFailed => write!(f, "Error: \"Failed to configure socket\""),
             Self::ProtectionError(e) => write!(f, "Error: \"Protection failed: {e}\""),
-            Self::ChannelSendError(e) => write!(f, "Error: \"Failed to send through channel: {e}\""),
+            Self::ChannelSendError(e) => {
+                write!(f, "Error: \"Failed to send through channel: {e}\"")
+            }
         }
     }
 }

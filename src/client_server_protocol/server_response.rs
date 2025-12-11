@@ -39,43 +39,43 @@ pub enum ServerResponse {
     /// * Server socket address for the session
     /// * HashMap of username to UserStatus for all connected users
     LoginOk(String, SocketAddr, HashMap<String, UserStatus>),
-    
+
     /// Login failure response with error details.
     LoginError(String),
 
     /// Successful user registration.
     SignupOk,
-    
+
     /// Sign up failure response with error details.
     SignupError(String),
 
     /// Successful logout.
     LogoutOk,
-    
+
     /// Logout failure response with error details.
     LogoutError(String),
 
     /// Successful call hang up.
     CallHangUpOk,
-    
+
     /// Call hang up failure response with error details.
     CallHangUpError(String),
 
     /// Successful call request transmission.
     CallRequestOk,
-    
+
     /// Call request failure response with error details.
     CallRequestError(String),
 
     /// Successful call acceptance transmission.
     CallAcceptOk,
-    
+
     /// Call acceptance failure response with error details.
     CallAcceptError(String),
 
     /// Successful call rejection transmission.
     CallRejectOk,
-    
+
     /// Call rejection failure response with error details.
     CallRejectError(String),
 
@@ -241,7 +241,6 @@ impl ServerResponse {
             "CALLREJECTERROR" if parts.len() == 2 => Some(Self::CallRejectError(parts[1].into())),
 
             // "SERVERFULL" if parts.len() == 1 => Some(Self::ServerFull),
-
             "BADMSG" if parts.len() == 1 => Some(Self::BadMessage),
 
             "ERROR" if parts.len() == 2 => Some(Self::Error(parts[1].into())),

@@ -80,7 +80,10 @@ mod tests {
     fn test_from_bytes_occupied_with_spaces() {
         let input = b"Occupied:Coding Hard";
         let status = UserStatus::from_bytes(input);
-        assert_eq!(status, Some(UserStatus::Occupied("Coding Hard".to_string())));
+        assert_eq!(
+            status,
+            Some(UserStatus::Occupied("Coding Hard".to_string()))
+        );
     }
 
     #[test]
@@ -103,7 +106,7 @@ mod tests {
 
     #[test]
     fn test_from_bytes_utf8_error() {
-        let input = b"\xff"; 
+        let input = b"\xff";
         assert_eq!(UserStatus::from_bytes(input), None);
     }
 
@@ -111,7 +114,10 @@ mod tests {
     fn test_display_implementation() {
         assert_eq!(format!("{}", UserStatus::Available), "Available");
         assert_eq!(format!("{}", UserStatus::Offline), "Offline");
-        assert_eq!(format!("{}", UserStatus::Occupied("Gaming".to_string())), "Occupied:Gaming");
+        assert_eq!(
+            format!("{}", UserStatus::Occupied("Gaming".to_string())),
+            "Occupied:Gaming"
+        );
     }
 
     #[test]

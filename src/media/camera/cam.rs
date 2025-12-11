@@ -1,14 +1,14 @@
+use crate::clock::Clock;
 use crate::config::Config;
 use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
 use opencv::{imgproc, prelude::*, videoio};
-use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc};
 use crate::logger::Logger;
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
-use crate::clock::Clock;
 
 /// Trait for objects that produce frames from a video source.
 ///
@@ -51,9 +51,8 @@ pub struct Camera {
     /// Application configuration with camera parameters.
     config: Arc<Config>,
 
-    /// Clock for frame timestamping.
-    /// Clock for frame timestamping.
     clock: Arc<Clock>,
+  
     logger: Logger,
 }
 
@@ -145,7 +144,8 @@ impl Camera {
             let mut mat = Mat::default();
             let mut rgb = Mat::default();
 
-            let frame_duration = Duration::from_millis(((1000f32)/ config.media.frame_rate) as u64);
+            let frame_duration =
+                Duration::from_millis(((1000f32) / config.media.frame_rate) as u64);
 
             while running.load(std::sync::atomic::Ordering::SeqCst) {
                 let frame_read = match cam.read(&mut mat) {
@@ -165,8 +165,9 @@ impl Camera {
                     &mut rgb,
                     imgproc::COLOR_BGR2RGB,
                     0,
+                    core::AlgorithmHint::ALGO_HINT_DEFAULT,
                 )
-                    .is_err()
+                .is_err()
                 {
                     logger.error("Failed to convert frame color.");
                     continue;
@@ -201,7 +202,8 @@ impl Camera {
     /// Clears the running flag, which signals the background capture thread to exit gracefully.
     /// The thread will observe this flag and stop capturing frames.
     fn stop_internal(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

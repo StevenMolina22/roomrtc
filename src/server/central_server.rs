@@ -1,5 +1,5 @@
-use super::{ServerError, UserHandler};
 use super::error::ServerError as Error;
+use super::{ServerError, UserHandler};
 use crate::client_server_protocol::{ClientResponse, ServerMessage};
 use crate::config::Config;
 use crate::logger::Logger;
@@ -149,19 +149,21 @@ impl CentralServer {
                         thread_logger,
                     );
 
-                    if user_handler.client_server_handshake(&mut tls_stream, &users_connected, &config).is_err() {
-                        return
+                    if user_handler
+                        .client_server_handshake(&mut tls_stream, &users_connected, &config)
+                        .is_err()
+                    {
+                        return;
                     }
 
                     match user_handler.handle_client(&mut tls_stream, on) {
-                        Ok(())|Err(ServerError::ConnectionError) => users_connected
+                        Ok(()) | Err(ServerError::ConnectionError) => users_connected
                             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
                                 if v == 0 { Some(0) } else { Some(v - 1) }
                             })
                             .ok(),
                         _ => Some(0),
                     };
-                    println!("User disconnected. Total: {}", users_connected.load(Ordering::SeqCst));
                 });
             }
         });
@@ -220,8 +222,8 @@ fn load_users_from_mem(filename: &String) -> Result<HashMap<String, UserData>, E
         f
     } else {
         OpenOptions::new()
-            .truncate(true)
-            .write(true)
+            .create(true)
+            .append(true)
             .open(filename)
             .map_err(|e| Error::MapError(e.to_string()))?;
 
@@ -283,7 +285,10 @@ pub fn map_stream_to_user(
     users: Arc<RwLock<HashMap<String, UserData>>>,
     mut stream: StreamOwned<ServerConnection, TcpStream>,
 ) {
-    if stream.write_all(&ServerMessage::UsernameRequest.to_bytes()).is_err() {
+    if stream
+        .write_all(&ServerMessage::UsernameRequest.to_bytes())
+        .is_err()
+    {
         return;
     }
 
@@ -342,7 +347,7 @@ mod tests {
             Err(_) => 0,
         };
         let filename = format!("test_users_{}.txt", nanos);
-        
+
         if let Ok(mut file) = File::create(&filename) {
             let _ = file.write_all(content.as_bytes());
         }
@@ -352,18 +357,17 @@ mod tests {
         let _ = fs::remove_file(filename);
     }
 
-
     #[test]
     fn test_load_users_valid_entries() {
         let content = "alice:1234\nbob:secret\ncharlie:pass";
-        
+
         with_temp_file(content, |filename| {
             let result = load_users_from_mem(filename);
-            
+
             match result {
                 Ok(users) => {
                     assert_eq!(users.len(), 3);
-                    
+
                     if let Some(u) = users.get("alice") {
                         assert_eq!(u.password, "1234");
                         assert_eq!(u.status, UserStatus::Offline);
@@ -376,7 +380,7 @@ mod tests {
                     } else {
                         unreachable!("Falta el usuario bob");
                     }
-                },
+                }
                 Err(e) => unreachable!("Falló la carga: {}", e),
             }
         });
@@ -392,9 +396,9 @@ mod tests {
             if let Ok(users) = result {
                 assert_eq!(users.len(), 2);
                 assert!(users.contains_key("valid"));
-                
+
                 if let Some(u) = users.get("complex") {
-                    assert_eq!(u.password, "pass:word"); 
+                    assert_eq!(u.password, "pass:word");
                 }
             } else {
                 unreachable!("No debería fallar por líneas mal formadas, solo ignorarlas");
@@ -417,24 +421,23 @@ mod tests {
             Ok(users) => {
                 assert!(users.is_empty());
                 assert!(Path::new(filename).exists(), "El archivo debería existir");
-            },
+            }
             Err(e) => unreachable!("Error inesperado: {}", e),
         }
 
         let _ = fs::remove_file(filename);
     }
 
-
     #[test]
     fn test_get_server_ip_returns_valid_result() {
         let result = get_server_ip();
-        
+
         match result {
             Ok(ip) => {
                 assert!(!ip.is_empty());
                 assert!(ip.contains('.'));
-            },
-            Err(Error::IPNotFound(_)) => {},
+            }
+            Err(Error::IPNotFound(_)) => {}
             Err(e) => unreachable!("Error desconocido obteniendo IP: {}", e),
         }
     }

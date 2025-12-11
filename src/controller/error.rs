@@ -34,22 +34,22 @@ use std::net::AddrParseError;
 pub enum ControllerError {
     /// Generic error with a message.
     Error(String),
-    
+
     /// Failed to establish connection to the server.
     ConnectingToServerFailed,
-    
+
     /// Input/output operation error.
     IOError(String),
-    
+
     /// Unexpected or malformed response from server.
     BadResponse,
-    
+
     /// Login authentication failed.
     LogInFailed(String),
-    
+
     /// User registration/signup failed.
     SignUpFailed(String),
-    
+
     /// Logout operation failed.
     LogOutFailed(String),
 
@@ -79,10 +79,10 @@ pub enum ControllerError {
 
     /// User is not logged in.
     NotLoggedInError,
-    
+
     /// Call operation failed with details.
     CallError(String),
-    
+
     /// Call was rejected by the peer.
     CallRefused,
 }

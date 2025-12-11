@@ -85,7 +85,7 @@ pub struct MediaConfig {
     pub media_protocol: String,
 
     /// Jitter buffer size
-    pub jitter_buffer_size: usize
+    pub jitter_buffer_size: usize,
 }
 
 #[derive(Debug, Clone)]

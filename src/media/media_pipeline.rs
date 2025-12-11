@@ -211,7 +211,7 @@ impl MediaPipeline {
         event_tx: Sender<AppEvent>,
         connected: &Arc<AtomicBool>,
     ) -> Result<(), Error> {
-        let mut encoder = match Encoder::new(&self.config.media, self.logger.clone()) {
+        let mut encoder = match Encoder::new(&self.config.media) {
             Ok(d) => d,
             Err(e) => {
                 self.logger.error(&format!("Failed to create encoder: {e}"));
@@ -318,9 +318,7 @@ mod tests {
             }
         };
 
-        let logger = crate::logger::Logger::new("/dev/null").unwrap();
-
-        let mut encoder = match Encoder::new(&config.media, logger) {
+        let mut encoder = match Encoder::new(&config.media) {
             Ok(enc) => enc,
             Err(_) => {
                 return;

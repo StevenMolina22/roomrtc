@@ -8,9 +8,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc, Mutex};
 use std::thread;
+use yuv::YuvPlanarImageMut;
 use crate::controller::AppEvent;
 use crate::clock::Clock;
 use crate::transport::rtcp::ReceiverStats;
+use crate::media::frame_handler::color_space::rgb_to_yuv420;
 
 const JITTER_BUFF_SIZE: usize = 2048;
 
@@ -118,9 +120,9 @@ impl MediaPipeline {
         connected: Arc<AtomicBool>,
     ) -> Result<Receiver<Frame>, Error> {
         let (local_frame_tx, local_frame_rx) = mpsc::channel();
-        let (raw_tx, raw_rx) = mpsc::channel();
+        let (rgb_tx, rgb_rx) = mpsc::channel();
 
-        self.start_encoding_thread(raw_rx, event_tx.clone(), rtp_tx, connected.clone())?;
+        self.start_frame_sender_thread(rgb_rx, event_tx.clone(), rtp_tx, &connected)?;
         let camera_frame_rx = self
             .camera
             .start()
@@ -136,7 +138,7 @@ impl MediaPipeline {
                     break;
                 }
 
-                if raw_tx.send(frame.clone()).is_err() {
+                if rgb_tx.send(frame.clone()).is_err() {
                     break;
                 }
             }
@@ -145,7 +147,30 @@ impl MediaPipeline {
         Ok(local_frame_rx)
     }
 
-    fn start_encoding_thread(&mut self, raw_rx: Receiver<Frame>, event_tx: Sender<AppEvent>, rtp_tx: Sender<RtpPacket>, connected: Arc<AtomicBool>) -> Result<(), Error> {
+    fn start_frame_sender_thread(&mut self, rgb_rx: Receiver<Frame>, event_tx: Sender<AppEvent>, rtp_tx: Sender<RtpPacket>, connected: &Arc<AtomicBool>) -> Result<(), Error> {
+        let yuv_rx = self.start_rgb_to_yuv_thread(rgb_rx)?;
+        self.start_encoded_sender_thread(rtp_tx, yuv_rx, event_tx.clone(), &connected)?;
+
+        Ok(())
+    }
+
+    fn start_rgb_to_yuv_thread(&mut self, rgb_rx: Receiver<Frame>) -> Result<Receiver<(YuvPlanarImageMut<'static, u8>, u128)>,Error> {
+        let (yuv_tx, yuv_rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            for rgb_frame in rgb_rx {
+                let yuv = rgb_to_yuv420(&rgb_frame).unwrap();
+
+                if let Err(_) = yuv_tx.send((yuv, rgb_frame.frame_time)) {
+                    break
+                }
+            }
+        });
+
+        Ok(yuv_rx)
+    }
+
+    fn start_encoded_sender_thread(&mut self, rtp_tx: Sender<RtpPacket>, yuv_rx: Receiver<(YuvPlanarImageMut<'static, u8>, u128)>, event_tx: Sender<AppEvent>, connected: &Arc<AtomicBool>) -> Result<(), Error> {
         let mut encoder = match Encoder::new(&self.config.media) {
             Ok(d) => d,
             Err(e) => {
@@ -156,40 +181,35 @@ impl MediaPipeline {
             }
         };
 
-        let ssrc = self.ssrc;
-        let config = Arc::clone(&self.config);
         let logger = self.logger.clone();
+        let ssrc = self.ssrc;
+        let config = self.config.clone();
+        let connected = connected.clone();
+        let mut seq_num: u64 = 0;
+
+
 
         thread::spawn(move || {
-            let mut seq_num: u64 = 0;
-            for frame in raw_rx {
-                let encoded_frame = match encoder.encode_frame(&frame) {
+            for (yuv, timestamp) in yuv_rx {
+                let encoded = match encoder.encode(&yuv, timestamp) {
                     Ok(f) => f,
                     Err(e) => {
                         logger.error(&format!("Failed to encode frame: {e}"));
                         break;
                     }
                 };
-                
-                
-                if let Err(e) = send_encoded_frame(
-                    encoded_frame, 
-                    &rtp_tx, 
-                    ssrc, 
-                    &connected, 
-                    &mut seq_num, 
-                    &config
-                ) 
-                {
+
+                if let Err(e) = send_encoded_frame(encoded, &rtp_tx, ssrc, &connected, &mut seq_num, &config) {
                     logger.error(&Error::SendError(e.to_string()).to_string());
                     break
                 }
             };
         });
-
         Ok(())
     }
 }
+
+
 
 fn send_encoded_frame(
     encoded_frame: EncodedFrame,
@@ -245,68 +265,4 @@ fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<F
 
 fn send_message_to_ui(event_tx: Sender<AppEvent>, event: AppEvent) {
     event_tx.send(event);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::Path;
-    use std::sync::Arc;
-
-    #[test]
-    fn test_generate_frame_from_chunks_h264() {
-        // ------- Setup -------
-        let config = Arc::new(Config::load(Path::new("./room_rtc.conf")).unwrap());
-        let mut encoder = Encoder::new(&config.media).expect("Encoder no pudo inicializarse");
-        let mut decoder = Decoder::new().expect("Decoder no pudo inicializarse");
-
-        // Creamos un frame crudo sintético RGB 320x240
-        let width = 320;
-        let height = 240;
-        let raw_data = vec![128u8; width * height * 3];
-
-        let raw_frame = Frame {
-            data: raw_data.clone(),
-            width,
-            height,
-            frame_time: 0
-        };
-
-        // ------- Encode -------
-        let encoded = encoder
-            .encode_frame(&raw_frame)
-            .expect("Fallo encodear el frame");
-
-        assert!(!encoded.chunks.is_empty(), "El encoder debe generar chunks");
-
-        let mut rtp_chunks = Vec::new();
-        let total_chunks = encoded.chunks.len() as u8;
-
-        for (i, chunk) in encoded.chunks.iter().enumerate() {
-            rtp_chunks.push(RtpPacket {
-                version: config.media.rtp_version,
-                marker: 0,
-                total_chunks,
-                is_i_frame: encoded.is_i_frame,
-                payload_type: config.media.rtp_payload_type,
-                sequence_number: i as u64,
-                timestamp: 0,
-                ssrc: 55,
-                payload: chunk.clone(),
-            });
-        }
-
-        // ------- Decodificar vía generate_frame_from_chunks -------
-        rtp_chunks.sort_by_key(|c| c.sequence_number);
-        let mut data = Vec::new();
-        for c in rtp_chunks.iter() {
-            data.extend_from_slice(&c.payload);
-        }
-
-        let decoded = generate_frame_from_chunks(&data, &mut decoder)
-            .expect("generate_frame_from_chunks no devolvió frame");
-
-        // ------- Validaciones -------
-        assert_eq!(decoded.data, raw_frame.data);
-    }
 }

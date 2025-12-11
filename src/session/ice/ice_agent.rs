@@ -78,7 +78,7 @@ impl IceAgent {
         self.logger
             .info("STUN: Starting discovery on existing socket...");
 
-        match stun_client::get_public_ip_and_port(socket) {
+        match stun_client::get_public_ip_and_port(socket, &self.logger) {
             Ok(addr) => {
                 if let Some((ip, port_str)) = addr.split_once(':')
                     && let Ok(stun_port) = port_str.parse::<u16>()
@@ -174,19 +174,27 @@ impl IceAgent {
             if pair.local.candidate_type == CandidateType::ServerReflexive
                 || pair.remote.candidate_type == CandidateType::ServerReflexive
             {
+                self.logger.debug(&format!("[ICE] Skipping STUN (srflx) pair: {}", pair));
                 continue;
             }
 
             pair.state = ConnectivityState::InProgress;
+            self.logger.debug(&format!(
+                "[ICE] Checking pair: {} <-> {}",
+                pair.local.address, pair.remote.address
+            ));
 
             let target = format!("{}:{}", pair.remote.address, pair.remote.port);
 
-            if Self::verify_candidate_pair(socket, &target) {
+            if Self::verify_candidate_pair(socket, &target, &self.logger) {
                 pair.state = ConnectivityState::Succeeded;
+                self.logger.info(&format!("[ICE] Pair VALIDATED: {}", pair));
                 selected_index = Some(index);
                 break;
             } else {
                 pair.state = ConnectivityState::Failed;
+                self.logger.debug(&format!("[ICE] Pair FAILED: {}", pair));
+
             }
         }
 
@@ -215,13 +223,14 @@ impl IceAgent {
     ///
     /// - `true` if a valid PONG response is received from the target within the timeout.
     /// - `false` if no PONG is received or the timeout expires.
-    fn verify_candidate_pair(socket: &std::net::UdpSocket, target: &str) -> bool {
+    fn verify_candidate_pair(socket: &std::net::UdpSocket, target: &str, logger: &Logger) -> bool {
         let start = Instant::now();
         let max_duration = Duration::from_secs(2);
         let mut buf = [0u8; 1024];
 
         while start.elapsed() < max_duration {
             if socket.send_to(b"PING", target).is_err() {
+                logger.warn(&format!("[ICE] Send error: {}", e));
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -235,9 +244,11 @@ impl IceAgent {
                     let msg = &buf[..amt];
 
                     if msg == b"PONG" {
+                        logger.debug(&format!("[ICE] Received PONG from remote: {}", src));
                         return true;
                     } else if msg == b"PING" {
                         let _ = socket.send_to(b"PONG", target);
+                        logger.debug("[ICE] Received PING from remote, sent PONG back.");
                     }
                 }
                 Err(_) => {

@@ -1,12 +1,19 @@
 use std::fmt;
 
+/// Errors that can occur during SRTP operations.
 #[derive(Debug)]
 pub enum SrtpError {
+    /// Key derivation process failed.
     KeyDerivationFailed,
+    /// Encryption operation failed.
     EncryptionFailed,
+    /// Decryption operation failed.
     DecryptionFailed,
+    /// Authentication verification failed.
     AuthenticationFailed,
+    /// Packet is too short to be valid.
     PacketTooShort,
+    /// OpenSSL library error occurred.
     OpenSslError(openssl::error::ErrorStack),
 }
 

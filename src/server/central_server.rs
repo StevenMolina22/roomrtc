@@ -1,5 +1,5 @@
-use super::UserHandler;
 use super::error::ServerError as Error;
+use super::{ServerError, UserHandler};
 use crate::client_server_protocol::{ClientResponse, ServerMessage};
 use crate::config::Config;
 use crate::logger::Logger;
@@ -87,7 +87,7 @@ impl CentralServer {
                     break;
                 }
                 Ok(_) => {}
-                Err(e) => {
+                Err(_) => {
                     self.on.store(false, Ordering::SeqCst);
                     break;
                 }
@@ -95,11 +95,9 @@ impl CentralServer {
         }
         Ok(())
     }
-    /// Spawns the initial TCP listener thread.
-    ///
-    /// This thread accepts incoming client connections and
-    /// spawns a new thread per connection. Each worker thread receives
-    /// references to the shared user map and the shared connected-user counter.
+    // Spawns the initial TCP listener thread.
+    // Accepts incoming client connections and spawns one worker per connection,
+    // sharing the user map and the connected-user counter across threads.
     fn await_for_connections(&mut self) -> Result<(), Error> {
         let config = self.config.clone();
         let tls_config = self.tls_config.clone();
@@ -107,7 +105,6 @@ impl CentralServer {
         let users_connected = self.users_connected.clone();
         let on = self.on.clone();
         let server_client_socket_addr = self.server_client_socket_addr;
-        let max_users = self.config.server.max_amount_of_users_connected;
 
         let logger = self.logger.clone();
 
@@ -139,18 +136,34 @@ impl CentralServer {
                 let thread_logger = logger.context("UserHandler");
 
                 thread::spawn(move || {
-                    let tls_conn = ServerConnection::new(tls_config).unwrap();
-                    let tls_stream = StreamOwned::new(tls_conn, stream);
+                    let tls_conn = match ServerConnection::new(tls_config) {
+                        Ok(conn) => conn,
+                        Err(_) => return,
+                    };
+                    let mut tls_stream = StreamOwned::new(tls_conn, stream);
 
                     let mut user_handler = UserHandler::new(
                         users,
-                        users_connected,
-                        config,
+                        config.clone(),
                         server_client_socket_addr,
-                        max_users,
                         thread_logger,
                     );
-                    if user_handler.handle_client(tls_stream, on).is_err() {}
+
+                    if user_handler
+                        .client_server_handshake(&mut tls_stream, &users_connected, &config)
+                        .is_err()
+                    {
+                        return;
+                    }
+
+                    match user_handler.handle_client(&mut tls_stream, on) {
+                        Ok(()) | Err(ServerError::ConnectionError) => users_connected
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+                                if v == 0 { Some(0) } else { Some(v - 1) }
+                            })
+                            .ok(),
+                        _ => Some(0),
+                    };
                 });
             }
         });
@@ -175,7 +188,10 @@ impl CentralServer {
         let users = self.users.clone();
 
         thread::spawn(move || {
-            let listener = TcpListener::bind(sc_addr).unwrap();
+            let listener = match TcpListener::bind(sc_addr) {
+                Ok(l) => l,
+                Err(_) => return,
+            };
 
             for incoming in listener.incoming() {
                 let stream = match incoming {
@@ -187,7 +203,10 @@ impl CentralServer {
                 let users = users.clone();
 
                 thread::spawn(move || {
-                    let tls_conn = ServerConnection::new(tls_config).unwrap();
+                    let tls_conn = match ServerConnection::new(tls_config) {
+                        Ok(conn) => conn,
+                        Err(_) => return,
+                    };
                     let tls_stream = StreamOwned::new(tls_conn, stream);
                     map_stream_to_user(users, tls_stream);
                 });
@@ -197,13 +216,14 @@ impl CentralServer {
     }
 }
 
+// Loads user credentials from disk; creates an empty file if it is missing.
 fn load_users_from_mem(filename: &String) -> Result<HashMap<String, UserData>, Error> {
     let file = if let Ok(f) = File::open(filename) {
         f
     } else {
         OpenOptions::new()
             .create(true)
-            .write(true)
+            .append(true)
             .open(filename)
             .map_err(|e| Error::MapError(e.to_string()))?;
 
@@ -230,19 +250,21 @@ fn load_users_from_mem(filename: &String) -> Result<HashMap<String, UserData>, E
     Ok(users)
 }
 
+// Reads certificate and private key files from disk, returning them ready for TLS setup.
 fn generate_certs_and_key(
     config: Arc<Config>,
 ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), Error> {
     let mut certs = Vec::new();
-    for item in
-        CertificateDer::pem_file_iter(config.server.server_certification_file.clone()).unwrap()
-    {
+    let cert_iter = CertificateDer::pem_file_iter(config.server.server_certification_file.clone())
+        .map_err(|e| Error::MapError(e.to_string()))?;
+    for item in cert_iter {
         match item {
             Ok(item) => certs.push(item),
             Err(e) => return Err(Error::MapError(e.to_string())),
         }
     }
-    let key = PrivateKeyDer::from_pem_file(config.server.server_private_key_file.clone()).unwrap();
+    let key = PrivateKeyDer::from_pem_file(config.server.server_private_key_file.clone())
+        .map_err(|e| Error::MapError(e.to_string()))?;
 
     Ok((certs, key))
 }
@@ -263,7 +285,10 @@ pub fn map_stream_to_user(
     users: Arc<RwLock<HashMap<String, UserData>>>,
     mut stream: StreamOwned<ServerConnection, TcpStream>,
 ) {
-    if let Err(_) = stream.write_all(&ServerMessage::UsernameRequest.to_bytes()) {
+    if stream
+        .write_all(&ServerMessage::UsernameRequest.to_bytes())
+        .is_err()
+    {
         return;
     }
 
@@ -279,18 +304,19 @@ pub fn map_stream_to_user(
         None => return,
     };
 
-    let username = match response {
-        ClientResponse::Username(name) => name,
-        _ => return,
-    };
+    let ClientResponse::Username(username) = response;
 
-    let mut users = users.write().unwrap();
+    let mut users = match users.write() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
     if let Some(mut user_data) = users.get(&username).cloned() {
         user_data.update_server_client_stream(stream);
         users.insert(username, user_data);
     }
 }
 
+// Retrieves the first non-loopback IPv4 address from available interfaces.
 fn get_server_ip() -> Result<String, Error> {
     let interfaces = if_addrs::get_if_addrs().map_err(|e| Error::MapError(e.to_string()))?;
 
@@ -303,4 +329,116 @@ fn get_server_ip() -> Result<String, Error> {
     }
 
     Err(Error::IPNotFound(String::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use std::path::Path;
+
+    fn with_temp_file<F>(content: &str, test_fn: F)
+    where
+        F: FnOnce(&String),
+    {
+        let nanos = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let filename = format!("test_users_{}.txt", nanos);
+
+        if let Ok(mut file) = File::create(&filename) {
+            let _ = file.write_all(content.as_bytes());
+        }
+
+        test_fn(&filename);
+
+        let _ = fs::remove_file(filename);
+    }
+
+    #[test]
+    fn test_load_users_valid_entries() {
+        let content = "alice:1234\nbob:secret\ncharlie:pass";
+
+        with_temp_file(content, |filename| {
+            let result = load_users_from_mem(filename);
+
+            match result {
+                Ok(users) => {
+                    assert_eq!(users.len(), 3);
+
+                    if let Some(u) = users.get("alice") {
+                        assert_eq!(u.password, "1234");
+                        assert_eq!(u.status, UserStatus::Offline);
+                    } else {
+                        unreachable!("Falta el usuario alice");
+                    }
+
+                    if let Some(u) = users.get("bob") {
+                        assert_eq!(u.password, "secret");
+                    } else {
+                        unreachable!("Falta el usuario bob");
+                    }
+                }
+                Err(e) => unreachable!("Falló la carga: {}", e),
+            }
+        });
+    }
+
+    #[test]
+    fn test_load_users_ignores_malformed_lines() {
+        let content = "valid:pass\nmalformed\n\ncomplex:pass:word";
+
+        with_temp_file(content, |filename| {
+            let result = load_users_from_mem(filename);
+
+            if let Ok(users) = result {
+                assert_eq!(users.len(), 2);
+                assert!(users.contains_key("valid"));
+
+                if let Some(u) = users.get("complex") {
+                    assert_eq!(u.password, "pass:word");
+                }
+            } else {
+                unreachable!("No debería fallar por líneas mal formadas, solo ignorarlas");
+            }
+        });
+    }
+
+    #[test]
+    fn test_load_users_creates_file_if_missing() {
+        let filename = "test_users_missing.txt";
+        let _ = fs::remove_file(filename);
+
+        if let Ok(mut file) = File::create(filename) {
+            let _ = file.write_all(b"");
+        }
+
+        let result = load_users_from_mem(&filename.to_string());
+
+        match result {
+            Ok(users) => {
+                assert!(users.is_empty());
+                assert!(Path::new(filename).exists(), "El archivo debería existir");
+            }
+            Err(e) => unreachable!("Error inesperado: {}", e),
+        }
+
+        let _ = fs::remove_file(filename);
+    }
+
+    #[test]
+    fn test_get_server_ip_returns_valid_result() {
+        let result = get_server_ip();
+
+        match result {
+            Ok(ip) => {
+                assert!(!ip.is_empty());
+                assert!(ip.contains('.'));
+            }
+            Err(Error::IPNotFound(_)) => {}
+            Err(e) => unreachable!("Error desconocido obteniendo IP: {}", e),
+        }
+    }
 }

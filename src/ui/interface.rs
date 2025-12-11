@@ -4,6 +4,7 @@ use crate::controller::{AppEvent, Controller};
 use crate::logger::Logger;
 use crate::media::frame_handler::Frame;
 use crate::session::sdp::SessionDescriptionProtocol;
+use crate::transport::rtcp::CallStats;
 use crate::ui::GUIError as Error;
 use crate::user::UserStatus;
 use eframe::egui;
@@ -42,10 +43,10 @@ pub struct RoomRTCApp {
     remote_texture: Option<TextureHandle>,
 
     // Error handling
-    fatal_error_msg: Option<String>,
     error_msg: Option<String>,
     warning_msg: Option<String>,
-    logger: Logger,
+
+    last_stats: Option<CallStats>,
 }
 
 impl RoomRTCApp {
@@ -64,7 +65,7 @@ impl RoomRTCApp {
         let config = Arc::new(config);
         let (event_tx, event_rx) = mpsc::channel();
 
-        let controller = match Controller::new(
+        let mut controller = match Controller::new(
             event_tx,
             &config,
             server_address,
@@ -73,6 +74,10 @@ impl RoomRTCApp {
             Ok(c) => c,
             Err(e) => panic!("Failed to initialize controller: {e}"),
         };
+
+        if controller.initial_handshake().is_err() {
+            std::process::exit(1);
+        }
 
         Self {
             view: View::default(),
@@ -84,10 +89,9 @@ impl RoomRTCApp {
             password_buff: String::new(),
             local_texture: None,
             remote_texture: None,
-            fatal_error_msg: None,
             error_msg: None,
             warning_msg: None,
-            logger,
+            last_stats: None,
         }
     }
 }
@@ -101,7 +105,6 @@ impl eframe::App for RoomRTCApp {
                     Ok(event) => self.handle_event(event),
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        self.fatal_error_msg = Some(Error::ControllerDisconnected.to_string());
                         self.view = View::FatalError;
                         break;
                     }
@@ -115,7 +118,6 @@ impl eframe::App for RoomRTCApp {
                 View::SignUp => self.show_sign_up(ui),
                 View::LogIn => self.show_log_in(ui),
                 View::Calling(peer_username) => self.show_calling(peer_username.clone(), ui),
-                View::PreCall(peer_username) => self.show_pre_call(peer_username.clone()),
                 View::CallIncoming(peer_username, sdp_offer) => {
                     self.show_call_incoming(peer_username.clone(), sdp_offer.clone(), ui);
                 }
@@ -126,6 +128,7 @@ impl eframe::App for RoomRTCApp {
                 View::CallEnded => self.show_call_ended(ui),
                 View::Error => self.show_error(ui),
                 View::FatalError => self.show_fatal_error(ui),
+                View::FullServer => self.show_full_server(ui),
             }
 
             ctx.request_repaint();
@@ -151,14 +154,15 @@ impl RoomRTCApp {
     }
 
     fn show_sign_up(&mut self, ui: &mut Ui) {
-        ui.heading("Sign Up");
-
         ui.vertical_centered(|ui| {
-            ui.label("Username:");
-            ui.add(egui::TextEdit::singleline(&mut self.username_buff));
+            ui.heading("Sign Up");
+            ui.add(egui::TextEdit::singleline(&mut self.username_buff).hint_text("Username"));
             ui.separator();
-            ui.label("Password:");
-            ui.add(egui::TextEdit::singleline(&mut self.password_buff));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.password_buff)
+                    .password(true)
+                    .hint_text("Password"),
+            );
         });
 
         if !self.username_buff.is_empty()
@@ -184,14 +188,15 @@ impl RoomRTCApp {
     }
 
     fn show_log_in(&mut self, ui: &mut Ui) {
-        ui.heading("Log In");
-
         ui.vertical_centered(|ui| {
-            ui.label("Username:");
-            ui.add(egui::TextEdit::singleline(&mut self.username_buff));
+            ui.heading("Log In");
+            ui.add(egui::TextEdit::singleline(&mut self.username_buff).hint_text("Username"));
             ui.separator();
-            ui.label("Password:");
-            ui.add(egui::TextEdit::singleline(&mut self.password_buff));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.password_buff)
+                    .password(true)
+                    .hint_text("Password"),
+            );
         });
 
         if !self.username_buff.is_empty()
@@ -220,8 +225,7 @@ impl RoomRTCApp {
             ui.horizontal(|ui| {
                 let username = match self.controller.get_username() {
                     Ok(username) => username,
-                    Err(e) => {
-                        self.fatal_error_msg = Some(e.to_string());
+                    Err(_) => {
                         self.view = View::FatalError;
                         return;
                     }
@@ -234,8 +238,7 @@ impl RoomRTCApp {
                         Ok(()) => {
                             self.view = View::Welcome;
                         }
-                        Err(e) => {
-                            self.fatal_error_msg = Some(e.to_string());
+                        Err(_) => {
                             self.view = View::Error;
                         }
                     }
@@ -251,8 +254,7 @@ impl RoomRTCApp {
 
                     let users_status = match self.controller.get_users_status() {
                         Ok(users_status) => users_status,
-                        Err(e) => {
-                            self.fatal_error_msg = Some(Error::MapError(e.to_string()).to_string());
+                        Err(_) => {
                             self.view = View::FatalError;
                             return;
                         }
@@ -264,7 +266,11 @@ impl RoomRTCApp {
                             ui.label(status.to_string());
 
                             if *status == UserStatus::Available && ui.button("Call").clicked() {
-                                self.view = View::Calling(username.clone());
+                                if let Err(e) = self.controller.call(username) {
+                                    self.warning_msg = Some(e.to_string());
+                                } else {
+                                    self.view = View::Calling(username.clone());
+                                }
                             }
                         });
                         ui.separator();
@@ -280,28 +286,6 @@ impl RoomRTCApp {
             ui.label("Connecting…");
             ui.separator();
         });
-
-        self.view = View::PreCall(peer_username);
-    }
-
-    fn show_pre_call(&mut self, peer_username: String) {
-        match self.controller.call(&peer_username) {
-            Ok((local_frame_rx, remote_frame_rx)) => match self.controller.get_username() {
-                Ok(username) => {
-                    self.local_frame_rx = Some(local_frame_rx);
-                    self.remote_frame_rx = Some(remote_frame_rx);
-                    self.view = View::Call(username, peer_username);
-                }
-                Err(e) => {
-                    self.error_msg = Some(e.to_string());
-                    self.view = View::Error;
-                }
-            },
-            Err(e) => {
-                self.warning_msg = Some(e.to_string());
-                self.view = View::CallHub;
-            }
-        }
     }
 
     fn show_call_incoming(
@@ -316,21 +300,17 @@ impl RoomRTCApp {
             ui.separator();
 
             ui.horizontal(|ui| {
-                if ui.button("Decline").clicked() {
-                    match self.controller.reject_call() {
-                        Ok(()) => self.view = View::CallHub,
-                        Err(e) => self.warning_msg = Some(e.to_string()),
-                    }
-                }
-
                 if ui.button("Accept").clicked() {
-                    match self.controller.accept_call(&sdp_offer) {
+                    match self
+                        .controller
+                        .accept_call(peer_username.clone(), &sdp_offer)
+                    {
                         Ok((local_frame_rx, remote_frame_rx)) => {
                             match self.controller.get_username() {
                                 Ok(username) => {
                                     self.local_frame_rx = Some(local_frame_rx);
                                     self.remote_frame_rx = Some(remote_frame_rx);
-                                    self.view = View::Call(username, peer_username);
+                                    self.view = View::Call(username, peer_username.clone());
                                 }
                                 Err(e) => {
                                     self.error_msg = Some(e.to_string());
@@ -342,6 +322,12 @@ impl RoomRTCApp {
                             self.warning_msg = Some(e.to_string());
                             self.view = View::CallHub;
                         }
+                    }
+                }
+                if ui.button("Decline").clicked() {
+                    match self.controller.reject_call(peer_username) {
+                        Ok(()) => self.view = View::CallHub,
+                        Err(e) => self.warning_msg = Some(e.to_string()),
                     }
                 }
             });
@@ -356,8 +342,7 @@ impl RoomRTCApp {
 
             if let Err(e) = self.update_video_textures(ctx) {
                 self.warning_msg = Some(e.to_string());
-                if let Err(e) = self.controller.hang_up() {
-                    self.fatal_error_msg = Some(e.to_string());
+                if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
                     self.reset_after_call();
@@ -385,13 +370,35 @@ impl RoomRTCApp {
 
             let exit_btn = egui::Button::new("End call").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
-                if let Err(e) = self.controller.hang_up() {
-                    self.fatal_error_msg = Some(e.to_string());
+                if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
                     self.reset_after_call();
                     self.view = View::CallHub;
                 }
+            }
+
+            ui.separator();
+            if let Some(stats) = &self.last_stats {
+                ui.scope(|ui| {
+                    ui.style_mut().override_text_style = Some(egui::TextStyle::Small);
+                    ui.label(RichText::new("📊 Network Stats").strong());
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Jitter: {}ms", stats.remote_receiver.jitter));
+                        ui.label(format!("Lost: {} pkts", stats.remote_receiver.packets_lost));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Sent: {}", stats.local_sender.packets_sent));
+                        ui.label(format!(
+                            "Received: {}",
+                            stats.local_receiver.packets_received
+                        ));
+                    });
+                });
+            } else {
+                ui.label("Esperando reporte RTCP...");
             }
         });
     }
@@ -403,6 +410,27 @@ impl RoomRTCApp {
 
             if ui.button("Back to menu").clicked() {
                 self.view = View::CallHub;
+            }
+        });
+    }
+
+    fn show_full_server(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(50.0);
+
+            ui.label(
+                RichText::new("Server is full. Try again soon!")
+                    .color(Color32::RED)
+                    .font(FontId::proportional(24.0)),
+            );
+
+            ui.add_space(20.0);
+
+            if ui
+                .add_sized([200.0, 40.0], egui::Button::new("Close App"))
+                .clicked()
+            {
+                std::process::exit(0);
             }
         });
     }
@@ -507,12 +535,8 @@ impl RoomRTCApp {
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
 
-            let error_text = self
-                .fatal_error_msg
-                .as_deref()
-                .unwrap_or("An unknown error occurred");
             ui.label(
-                RichText::new(error_text)
+                RichText::new("An unexpected error occurred")
                     .color(Color32::RED)
                     .font(FontId::proportional(24.0)),
             );
@@ -538,12 +562,12 @@ impl RoomRTCApp {
 
     fn handle_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::FullServerError => self.view = View::FullServer,
             AppEvent::CallIncoming(peer, offer_sdp) => {
                 self.view = View::CallIncoming(peer, offer_sdp);
             }
             AppEvent::CallEnded => {
-                if let Err(e) = self.controller.hang_up() {
-                    self.fatal_error_msg = Some(e.to_string());
+                if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
                     self.view = View::CallEnded;
@@ -551,8 +575,7 @@ impl RoomRTCApp {
                 self.reset_after_call();
             }
             AppEvent::Error(e) => {
-                if let Err(hangup_err) = self.controller.hang_up() {
-                    self.fatal_error_msg = Some(hangup_err.to_string());
+                if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
                     self.warning_msg = Some(e);
@@ -560,9 +583,41 @@ impl RoomRTCApp {
                 }
                 self.reset_after_call();
             }
-            AppEvent::FatalError(e) => {
-                self.fatal_error_msg = Some(e);
+            AppEvent::FatalError => {
+                let _ = self.controller.stop_media_components();
                 self.view = View::FatalError;
+            }
+            AppEvent::CallAccepted(answer_sdp, username, peer_username) => {
+                match self.controller.get_in_call(answer_sdp) {
+                    Ok((local_frame_rx, remote_frame_rx)) => {
+                        self.local_frame_rx = Some(local_frame_rx);
+                        self.remote_frame_rx = Some(remote_frame_rx);
+                        self.view = View::Call(username, peer_username);
+                    }
+                    Err(e) => {
+                        self.warning_msg = Some(e.to_string());
+                        self.view = View::CallHub;
+                    }
+                }
+            }
+            AppEvent::CallRejected => {
+                self.view = View::CallHub;
+            }
+            AppEvent::LocalStatsUpdate(new_stats) => {
+                if let Some(current) = &mut self.last_stats {
+                    current.local_sender = new_stats.local_sender;
+                    current.local_receiver = new_stats.local_receiver;
+                } else {
+                    self.last_stats = Some(new_stats);
+                }
+            }
+            AppEvent::RemoteStatsUpdate(new_stats) => {
+                if let Some(current) = &mut self.last_stats {
+                    current.remote_sender = new_stats.remote_sender;
+                    current.remote_receiver = new_stats.remote_receiver;
+                } else {
+                    self.last_stats = Some(new_stats);
+                }
             }
         }
     }

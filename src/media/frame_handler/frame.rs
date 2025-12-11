@@ -1,14 +1,14 @@
 use super::FrameError as Error;
 use opencv::prelude::*;
 use opencv::{core, imgproc};
-use std::fmt::{Display, Formatter};
 
 /// An in-memory video frame used by the frame handler.
 ///
 /// `Frame` represents raw (decoded) frame data or intermediate
 /// conversions (for example, RGB data produced from YUV input). The
-/// struct carries the pixel bytes, the frame dimensions and an id.
-#[derive(Clone)]
+/// struct carries the pixel bytes, the frame dimensions and the capture
+/// timestamp in milliseconds.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     /// Raw pixel bytes.
     pub data: Vec<u8>,
@@ -19,35 +19,8 @@ pub struct Frame {
     /// Height in pixels of the frame data.
     pub height: usize,
 
-    /// Identifier for the frame.
-    pub id: u64,
-}
-
-impl Display for Frame {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let preview_len = 16; // bytes para mostrar
-        let preview: Vec<String> = self
-            .data
-            .iter()
-            .take(preview_len)
-            .map(|b| format!("{b:02X}"))
-            .collect();
-
-        write!(
-            f,
-            "Frame {{ id: {}, size: {}x{}, data_len: {}, preview: [{}]{} }}",
-            self.id,
-            self.width,
-            self.height,
-            self.data.len(),
-            preview.join(" "),
-            if self.data.len() > preview_len {
-                " ..."
-            } else {
-                ""
-            }
-        )
-    }
+    /// Instant when the frame was captured.
+    pub frame_time: u128,
 }
 
 impl Frame {
@@ -75,7 +48,8 @@ impl Frame {
             &yuv_mat,
             &mut rgb_mat,
             imgproc::COLOR_YUV2RGB_I420,
-            0
+            0,
+            core::AlgorithmHint::ALGO_HINT_DEFAULT,
         )
         .map_err(|_| Error::TypeConversionError)?;
 
@@ -86,7 +60,7 @@ impl Frame {
                 .to_vec(),
             width: self.width,
             height: self.height,
-            id: self.id,
+            frame_time: self.frame_time,
         })
     }
 
@@ -95,35 +69,40 @@ impl Frame {
     /// properly formatted.
     ///
     /// Expected layout:
-    /// - bytes 0..8: `id`
-    /// - bytes 8..12: `width`
-    /// - bytes 12..16: `height`
-    /// - bytes 16..: raw pixel bytes
+    /// - bytes 0..16: `frame_time` as little-endian `u128`
+    /// - bytes 16..20: `width` as little-endian `u32`
+    /// - bytes 20..24: `height` as little-endian `u32`
+    /// - bytes 24..: raw pixel bytes
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < 16 {
+        if bytes.len() < 24 {
             return None;
         }
 
-        let id = u64::from_le_bytes(bytes[0..8].try_into().ok()?);
-        let width = u32::from_le_bytes(bytes[8..12].try_into().ok()?);
-        let height = u32::from_le_bytes(bytes[12..16].try_into().ok()?);
+        let frame_time = u128::from_le_bytes(bytes[0..16].try_into().ok()?);
+        let width = u32::from_le_bytes(bytes[16..20].try_into().ok()?);
+        let height = u32::from_le_bytes(bytes[20..24].try_into().ok()?);
 
-        let data = bytes[16..].to_vec();
+        let data = bytes[24..].to_vec();
 
         Some(Self {
             data,
             width: width as usize,
             height: height as usize,
-            id,
+            frame_time,
         })
     }
 
     /// Serialize the `Frame` into bytes in the same layout consumed by
     /// `from_bytes`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DimensionConversionError`] if width or height
+    /// cannot be converted to `u32`.
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-        let mut buf = Vec::with_capacity(16 + self.data.len());
-        buf.extend_from_slice(&self.id.to_le_bytes());
+        let mut buf = Vec::with_capacity(24 + self.data.len());
+        buf.extend_from_slice(&self.frame_time.to_le_bytes());
         buf.extend_from_slice(
             &u32::try_from(self.width)
                 .map_err(|_| Error::DimensionConversionError)?
@@ -146,15 +125,17 @@ mod tests {
     #[test]
     fn test_frame_serialization_roundtrip() {
         let original_frame = Frame {
-            data: vec![10, 20, 30, 40, 50, 60], // 2 RGB pixels
+            data: vec![10, 20, 30, 40, 50, 60],
             width: 2,
             height: 1,
-            id: 12345,
+            frame_time: 123456789,
         };
 
         let bytes = original_frame
             .to_bytes()
             .expect("Failed to serialize frame");
+
+        assert_eq!(bytes.len(), 30);
 
         let deserialized_frame_option = Frame::from_bytes(&bytes);
 
@@ -163,82 +144,58 @@ mod tests {
             "Deserialization failed and returned None"
         );
 
-        let deserialized_frame = deserialized_frame_option.unwrap();
-
-        assert_eq!(
-            original_frame.id, deserialized_frame.id,
-            "Frame ID mismatch"
-        );
-        assert_eq!(
-            original_frame.width, deserialized_frame.width,
-            "Frame width mismatch"
-        );
-        assert_eq!(
-            original_frame.height, deserialized_frame.height,
-            "Frame height mismatch"
-        );
-        assert_eq!(
-            original_frame.data, deserialized_frame.data,
-            "Frame data mismatch"
-        );
+        if let Some(deserialized_frame) = deserialized_frame_option {
+            assert_eq!(original_frame, deserialized_frame);
+        }
     }
 
     #[test]
     fn test_frame_with_empty_data() {
-        // Test that a frame with no pixel data can also roundtrip
         let original_frame = Frame {
             data: vec![],
-            width: 0,
-            height: 0,
-            id: 777,
+            width: 640,
+            height: 480,
+            frame_time: 99999,
         };
 
         let bytes = original_frame
             .to_bytes()
             .expect("Failed to serialize frame");
+
+        assert_eq!(bytes.len(), 24);
+
         let deserialized_frame =
             Frame::from_bytes(&bytes).expect("Deserialization of empty frame failed");
 
-        assert_eq!(original_frame.id, deserialized_frame.id);
-        assert_eq!(original_frame.width, deserialized_frame.width);
-        assert_eq!(original_frame.height, deserialized_frame.height);
-        assert_eq!(original_frame.data, deserialized_frame.data);
+        assert_eq!(original_frame, deserialized_frame);
     }
 
     #[test]
     fn test_from_bytes_too_short() {
-        // Test that we get None if the byte slice is too small
         let short_bytes: &[u8] = &[0; 15];
-
         let result = Frame::from_bytes(short_bytes);
-
-        assert!(
-            result.is_none(),
-            "Expected None when deserializing from 15 bytes"
-        );
+        assert!(result.is_none());
     }
 
     #[test]
     fn test_from_bytes_exactly_header_size() {
-        // We get a valid empty frame if the slice is exactly the 16 bytes header size
-        // Corresponds to: id=1, width=2, height=3
+        // frame_time = 1 (u128), width = 2 (u32), height = 3 (u32), no data
         let header_only_bytes: &[u8] = &[
-            1, 0, 0, 0, 0, 0, 0, 0, //
-            2, 0, 0, 0, //
-            3, 0, 0, 0, //
+            // frame_time (1 as little-endian u128)
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            // width (2 as little-endian u32)
+            2, 0, 0, 0, // height (3 as little-endian u32)
+            3, 0, 0, 0,
         ];
 
         let result = Frame::from_bytes(header_only_bytes);
 
-        assert!(
-            result.is_some(),
-            "Expected Some when deserializing exact header size"
-        );
-        let frame = result.unwrap();
-
-        assert_eq!(frame.id, 1);
-        assert_eq!(frame.width, 2);
-        assert_eq!(frame.height, 3);
-        assert_eq!(frame.data.len(), 0, "Data should be empty");
+        assert!(result.is_some());
+        if let Some(frame) = result {
+            assert_eq!(frame.frame_time, 1);
+            assert_eq!(frame.width, 2);
+            assert_eq!(frame.height, 3);
+            assert_eq!(frame.data.len(), 0);
+        }
     }
 }

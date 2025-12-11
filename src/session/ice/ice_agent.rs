@@ -4,8 +4,10 @@ use super::connectivity_state::ConnectivityState;
 use super::error::IceError as Error;
 use crate::config::IceConfig;
 use crate::logger::Logger;
+use crate::session::ice::candidate_type::CandidateType;
 use crate::session::ice::stun_client;
 use if_addrs;
+use std::time::{Duration, Instant};
 
 /// An ICE agent that gathers local candidates, accepts remote candidates
 /// and forms candidate pairs for connectivity checks.
@@ -64,7 +66,10 @@ impl IceAgent {
         ice_config: &IceConfig,
     ) -> Result<(), Error> {
         if let Ok(local_ip) = get_local_ip() {
-            let port = socket.local_addr().map(|a| a.port()).unwrap_or(0);
+            let port = match socket.local_addr() {
+                Ok(addr) => addr.port(),
+                Err(_) => 0,
+            };
             let mut host = Candidate::new_host(local_ip, ice_config.component_id, ice_config);
             host.port = port;
             self.local_candidates.push(host);
@@ -122,7 +127,6 @@ impl IceAgent {
     ///
     /// Note: server-reflexive (srflx) candidates discovered via STUN are
     /// skipped when forming Host-Host pairs in this implementation.
-
     fn create_candidate_pair(&mut self) -> Result<(), Error> {
         if self.local_candidates.is_empty() {
             return Err(Error::NoLocalCandidates);
@@ -134,20 +138,6 @@ impl IceAgent {
 
         for local in &self.local_candidates {
             for remote in &self.remote_candidates {
-                let is_local_stun = local.candidate_type
-                    == crate::session::ice::candidate_type::CandidateType::ServerReflexive;
-                let is_remote_stun = remote.candidate_type
-                    == crate::session::ice::candidate_type::CandidateType::ServerReflexive;
-
-                if is_local_stun || is_remote_stun {
-                    self.logger.debug(&format!(
-                        "Skipping STUN pair: {} <-> {}",
-                        local.address, remote.address
-                    ));
-                    continue;
-                }
-                // -------------------------------------------------------------
-
                 let pair = CandidatePair::new(local.clone(), remote.clone());
                 self.candidate_pairs.push(pair);
             }
@@ -164,33 +154,99 @@ impl IceAgent {
 
     /// Start connectivity checks and select a working pair.
     ///
-    /// This function simulates connectivity checks by selecting the first
-    /// pair and marking it as `Succeeded`.
-    pub fn start_connectivity_checks(&mut self) -> Result<(), Error> {
+    /// This function iterates through sorted candidate pairs and simulates
+    /// connectivity checks. It selects the first pair that succeeds.
+    pub fn start_connectivity_checks(&mut self, socket: &std::net::UdpSocket) -> Result<(), Error> {
         if self.candidate_pairs.is_empty() {
             return Err(Error::NoCandidatePairs);
         }
 
-        // The first pair is selected (highest priority)
-        // In a real implementation, here would be STUN verifications (final delivery)
-        let mut selected_pair = self.candidate_pairs[0].clone();
-        selected_pair.state = ConnectivityState::Succeeded;
+        self.candidate_pairs
+            .sort_by(|a, b| b.priority.cmp(&a.priority));
 
-        self.selected_pair = Some(selected_pair.clone());
+        let mut selected_index = None;
 
-        // Display handshake completion message
-        self.logger
-            .info("Handshake complete! A direct connection can be established.");
-        self.logger.info(&format!(
-            "   - My Address: {}:{}",
-            selected_pair.local.address, selected_pair.local.port
-        ));
-        self.logger.info(&format!(
-            "   - Peer Address: {}:{}",
-            selected_pair.remote.address, selected_pair.remote.port
-        ));
+        socket
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .map_err(|_| Error::NetworkInterfaceError)?; // O el error que prefieras
 
-        Ok(())
+        for (index, pair) in self.candidate_pairs.iter_mut().enumerate() {
+            if pair.local.candidate_type == CandidateType::ServerReflexive
+                || pair.remote.candidate_type == CandidateType::ServerReflexive
+            {
+                continue;
+            }
+
+            pair.state = ConnectivityState::InProgress;
+
+            let target = format!("{}:{}", pair.remote.address, pair.remote.port);
+
+            if Self::verify_candidate_pair(socket, &target) {
+                pair.state = ConnectivityState::Succeeded;
+                selected_index = Some(index);
+                break;
+            } else {
+                pair.state = ConnectivityState::Failed;
+            }
+        }
+
+        let _ = socket.set_read_timeout(None);
+
+        if let Some(index) = selected_index {
+            self.selected_pair = Some(self.candidate_pairs[index].clone());
+            Ok(())
+        } else {
+            Err(Error::NoSelectedPair)
+        }
+    }
+
+    /// Verify that a candidate pair is reachable via PING/PONG exchange.
+    ///
+    /// Performs a connectivity check by sending PING messages to the target
+    /// address and waiting for a PONG response. The check repeats for up to 2 seconds.
+    /// If a PING is received from the remote, a PONG is sent back in response.
+    ///
+    /// # Arguments
+    ///
+    /// - `socket`: the UDP socket to use for sending and receiving messages.
+    /// - `target`: the target address in "IP:port" format to send PING messages to.
+    ///
+    /// # Returns
+    ///
+    /// - `true` if a valid PONG response is received from the target within the timeout.
+    /// - `false` if no PONG is received or the timeout expires.
+    fn verify_candidate_pair(socket: &std::net::UdpSocket, target: &str) -> bool {
+        let start = Instant::now();
+        let max_duration = Duration::from_secs(2);
+        let mut buf = [0u8; 1024];
+
+        while start.elapsed() < max_duration {
+            if socket.send_to(b"PING", target).is_err() {
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+
+            match socket.recv_from(&mut buf) {
+                Ok((amt, src)) => {
+                    if !target.contains(&src.ip().to_string()) {
+                        continue;
+                    }
+
+                    let msg = &buf[..amt];
+
+                    if msg == b"PONG" {
+                        return true;
+                    } else if msg == b"PING" {
+                        let _ = socket.send_to(b"PONG", target);
+                    }
+                }
+                Err(_) => {
+                    continue;
+                }
+            }
+        }
+
+        false
     }
 
     pub fn get_local_ip_str(&self) -> Result<String, Error> {
@@ -203,7 +259,8 @@ impl IceAgent {
         self.local_candidates.first()
     }
 
-    #[must_use] pub fn get_local_candidates(&self) -> &[Candidate] {
+    #[must_use]
+    pub fn get_local_candidates(&self) -> &[Candidate] {
         &self.local_candidates
     }
 
@@ -243,7 +300,10 @@ mod tests {
     use super::*;
     use crate::session::ice::candidate::Candidate;
     use crate::session::ice::candidate_type::CandidateType;
+    use crate::session::ice::connectivity_state::ConnectivityState;
     use std::net::UdpSocket;
+    use std::thread;
+    use std::time::Duration;
 
     fn make_ice_config() -> IceConfig {
         IceConfig {
@@ -256,12 +316,12 @@ mod tests {
         }
     }
 
-    fn sample_remote_candidate() -> Candidate {
+    fn build_remote_candidate(ip: String, port: u16) -> Candidate {
         Candidate::new(
             CandidateType::Host,
             126,
-            "192.168.0.50".to_string(),
-            5000,
+            ip,
+            port,
             1,
             "1".to_string(),
             "udp".to_string(),
@@ -270,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_new_agent_is_empty() {
-        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let agent = IceAgent::new(logger);
 
         assert!(agent.local_candidates.is_empty());
@@ -281,19 +341,14 @@ mod tests {
 
     #[test]
     fn test_gather_candidates_adds_local_candidate() {
-        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let mut agent = IceAgent::new(logger);
-        let ice_config = IceConfig {
-            foundation: "1".to_string(),
-            transport: "UDP".to_string(),
-            component_id: 1,
-            host_priority_preference: 126,
-            srflx_priority_preference: 100,
-            host_local_preference: 65535,
-        };
 
-        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind test socket");
-        let assigned_port = socket.local_addr().unwrap().port();
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind test socket");
+        let assigned_port = socket
+            .local_addr()
+            .expect("Failed to get socket local address")
+            .port();
 
         let result = agent.gather_candidates(&socket, &make_ice_config());
 
@@ -301,7 +356,6 @@ mod tests {
             result,
             Err(Error::NetworkInterfaceError | Error::NoNetworkInterfaceFound)
         ) {
-            eprintln!("Skipping gather_candidates test due to missing network interface");
             return;
         }
         assert!(result.is_ok());
@@ -312,26 +366,25 @@ mod tests {
             .local_candidates
             .iter()
             .find(|c| c.candidate_type == CandidateType::Host)
-            .expect("Host candidate missing");
+            .expect("Host candidate should exist after gather_candidates");
 
         assert_eq!(host_candidate.port, assigned_port);
     }
 
     #[test]
     fn test_add_remote_candidate_creates_pairs() -> Result<(), Error> {
-        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let mut agent = IceAgent::new(logger);
 
-        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind test socket");
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind test socket");
         agent.gather_candidates(&socket, &make_ice_config())?;
 
-        let remote = sample_remote_candidate();
+        let remote = build_remote_candidate("127.0.0.1".to_string(), 9000);
 
         let result = agent.add_remote_candidate(remote.clone());
         assert!(result.is_ok());
 
         assert_eq!(agent.remote_candidates.len(), 1);
-
         assert!(!agent.candidate_pairs.is_empty());
 
         let pair = &agent.candidate_pairs[0];
@@ -342,29 +395,58 @@ mod tests {
 
     #[test]
     fn test_start_connectivity_checks_selects_pair() -> Result<(), Error> {
-        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let mut agent = IceAgent::new(logger);
 
-        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind test socket");
-        agent.gather_candidates(&socket, &make_ice_config())?;
+        let local_socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind local socket");
+        agent.gather_candidates(&local_socket, &make_ice_config())?;
 
-        let remote = sample_remote_candidate();
-        agent.add_remote_candidate(remote)?;
+        let remote_socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind remote socket");
+        let remote_addr = remote_socket
+            .local_addr()
+            .expect("Failed to get remote socket address");
 
-        let result = agent.start_connectivity_checks();
+        thread::spawn(move || {
+            let mut buf = [0u8; 1024];
+            let _ = remote_socket.set_read_timeout(Some(Duration::from_secs(2)));
+
+            while let Ok((_amt, _src)) = remote_socket.recv_from(&mut buf) {
+                if let Ok((amt, src)) = remote_socket.recv_from(&mut buf) {
+                    let msg = &buf[..amt];
+                    if msg == b"PING" {
+                        let _ = remote_socket.send_to(b"PONG", src);
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        });
+
+        let remote_candidate =
+            build_remote_candidate(remote_addr.ip().to_string(), remote_addr.port());
+        agent.add_remote_candidate(remote_candidate)?;
+
+        let result = agent.start_connectivity_checks(&local_socket);
         assert!(result.is_ok());
 
         let selected = agent.get_selected_pair()?;
         assert_eq!(selected.state, ConnectivityState::Succeeded);
+
+        assert_eq!(selected.remote.port, remote_addr.port());
 
         Ok(())
     }
 
     #[test]
     fn test_error_when_starting_checks_without_pairs() {
-        let logger = Logger::new("test_ice_agent.log").unwrap();
+        let logger = Logger::new("/dev/null").expect("Failed to create logger");
         let mut agent = IceAgent::new(logger);
-        let result = agent.start_connectivity_checks();
+
+        let dummy_socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind socket");
+
+        let result = agent.start_connectivity_checks(&dummy_socket);
+
         assert!(matches!(result, Err(Error::NoCandidatePairs)));
     }
 }

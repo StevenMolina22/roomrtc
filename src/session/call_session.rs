@@ -12,10 +12,6 @@ use crate::logger::Logger;
 
 /// High-level session that exposes SDP and ICE operations used by the UI
 /// and signaling code.
-///
-/// `Session` holds a local `SessionDescriptionProtocol` and an `IceAgent`.
-/// It can create an SDP offer, process remote offers/answers and drive
-/// ICE connectivity checks.
 pub struct CallSession {
     /// Local SDP state representing current media descriptions.
     pub sdp: SessionDescriptionProtocol,
@@ -23,6 +19,10 @@ pub struct CallSession {
     /// ICE agent responsible for gathering local candidates and
     /// performing connectivity checks with remote candidates.
     pub ice_agent: IceAgent,
+
+    /// UDP socket used for communication (STUN, ICE Checks, and RTP).
+    /// We store the socket here to persist it throughout the session.
+    pub socket: UdpSocket,
 
     /// Locally generated certificate and DTLS identity for DTLS handshakes.
     pub local_cert: LocalCert,
@@ -35,8 +35,6 @@ pub struct CallSession {
 
     /// Local DTLS setup role negotiated from signaling.
     pub local_setup_role: DtlsSetupRole,
-
-    logger: Logger,
 }
 
 #[derive(Clone, Copy)]
@@ -48,27 +46,6 @@ enum RemoteSdpType {
 impl CallSession {
     /// Create a new `CallSession` using the provided media port and codec
     /// configuration.
-    /// - `ice_config`: ICE configuration for candidate creation.
-    /// - `sdp_config`: SDP session-level configuration values.
-    ///
-    /// Parameters:
-    /// - `media_port`: UDP port where ICE candidate gathering is performed
-    ///   and where the endpoint expects/receives RTP packets.
-    /// - `media_config`: media stream configuration (payload type, codec
-    ///   name and clock rate).
-    ///
-    /// This method performs the following steps:
-    /// 1. Creates an `IceAgent` and calls `gather_candidates` to obtain
-    ///    local candidates.
-    /// 2. Builds a local `MediaDescription` and adds an `rtpmap` attribute
-    ///    (and a `candidate` attribute if a local candidate is available).
-    /// 3. Initializes the local `SessionDescriptionProtocol` and, if a
-    ///    local candidate exists, sets the connection data (`c=`) to the
-    ///    candidate's IP address.
-    ///
-    /// # Returns
-    /// Returns a `CallSession` containing the local SDP and an `IceAgent`
-    /// already configured with (potentially) gathered candidates.
     pub fn new(
         stun_socket: UdpSocket,
         config: &Arc<Config>,
@@ -138,11 +115,11 @@ impl CallSession {
         Ok(Self {
             sdp,
             ice_agent,
+            socket: stun_socket,
             local_cert,
             remote_fingerprint: None,
             remote_setup_role: None,
             local_setup_role,
-            logger,
         })
     }
 
@@ -175,6 +152,14 @@ impl CallSession {
         self.process_remote_sdp(answer_sdp, RemoteSdpType::Answer)
     }
 
+    /// Start ICE connectivity checks using the current set of local
+    /// and remote candidates.
+    pub fn start_ice_checks(&mut self) -> Result<(), Error> {
+        self.ice_agent
+            .start_connectivity_checks(&self.socket)
+            .map_err(|e| Error::IceConnectionError(e.to_string()))
+    }
+
     /// Return the local SDP offer, a copy from the current
     /// `SessionDescriptionProtocol` state.
     #[must_use]
@@ -182,9 +167,8 @@ impl CallSession {
         self.sdp.clone()
     }
 
-    /// Internal helper that walks a remote `SessionDescriptionProtocol`,
-    /// adds remote ICE candidates to the `IceAgent` and starts
-    /// connectivity checks.
+    // Walks a remote `SessionDescriptionProtocol`, adds remote ICE candidates,
+    // and starts connectivity checks.
     fn process_remote_sdp(
         &mut self,
         sdp: &SessionDescriptionProtocol,
@@ -208,17 +192,17 @@ impl CallSession {
             }
         }
 
-        self.ice_agent
-            .start_connectivity_checks()
-            .map_err(|e| Error::IceConnectionError(e.to_string()))
+        Ok(())
     }
 
+    /// Return the currently selected ICE candidate pair if connectivity checks succeeded.
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.ice_agent
             .get_selected_pair()
             .map_err(|e| Error::IceConnectionError(e.to_string()))
     }
 
+    // Chooses the local DTLS role based on the remote SDP and whether it is an offer/answer.
     fn determine_local_role(
         &self,
         remote_sdp: &SessionDescriptionProtocol,

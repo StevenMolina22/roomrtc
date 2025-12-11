@@ -1,4 +1,5 @@
 pub mod client_server_protocol;
+pub mod clock;
 pub mod config;
 pub mod controller;
 pub mod dtls;

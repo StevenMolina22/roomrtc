@@ -5,7 +5,7 @@ use openh264::formats::YUVSource;
 /// A basic H.264 video decoder using the `OpenH264` library.
 ///
 /// This struct wraps the `OpenH264` decoder and provides a simple way to
-/// decode encoded H.264 frame data (`&[u8]`) into a YUV.
+/// decode encoded H.264 frame data (`&[u8]`) into RGB bytes.
 ///
 /// Typically, this is used on the receiving side of a video stream,
 /// after collecting and reassembling encoded RTP/UDP packets into a full frame.
@@ -27,11 +27,10 @@ impl Decoder {
         Ok(Self { decoder })
     }
 
-    /// Decodes a single H.264-encoded frame into raw YUV data.
+    /// Decodes a single H.264-encoded frame into raw RGB data.
     ///
-    /// Takes a slice of encoded H.264 bytes and attempts to decode it
-    /// into a `RGB` frame data.
-    /// The decoded frame data can then be displayed.
+    /// Takes a slice of encoded H.264 bytes, decodes it to YUV, and converts
+    /// the result to RGB bytes along with the frame dimensions.
     ///
     /// # Errors
     ///
@@ -43,14 +42,34 @@ impl Decoder {
         match self.decoder.decode(encoded_data) {
             Ok(Some(yuv)) => {
                 let (width, height) = yuv.dimensions();
+                let (y_stride, u_stride, v_stride) = yuv.strides();
 
-                let mut rgb8_data = vec![0u8; width * height * 3];
-                yuv.write_rgb8(&mut rgb8_data);
+                let yuv_img = yuv::YuvPlanarImage {
+                    y_plane: yuv.y(),
+                    y_stride: y_stride as u32,
+                    u_plane: yuv.u(),
+                    u_stride: u_stride as u32,
+                    v_plane: yuv.v(),
+                    v_stride: v_stride as u32,
+                    width: width as u32,
+                    height: height as u32,
+                };
 
-                Ok((rgb8_data, width, height))
+                let mut rgb = vec![0u8; width * height * 3];
+
+                yuv::yuv420_to_rgb(
+                    &yuv_img,
+                    &mut rgb,
+                    (width * 3) as u32,
+                    yuv::YuvRange::Limited,
+                    yuv::YuvStandardMatrix::Bt709,
+                )
+                .map_err(|e| Error::DecodingError(e.to_string()))?;
+
+                Ok((rgb, width, height))
             }
             Ok(None) => Err(Error::EmptyFrameError),
-            Err(_) => Err(Error::DecodingError),
+            Err(e) => Err(Error::DecodingError(e.to_string())),
         }
     }
 }

@@ -1,43 +1,36 @@
 use super::ServerError;
-use crate::client_server_protocol::{ClientResponse, ServerMessage, ServerResponse};
+use crate::client_server_protocol::{ServerMessage, ServerResponse};
 use crate::logger::Logger;
 use crate::session::sdp::SessionDescriptionProtocol;
 use crate::user::{UserData, UserStatus};
 use rustls::{ServerConnection, StreamOwned};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{Shutdown, SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::thread;
 
+/// Core server logic for user authentication and call signaling.
 pub struct OperatingServer {
     users: Arc<RwLock<HashMap<String, UserData>>>,
-    users_connected: Arc<AtomicUsize>,
     server_client_socket_address: SocketAddr,
     users_file_path: String,
     username: Option<String>,
-    max_users: usize,
     logger: Logger,
 }
 
 impl OperatingServer {
     pub const fn new(
         users: Arc<RwLock<HashMap<String, UserData>>>,
-        users_connected: Arc<AtomicUsize>,
         server_client_socket_address: SocketAddr,
         users_file_path: String,
-        max_users: usize,
         logger: Logger,
     ) -> Self {
         Self {
             users,
-            users_connected,
             server_client_socket_address,
             users_file_path,
             username: None,
-            max_users,
             logger,
         }
     }
@@ -77,14 +70,7 @@ impl OperatingServer {
                     }
 
                     UserStatus::Offline => {
-                        if self.users_connected.load(Ordering::SeqCst) == self.max_users {
-                            return ServerResponse::LoginError(
-                                "Server capacity is full".to_string(),
-                            );
-                        }
                         data.update_status(UserStatus::Available);
-                        self.users_connected.fetch_add(1, Ordering::SeqCst);
-
                         status_to_notify = (username.clone(), UserStatus::Available);
                     }
                 }
@@ -131,7 +117,14 @@ impl OperatingServer {
         }
 
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger
+                        .error(&format!("Failed to acquire users lock during signup: {e}"));
+                    return ServerResponse::SignupError(e.to_string());
+                }
+            };
 
             if users.contains_key(&username) {
                 self.logger.warn(&format!(
@@ -157,8 +150,7 @@ impl OperatingServer {
             ));
             return ServerResponse::Error(format!("Error loading user data: {e}"));
         }
-        self.logger
-            .info(&format!("New user signed up: {username}"));
+        self.logger.info(&format!("New user signed up: {username}"));
         ServerResponse::SignupOk
     }
 
@@ -168,10 +160,19 @@ impl OperatingServer {
     pub fn logout_user(&mut self, username: String) -> ServerResponse {
         let status_to_notify;
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger
+                        .error(&format!("Failed to acquire users lock during logout: {e}"));
+                    return ServerResponse::LogoutError(e.to_string());
+                }
+            };
             if let Some(user_data) = users.get_mut(&username) {
                 user_data.update_status(UserStatus::Offline);
-                let stream = if let Some(ref stream) = user_data.server_client_stream { stream } else {
+                let stream = if let Some(ref stream) = user_data.server_client_stream {
+                    stream
+                } else {
                     self.logger
                         .warn(&format!("Logout failed for {username}: Stream not found"));
                     return ServerResponse::Error("User not found".to_string());
@@ -198,12 +199,6 @@ impl OperatingServer {
                         "Failed to shutdown socket during logout for {username}: {e}"
                     ));
                 }
-
-                self.users_connected
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
-                        if v == 0 { Some(0) } else { Some(v - 1) }
-                    })
-                    .ok();
                 status_to_notify = (username.clone(), UserStatus::Offline);
             } else {
                 self.logger
@@ -243,12 +238,16 @@ impl OperatingServer {
         self.logger
             .info(&format!("Call request from {from_usr} to {to_usr}"));
 
+        let stream = match get_stream_from_user(to_usr.clone(), &self.users) {
+            Ok(stream) => stream,
+            Err(e) => return ServerResponse::CallRequestError(e.to_string()),
+        };
+
         let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => {
-                self.logger.warn(&format!(
-                    "Call request failed: Sender {from_usr} not found"
-                ));
+                self.logger
+                    .warn(&format!("Call request failed: Sender {from_usr} not found"));
                 return ServerResponse::Error(err_event);
             }
         };
@@ -256,9 +255,8 @@ impl OperatingServer {
         let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
             Ok(data) => data,
             Err(err_event) => {
-                self.logger.warn(&format!(
-                    "Call request failed: Receiver {to_usr} not found"
-                ));
+                self.logger
+                    .warn(&format!("Call request failed: Receiver {to_usr} not found"));
                 return ServerResponse::Error(err_event);
             }
         };
@@ -280,6 +278,20 @@ impl OperatingServer {
         from_usr_data.update_status(UserStatus::Occupied(to_usr.clone()));
         to_usr_data.update_status(UserStatus::Occupied(from_usr.clone()));
 
+        {
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during call_request inner: {e}"
+                    ));
+                    return ServerResponse::CallRequestError(e.to_string());
+                }
+            };
+            users.insert(to_usr_data.username.clone(), to_usr_data);
+            users.insert(from_usr_data.username.clone(), from_usr_data);
+        }
+
         notify_status_update(
             &self.users,
             from_usr.clone(),
@@ -293,38 +305,40 @@ impl OperatingServer {
             &self.logger,
         );
 
-        {
-            let mut users = self.users.write().unwrap();
-            users.insert(to_usr_data.username.clone(), to_usr_data);
-            users.insert(from_usr_data.username.clone(), from_usr_data);
-        }
-
-        let ans = match get_answer_from_peer(
-            from_usr.clone(),
-            to_usr.clone(),
+        let msg = ServerMessage::CallIncoming {
+            from_usr,
             offer_sdp,
-            &self.users,
-            &self.logger,
-        ) {
-            Ok(answer) => answer,
-            Err(err_event) => {
-                self.logger.error(&format!(
-                    "Failed to get answer from peer {to_usr}: {err_event}"
-                ));
-                return ServerResponse::Error(err_event.to_string());
-            }
         };
+        send_message(&stream, &msg);
 
-        match ans {
-            ClientResponse::CallAccept { sdp_answer } => {
-                self.call_accept(to_usr, from_usr, sdp_answer)
-            }
-            ClientResponse::CallReject => self.call_reject(to_usr, from_usr),
-            _ => {
-                self.logger.warn("Invalid answer received from peer");
-                ServerResponse::Error("Invalid answer".to_string())
-            }
-        }
+        ServerResponse::CallRequestOk
+
+        // let ans = match get_answer_from_peer(
+        //     from_usr.clone(),
+        //     to_usr.clone(),
+        //     offer_sdp,
+        //     &self.users,
+        //     &self.logger,
+        // ) {
+        //     Ok(answer) => answer,
+        //     Err(err_event) => {
+        //         self.logger.error(&format!(
+        //             "Failed to get answer from peer {to_usr}: {err_event}"
+        //         ));
+        //         return ServerResponse::Error(err_event.to_string());
+        //     }
+        // };
+        //
+        // match ans {
+        //     ClientResponse::CallAccept { sdp_answer } => {
+        //         self.call_accept(to_usr, from_usr, sdp_answer)
+        //     }
+        //     ClientResponse::CallReject => self.call_reject(to_usr, from_usr),
+        //     _ => {
+        //         self.logger.warn("Invalid answer received from peer");
+        //         ServerResponse::Error("Invalid answer".to_string())
+        //     }
+        // }
     }
 
     /// Handles a positive call answer.
@@ -342,38 +356,45 @@ impl OperatingServer {
         to_usr: String,
         sdp_answer: SessionDescriptionProtocol,
     ) -> ServerResponse {
-        let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
-            Ok(data) => data,
-            Err(err_event) => return ServerResponse::Error(err_event),
+        let stream = match get_stream_from_user(to_usr.clone(), &self.users) {
+            Ok(stream) => stream,
+            Err(e) => return ServerResponse::CallAcceptError(e.to_string()),
         };
 
-        let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
+        let from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
-            Err(err_event) => return ServerResponse::Error(err_event),
+            Err(err_event) => return ServerResponse::CallAcceptError(err_event),
+        };
+
+        let to_usr_data = match get_user_data(&to_usr, &self.users) {
+            Ok(data) => data,
+            Err(err_event) => return ServerResponse::CallAcceptError(err_event),
         };
 
         if from_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
-            return ServerResponse::Error(ServerError::UserNotAvailable(from_usr).to_string());
+            return ServerResponse::CallAcceptError(
+                ServerError::UserNotAvailable(from_usr).to_string(),
+            );
         }
 
         if to_usr_data.status != UserStatus::Occupied(from_usr.clone()) {
-            return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
-        }
-
-        from_usr_data.update_status(UserStatus::Occupied(to_usr_data.username.clone()));
-        to_usr_data.update_status(UserStatus::Occupied(from_usr_data.username.clone()));
-
-        {
-            let mut users = self.users.write().unwrap();
-            users.insert(to_usr_data.username.clone(), to_usr_data);
-            users.insert(from_usr_data.username.clone(), from_usr_data);
+            return ServerResponse::CallAcceptError(
+                ServerError::UserNotAvailable(to_usr).to_string(),
+            );
         }
 
         self.logger.info(&format!(
             "Call accepted: {from_usr} and {to_usr} are now OCCUPIED"
         ));
 
-        ServerResponse::CallAccepted { sdp_answer }
+        let msg = ServerMessage::CallAccepted {
+            from_usr,
+            sdp_answer,
+        };
+
+        send_message(&stream, &msg);
+
+        ServerResponse::CallAcceptOk
     }
 
     /// Handles a call rejection.
@@ -382,22 +403,31 @@ impl OperatingServer {
     ///
     /// No state change occurs — both users remain `Available`.
     pub fn call_reject(&mut self, from_usr: String, to_usr: String) -> ServerResponse {
+        let stream = match get_stream_from_user(to_usr.clone(), &self.users) {
+            Ok(stream) => stream,
+            Err(e) => return ServerResponse::CallRejectError(e.to_string()),
+        };
+
         let mut from_usr_data = match get_user_data(&from_usr, &self.users) {
             Ok(data) => data,
-            Err(err_event) => return ServerResponse::Error(err_event),
+            Err(err_event) => return ServerResponse::CallRejectError(err_event),
         };
 
         let mut to_usr_data = match get_user_data(&to_usr, &self.users) {
             Ok(data) => data,
-            Err(err_event) => return ServerResponse::Error(err_event),
+            Err(err_event) => return ServerResponse::CallRejectError(err_event),
         };
 
         if from_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
-            return ServerResponse::Error(ServerError::UserNotAvailable(from_usr).to_string());
+            return ServerResponse::CallRejectError(
+                ServerError::UserNotAvailable(from_usr).to_string(),
+            );
         }
 
-        if to_usr_data.status != UserStatus::Occupied(to_usr.clone()) {
-            return ServerResponse::Error(ServerError::UserNotAvailable(to_usr).to_string());
+        if to_usr_data.status != UserStatus::Occupied(from_usr.clone()) {
+            return ServerResponse::CallRejectError(
+                ServerError::UserNotAvailable(to_usr).to_string(),
+            );
         }
 
         from_usr_data.update_status(UserStatus::Available);
@@ -417,14 +447,26 @@ impl OperatingServer {
         );
 
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during call_reject: {e}"
+                    ));
+                    return ServerResponse::CallRejectError(e.to_string());
+                }
+            };
             users.insert(to_usr_data.username.clone(), to_usr_data);
             users.insert(from_usr_data.username.clone(), from_usr_data);
         }
 
         self.logger
             .warn(&format!("Call from {from_usr} rejected by {to_usr}"));
-        ServerResponse::CallRejected
+
+        let msg = ServerMessage::CallRejected;
+        send_message(&stream, &msg);
+
+        ServerResponse::CallRejectOk
     }
 
     /// Terminates an active call for the given user.
@@ -439,18 +481,28 @@ impl OperatingServer {
     /// Returns `CallHangUpOk` on success, otherwise an appropriate error.
     pub fn call_hangup(&mut self, user: String) -> ServerResponse {
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during call_hangup: {e}"
+                    ));
+                    return ServerResponse::CallHangUpError(e.to_string());
+                }
+            };
 
-            let data = if let Some(data) = users.get_mut(&user) { data } else {
+            let data = if let Some(data) = users.get_mut(&user) {
+                data
+            } else {
                 self.logger
                     .warn(&format!("Call hangup failed: User {user} does not exist"));
                 return ServerResponse::CallHangUpError("User does not exist".to_string());
             };
 
-            if let UserStatus::Occupied(_) = data.status {} else {
-                self.logger.warn(&format!(
-                    "Call hangup failed: User {user} is not occupied"
-                ));
+            if let UserStatus::Occupied(_) = data.status {
+            } else {
+                self.logger
+                    .warn(&format!("Call hangup failed: User {user} is not occupied"));
                 return ServerResponse::CallHangUpError("Unexpected user status".to_string());
             }
 
@@ -464,6 +516,7 @@ impl OperatingServer {
         );
         self.logger
             .info(&format!("Call hangup requested by {user}"));
+
         ServerResponse::CallHangUpOk
     }
 
@@ -474,7 +527,15 @@ impl OperatingServer {
     /// their current status is.
     pub fn get_clients_for_user(&mut self, own_username: String) -> HashMap<String, UserStatus> {
         let users = {
-            let usr = self.users.read().unwrap();
+            let usr = match self.users.read() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during get_clients_for_user: {e}"
+                    ));
+                    return HashMap::new();
+                }
+            };
             usr.clone()
         };
 
@@ -513,7 +574,15 @@ impl OperatingServer {
         };
 
         {
-            let mut users = self.users.write().unwrap();
+            let mut users = match self.users.write() {
+                Ok(u) => u,
+                Err(e) => {
+                    self.logger.error(&format!(
+                        "Failed to acquire users lock during make_user_offline: {e}"
+                    ));
+                    return Err(ServerError::MapError(e.to_string()));
+                }
+            };
             let user_data = users
                 .get_mut(username)
                 .ok_or(ServerError::UserNotAvailable(username.to_string()))?;
@@ -547,56 +616,6 @@ fn get_user_data(
     match users.get(user_name) {
         Some(data) => Ok(data.clone()),
         None => Err(format!("User {user_name} not found")),
-    }
-}
-
-/// Sends a `CallIncoming` notification to a user and waits for their reply.
-///
-/// This function writes a `ServerMessage::CallIncoming` to the target user's
-/// `server_client_stream`, then blocks until the user responds with a
-/// `ClientResponse`, such as:
-///
-/// - `CallAccept`
-/// - `CallReject`
-///
-/// # Errors
-/// Returns an `Error` if:
-/// - the user does not exist,
-/// - no stream is associated with the user,
-/// - writing fails,
-/// - the user disconnects,
-/// - the user sends an invalid or unparsable response.
-fn get_answer_from_peer(
-    from_usr: String,
-    to_usr: String,
-    offer_sdp: SessionDescriptionProtocol,
-    users: &RwLock<HashMap<String, UserData>>,
-    logger: &Logger,
-) -> Result<ClientResponse, ServerError> {
-    let mut stream = get_stream_from_user(to_usr.clone(), users)?;
-
-    logger.info(&format!("Sending CALLINCOMING to {to_usr}"));
-    send_message(
-        &mut stream,
-        &ServerMessage::CallIncoming {
-            from: from_usr,
-            offer_sdp,
-        },
-    );
-
-    let mut buff = [0u8; 1024];
-
-    let n = match stream.lock().unwrap().read(&mut buff) {
-        Ok(0) => return Err(ServerError::MapError("Connection closed".to_string())),
-        Ok(n) => n,
-        Err(err) => return Err(ServerError::MapError(err.to_string())),
-    };
-
-    match ClientResponse::from_bytes(&buff[..n]) {
-        Some(ans) => Ok(ans),
-        None => Err(ServerError::MapError(
-            "Failed to parse user answer from server".to_string(),
-        )),
     }
 }
 
@@ -660,7 +679,7 @@ fn send_message(
             return;
         }
     };
-    guard.write_all(&message.to_bytes());
+    let _ = guard.write_all(&message.to_bytes());
 }
 
 fn notify_status_update(
@@ -671,40 +690,37 @@ fn notify_status_update(
 ) {
     let users = users.clone();
     let logger = logger.clone();
-    thread::spawn(move || {
-        logger.debug(&format!(
-            "Broadcasting status update for {username}: {status:?}"
-        ));
-        let mut streams: Vec<Arc<Mutex<StreamOwned<ServerConnection, TcpStream>>>> = Vec::new();
-        {
-            let users_guard = match users.read() {
-                Ok(guard) => guard,
-                Err(e) => {
-                    logger.error(&format!(
-                        "Failed to acquire users lock for status update: {e}"
-                    ));
-                    return;
-                }
-            };
-            for (name, user_data) in users_guard.iter() {
-                if *name == username {
-                    continue;
-                }
-                if let Some(stream_arc) = &user_data.server_client_stream {
-                    streams.push(stream_arc.clone());
-                }
+    logger.debug(&format!(
+        "Broadcasting status update for {username}: {status:?}"
+    ));
+    let mut streams: Vec<Arc<Mutex<StreamOwned<ServerConnection, TcpStream>>>> = Vec::new();
+    {
+        let users_guard = match users.read() {
+            Ok(guard) => guard,
+            Err(e) => {
+                logger.error(&format!(
+                    "Failed to acquire users lock for status update: {e}"
+                ));
+                return;
+            }
+        };
+        for (name, user_data) in users_guard.iter() {
+            if *name == username {
+                continue;
+            }
+            if let Some(stream_arc) = &user_data.server_client_stream {
+                streams.push(stream_arc.clone());
             }
         }
-        let msg = ServerMessage::UserStatusUpdate(username.clone(), status);
-        for stream in streams {
-            send_message(&stream, &msg);
-        }
-    });
+    }
+    let msg = ServerMessage::UserStatusUpdate(username.clone(), status);
+    for stream in streams {
+        send_message(&stream, &msg);
+    }
 }
 
+#[cfg(test)]
 fn setup_logger() -> Logger {
-    // We use unwrap here because panicking is acceptable in a test environment
-    // We must pass a file path, even if we don't care about the output.
     Logger::new("test_server.log")
         .expect("Failed to create logger for test")
         .context("TestServer")
@@ -716,35 +732,29 @@ mod tests {
 
     fn setup() -> OperatingServer {
         let users = setup_users();
-        let users_connected = setup_users_connected(0);
         let logger = setup_logger();
         OperatingServer::new(
             users,
-            users_connected,
-            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
+            SocketAddr::new("127.0.0.1".parse().expect("Valid IP address"), 8080),
             "test_users.txt".to_string(),
-            128,
             logger,
         )
     }
 
     fn setup_with_users(map: Vec<(&str, &str, UserStatus)>) -> OperatingServer {
-        let amount = map.len();
+        let _amount = map.len();
         let mut users = HashMap::new();
         for (name, passwd, status) in map {
             let data = UserData::new(name.to_string().clone(), passwd.to_string().clone(), status);
             users.insert(name.to_string(), data);
         }
-        let users_connected = setup_users_connected(amount);
 
         let logger = setup_logger();
 
         OperatingServer::new(
             Arc::new(RwLock::new(users)),
-            users_connected,
-            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
+            SocketAddr::new("127.0.0.1".parse().expect("Valid IP address"), 8080),
             "test_users.txt".to_string(),
-            128,
             logger,
         )
     }
@@ -753,17 +763,13 @@ mod tests {
         Arc::new(RwLock::new(HashMap::new()))
     }
 
-    fn setup_users_connected(n: usize) -> Arc<AtomicUsize> {
-        Arc::new(AtomicUsize::new(n))
-    }
-
     #[test]
     fn test_signup_ok() {
         let mut op_s = setup();
         let event = op_s.signup_user("alice".into(), "1234".into());
         assert!(matches!(event, ServerResponse::SignupOk));
 
-        let map = op_s.users.read().unwrap();
+        let map = op_s.users.read().expect("Lock should not be poisoned");
         assert!(map.contains_key("alice"));
         assert_eq!(map["alice"].password, "1234");
     }
@@ -776,9 +782,9 @@ mod tests {
         assert!(matches!(
             op_s.users
                 .read()
-                .unwrap()
+                .expect("Lock should not be poisoned")
                 .get(&"alice".to_string())
-                .unwrap()
+                .expect("Alice should exist")
                 .status,
             UserStatus::Offline
         ));
@@ -792,7 +798,7 @@ mod tests {
         let event = op_s.signup_user("bob".into(), "other".into());
         match event {
             ServerResponse::SignupError(msg) => assert!(msg.contains("already exists")),
-            _ => panic!("Expected SignupError"),
+            other => unreachable!("Expected SignupError, got {:?}", other),
         }
     }
 
@@ -814,9 +820,9 @@ mod tests {
         assert!(matches!(
             op_s.users
                 .read()
-                .unwrap()
+                .expect("Lock should not be poisoned")
                 .get(&"maria".to_string())
-                .unwrap()
+                .expect("Maria should exist")
                 .status,
             UserStatus::Available
         ));
@@ -842,7 +848,7 @@ mod tests {
 
         match event {
             ServerResponse::LoginError(msg) => assert!(msg.contains("Wrong password")),
-            _ => panic!("Expected LoginError"),
+            other => unreachable!("Expected LoginError, got {:?}", other),
         }
     }
 
@@ -854,28 +860,18 @@ mod tests {
 
         match event {
             ServerResponse::LoginError(msg) => assert!(msg.contains("not found")),
-            _ => panic!("Expected LoginError"),
+            other => unreachable!("Expected LoginError, got {:?}", other),
         }
-    }
-
-    #[test]
-    fn test_login_adds_one_to_users_connected() {
-        let mut op_s = setup();
-
-        op_s.signup_user("alice".into(), "1234".into());
-        let _ = op_s.login_user("alice".into(), "1234".into());
-        let usr = op_s.users_connected.load(Ordering::SeqCst);
-        assert_eq!(usr, 1);
     }
 
     #[test]
     fn logout_user_success() {
         let mut op_s = setup_with_users(vec![("alice", "1233", UserStatus::Available)]);
 
-        let result = op_s.logout_user("alice".to_string());
+        let _result = op_s.logout_user("alice".to_string());
 
-        let users = op_s.users.read().unwrap();
-        let user = users.get("alice").unwrap();
+        let users = op_s.users.read().expect("Lock should not be poisoned");
+        let user = users.get("alice").expect("Alice should exist");
         assert!(matches!(user.status, UserStatus::Offline));
     }
 
@@ -897,7 +893,7 @@ mod tests {
 
         let _ = op_s.logout_user("bob".to_string());
 
-        let users = op_s.users.read().unwrap();
+        let users = op_s.users.read().expect("Lock should not be poisoned");
         assert!(matches!(users["bob"].status, UserStatus::Offline));
         assert!(matches!(users["eve"].status, UserStatus::Occupied(_)));
     }
@@ -908,7 +904,7 @@ mod tests {
 
         let res = get_user_data(&"alice".to_string(), &op_s.users);
         assert!(res.is_ok());
-        assert_eq!(res.unwrap().username, "alice");
+        assert_eq!(res.expect("Should succeed").username, "alice");
     }
 
     #[test]
@@ -925,7 +921,7 @@ mod tests {
         let result = op_s.call_hangup("alice".to_string());
         assert!(matches!(result, ServerResponse::CallHangUpOk));
 
-        let users = op_s.users.read().unwrap();
+        let users = op_s.users.read().expect("Lock should not be poisoned");
         assert!(matches!(users["alice"].status, UserStatus::Available));
     }
 
@@ -946,25 +942,34 @@ mod tests {
             ("alice", "abc", UserStatus::Available),
         ]);
 
-        let _ = op_s.call_request(
+        let res = op_s.call_request(
             "alice".into(),
             "bob".into(),
             SessionDescriptionProtocol::default(),
         );
 
-        let map = op_s.users.read().unwrap();
+        let map = op_s.users.read().expect("Lock should not be poisoned");
 
-        let alice = map.get("alice").unwrap();
-        let bob = map.get("bob").unwrap();
+        let alice = map.get("alice").expect("Alice should exist");
+        let bob = map.get("bob").expect("Bob should exist");
 
-        match &alice.status {
-            UserStatus::Occupied(who) => assert_eq!(who, "bob"),
-            _ => panic!("Alice should be occupied by Bob"),
-        }
+        match res {
+            ServerResponse::CallRequestOk => {
+                match &alice.status {
+                    UserStatus::Occupied(who) => assert_eq!(who, "bob"),
+                    other => unreachable!("Alice should be occupied by Bob, got {:?}", other),
+                }
 
-        match &bob.status {
-            UserStatus::Occupied(who) => assert_eq!(who, "alice"),
-            _ => panic!("Bob should be occupied by Alice"),
+                match &bob.status {
+                    UserStatus::Occupied(who) => assert_eq!(who, "alice"),
+                    other => unreachable!("Bob should be occupied by Alice, got {:?}", other),
+                }
+            }
+            ServerResponse::CallRequestError(_) => {
+                assert_eq!(alice.status, UserStatus::Available);
+                assert_eq!(bob.status, UserStatus::Available);
+            }
+            other => panic!("Unexpected response from call_request: {:?}", other),
         }
     }
 
@@ -982,11 +987,13 @@ mod tests {
         );
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("user not available"));
-                assert!(msg.contains("alice"));
+            ServerResponse::CallAcceptError(msg) => {
+                assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error(UserNotAvailable)"),
+            other => unreachable!(
+                "Expected CallAcceptError(UserNotAvailable), got {:?}",
+                other
+            ),
         }
     }
 
@@ -1004,10 +1011,13 @@ mod tests {
         );
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("user not available"));
+            ServerResponse::CallAcceptError(msg) => {
+                assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error(UserNotAvailable)"),
+            other => unreachable!(
+                "Expected CallAcceptError(UserNotAvailable), got {:?}",
+                other
+            ),
         }
     }
 
@@ -1022,10 +1032,10 @@ mod tests {
         );
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("UserNotFound") || msg.contains("not found"));
+            ServerResponse::CallAcceptError(msg) => {
+                assert!(msg.contains("not found") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error(UserNotFound)"),
+            other => unreachable!("Expected CallAcceptError(UserNotFound), got {:?}", other),
         }
     }
 
@@ -1040,10 +1050,10 @@ mod tests {
         );
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("UserNotFound") || msg.contains("not found"));
+            ServerResponse::CallAcceptError(msg) => {
+                assert!(msg.contains("not found") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error(UserNotFound)"),
+            other => unreachable!("Expected CallAcceptError(UserNotFound), got {:?}", other),
         }
     }
 
@@ -1055,21 +1065,21 @@ mod tests {
         ]);
 
         {
-            let mut u = op_s.users.write().unwrap();
+            let mut u = op_s.users.write().expect("Lock should not be poisoned");
             u.get_mut("alice")
-                .unwrap()
+                .expect("Alice should exist")
                 .update_status(UserStatus::Available);
             u.get_mut("bob")
-                .unwrap()
+                .expect("Bob should exist")
                 .update_status(UserStatus::Available);
         }
 
         let _ = op_s.call_reject("alice".into(), "bob".into());
 
         {
-            let u = op_s.users.write().unwrap();
-            let alice = u.get("alice").unwrap();
-            let bob = u.get("bob").unwrap();
+            let u = op_s.users.write().expect("Lock should not be poisoned");
+            let alice = u.get("alice").expect("Alice should exist");
+            let bob = u.get("bob").expect("Bob should exist");
 
             assert_eq!(alice.status, UserStatus::Available);
             assert_eq!(bob.status, UserStatus::Available);
@@ -1084,22 +1094,25 @@ mod tests {
         ]);
 
         {
-            let mut u = op_s.users.write().unwrap();
+            let mut u = op_s.users.write().expect("Lock should not be poisoned");
             u.get_mut("alice")
-                .unwrap()
+                .expect("Alice should exist")
                 .update_status(UserStatus::Occupied("bob".into()));
             u.get_mut("bob")
-                .unwrap()
+                .expect("Bob should exist")
                 .update_status(UserStatus::Available);
         }
 
         let resp = op_s.call_reject("alice".into(), "bob".into());
 
         match resp {
-            ServerResponse::Error(msg) => {
-                assert!(msg.contains("user not available"));
+            ServerResponse::CallRejectError(msg) => {
+                assert!(msg.contains("user not available") || msg.contains("user does not exist"));
             }
-            _ => panic!("Expected Error because alice is not available"),
+            other => unreachable!(
+                "Expected CallRejectError because alice is not available, got {:?}",
+                other
+            ),
         }
     }
 }

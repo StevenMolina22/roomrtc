@@ -1,8 +1,13 @@
 use crate::config::MediaConfig;
 
-use super::{EncodedFrame, error::FrameError as Error, frame::Frame};
-use openh264::encoder::{EncodedBitStream, Encoder as H264Encoder};
-use openh264::formats::{RgbSliceU8, YUVBuffer};
+use super::{EncodedFrame, error::FrameError as Error};
+use openh264::OpenH264API;
+use openh264::encoder::{
+    BitRate, Complexity, EncodedBitStream, Encoder as H264Encoder, EncoderConfig, FrameRate,
+    FrameType, IntraFramePeriod, RateControlMode, UsageType,
+};
+use openh264::formats::YUVSlices;
+use yuv::YuvPlanarImageMut;
 
 /// A basic H.264 video encoder using the `OpenH264` library.
 ///
@@ -14,8 +19,6 @@ use openh264::formats::{RgbSliceU8, YUVBuffer};
 pub struct Encoder {
     encoder: H264Encoder,
     max_chunk_size: usize,
-    frame_count: usize,
-    key_frame_interval: usize,
 }
 
 impl Encoder {
@@ -30,54 +33,78 @@ impl Encoder {
     /// Returns [`Error::EncoderInitializationError`] if the encoder cannot
     /// be created by the `OpenH264` library.
     pub fn new(media_config: &MediaConfig) -> Result<Self, Error> {
-        let encoder = H264Encoder::new().map_err(|_| Error::EncoderInitializationError)?;
+        let config = EncoderConfig::new()
+            .bitrate(BitRate::from_bps(2_500_000))
+            .max_frame_rate(FrameRate::from_hz(media_config.frame_rate))
+            .usage_type(UsageType::CameraVideoRealTime)
+            .intra_frame_period(IntraFramePeriod::from_num_frames(
+                media_config.h264_idr_interval,
+            ))
+            .complexity(Complexity::Low)
+            .rate_control_mode(RateControlMode::Off)
+            .skip_frames(true);
+
+        let encoder = H264Encoder::with_api_config(OpenH264API::from_source(), config)
+            .map_err(|_| Error::EncoderInitializationError)?;
 
         Ok(Self {
             encoder,
             max_chunk_size: media_config.rtp_max_chunk_size,
-            frame_count: 0,
-            key_frame_interval: 18,
         })
     }
 
     /// Encodes a raw frame into H.264 byte chunks.
     ///
-    /// Takes a [`Frame`] containing raw YUV data, converts it into a
-    /// [`YUVBuffer`], and encodes it using `OpenH264`.
+    /// Takes a [`Frame`] containing raw RGB data, converts it into a
+    /// YUV420 planar buffer, and encodes it using `OpenH264`.
     /// The result is split into smaller chunks, each up to `max_chunk_size`
     /// bytes, ready for transmission.
     ///
     /// # Errors
     ///
     /// - [`Error::EncodingError`] — if encoding fails due to invalid frame data.
-    pub fn encode_frame(&mut self, frame: &Frame) -> Result<EncodedFrame, Error> {
-        let rgb_source = RgbSliceU8::new(&frame.data, (frame.width, frame.height));
-        let yuv = YUVBuffer::from_rgb8_source(rgb_source);
+    pub fn encode(
+        &mut self,
+        yuv: &YuvPlanarImageMut<u8>,
+        frame_time: u128,
+    ) -> Result<EncodedFrame, Error> {
+        let yuv_source = YUVSlices::new(
+            (
+                yuv.y_plane.borrow(),
+                yuv.u_plane.borrow(),
+                yuv.v_plane.borrow(),
+            ),
+            (yuv.width as usize, yuv.height as usize),
+            (
+                yuv.y_stride as usize,
+                yuv.u_stride as usize,
+                yuv.v_stride as usize,
+            ),
+        );
 
-        self.frame_count += 1;
-
-        if self.frame_count.is_multiple_of(self.key_frame_interval) {
-            self.encoder.force_intra_frame();
-        }
-
-        let nalus = self
+        let bitstream = self
             .encoder
-            .encode(&yuv)
-            .map_err(|_| Error::EncodingError)?;
-        let chunks = generate_chunks_from_nalus(&nalus, self.max_chunk_size);
+            .encode(&yuv_source)
+            .map_err(|e| Error::EncodingError(e.to_string()))?;
+
+        let chunks = generate_chunks_from_bitstream(&bitstream, self.max_chunk_size);
+        let frame_type = bitstream.frame_type();
+        let is_i_frame = frame_type == FrameType::I || frame_type == FrameType::IDR;
 
         Ok(EncodedFrame {
-            id: frame.id,
             chunks,
-            width: frame.width,
-            height: frame.height,
+            frame_time,
+            is_i_frame,
         })
     }
 }
 
 /// Splits the encoded NALUs into smaller chunks based on the
 /// `max_chunk_size`.
-fn generate_chunks_from_nalus(nalus: &EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
+///
+/// This helper ensures each chunk is at most `max_chunk_size` bytes,
+/// which is useful for transport over datagram protocols like UDP.
+fn generate_chunks_from_bitstream(nalus: &EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
     let nalu_units = nalus.to_vec();
     let mut chunks = Vec::new();
     for chunk in nalu_units.chunks(max_chunk_size) {

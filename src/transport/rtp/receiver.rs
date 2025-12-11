@@ -10,35 +10,47 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-/// RTP receiver that reads `RtpPacket` instances from a socket and
-/// manages RTCP reporting through a `RtcpReportHandler`.
+/// RTP receiver that reads encrypted RTP packets from a socket.
 ///
-/// This type owns a socket implementing the project's `Socket` trait,
-/// a locked `RtcpReportHandler` used to drive RTCP-style reporting and
-/// a shared `connection_status` used to observe/drive session state.
+/// The receiver wraps a socket implementing the project's `Socket` trait
+/// and coordinates with an RTCP report handler for session management.
+/// It spawns a background thread that continuously reads encrypted packet
+/// data from the socket and forwards it to a channel for decryption.
+///
+/// # Threading Model
+/// The receiver operates in a background thread with a configured read timeout,
+/// allowing the application to receive packets asynchronously via a channel.
 pub struct RtpReceiver<S: Socket + Send + Sync + 'static> {
-    config: Arc<Config>,
+    /// Socket for receiving RTP packets from the remote peer.
     rtp_socket: S,
+    /// RTCP report handler for session management and goodbye signaling.
     report_handler: Arc<Mutex<RtcpReportHandler<S>>>,
+    /// Shared connection status flag coordinating thread lifecycle.
     connected: Arc<AtomicBool>,
+    /// Logger instance for receiver-specific messages.
     logger: Logger,
 }
 
 impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
-    /// Create a new `RtpReceiver`.
+    /// Create a new `RtpReceiver` with the provided socket and dependencies.
+    ///
+    /// Configures the socket with a read timeout from the application config
+    /// and initializes the receiver with references to the RTCP handler and
+    /// connection status. Does not start the background thread; call `start()`
+    /// to begin reception.
     ///
     /// # Parameters
-    /// - `rtp_socket`: socket bound to the local RTP port implementing
-    ///   the `Socket` trait.
-    /// - `report_handler`: an `Arc<Mutex<RtcpReportHandler<S>>>` used to
-    ///   control and close RTCP reporting when needed.
-    /// - `connection_status`: shared `Arc<RwLock<ConnectionStatus>>`
-    ///   representing the current session state. The receiver uses this
-    ///   value to detect when the session has been closed.
+    /// - `config`: application configuration (contains RTP read timeout).
+    /// - `rtp_socket`: socket for receiving RTP packets.
+    /// - `report_handler`: RTCP report handler for session coordination.
+    /// - `connected`: shared connection status flag.
+    /// - `logger`: logger instance for this receiver.
+    ///
+    /// # Returns
+    /// A configured `RtpReceiver` ready to `start()`.
     ///
     /// # Errors
-    /// Returns `Error::SocketConfigFailed` if configuring the socket
-    /// read timeout fails.
+    /// Returns `Error::SocketConfigFailed` if setting the read timeout fails.
     pub fn new(
         config: &Arc<Config>,
         rtp_socket: S,
@@ -51,7 +63,6 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
             .map_err(|_| Error::SocketConfigFailed)?;
 
         Ok(Self {
-            config: Arc::clone(config),
             rtp_socket,
             report_handler: Arc::clone(report_handler),
             connected: Arc::clone(connected),
@@ -59,6 +70,22 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         })
     }
 
+    /// Start the RTP receiver by spawning a background reception thread.
+    ///
+    /// Creates a channel for forwarding received encrypted packet data and spawns
+    /// a thread that continuously reads from the socket and sends data through the
+    /// channel. The thread runs until the connection is closed or an error occurs.
+    /// If the thread terminates due to error while the connection is still active,
+    /// it sends a `CallEnded` event to notify the application.
+    ///
+    /// # Parameters
+    /// - `event_tx`: channel for sending application events (call end notifications).
+    ///
+    /// # Returns
+    /// A receiver channel for encrypted RTP packet data (Vec<u8>).
+    ///
+    /// # Errors
+    /// Returns `Error::SocketCloneFailed` if cloning the socket for the thread fails.
     pub fn start(&mut self, event_tx: Sender<AppEvent>) -> Result<Receiver<Vec<u8>>, Error> {
         let (remote_to_local_rtp_tx, remote_to_local_rtp_rx) = mpsc::channel();
 
@@ -93,7 +120,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
 
                 if connected.load(Ordering::SeqCst) {
                     connected.store(false, Ordering::SeqCst);
-                    event_tx.send(AppEvent::CallEnded);
+                    let _ = event_tx.send(AppEvent::CallEnded);
                 }
                 logger.info("RtpReceiver thread terminated");
             }
@@ -102,18 +129,25 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
         Ok(remote_to_local_rtp_rx)
     }
 }
-/// Wait for and return the next decoded `RtpPacket`.
+
+/// Wait for and receive the next encrypted RTP packet from the socket.
 ///
-/// This method loops until a valid `RtpPacket` is decoded from the
-/// underlying socket. If the shared `connection_status` transitions
-/// to `Closed` while waiting, the method returns
-/// `Error::ConnectionClosed`. On other socket errors it will attempt
-/// to close the RTCP reporting handler and propagate a
-/// `ReceiveFailed` error.
+/// This function loops until a complete packet is received from the socket.
+/// It handles `WouldBlock` errors by checking the connection status and
+/// continuing to wait. On other errors, it attempts to send an RTCP goodbye
+/// before returning the error.
+///
+/// # Parameters
+/// - `rtp_socket`: the socket to receive data from.
+/// - `connected`: connection status flag to check during timeout waits.
+/// - `report_handler`: RTCP handler for sending goodbye on fatal errors.
+///
+/// # Returns
+/// A byte vector containing the encrypted packet data.
 ///
 /// # Errors
-/// Returns `Error::ReceiveFailed` for unexpected socket errors and
-/// `Error::ConnectionClosed` if the session is closed while waiting.
+/// - `Error::ConnectionClosed` if the connection flag is set to false during a timeout.
+/// - `Error::ReceiveFailed` if a fatal socket error occurs.
 pub fn receive<S: Socket + Send + Sync + 'static>(
     rtp_socket: &S,
     connected: &Arc<AtomicBool>,

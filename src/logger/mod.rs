@@ -1,10 +1,7 @@
 use std::{
     fs::OpenOptions,
     io::Write,
-    sync::{
-        Arc,
-        mpsc::{self, Receiver, Sender},
-    },
+    sync::mpsc::{self, Receiver, Sender},
     thread,
 };
 
@@ -59,7 +56,6 @@ pub struct Logger {
     message_tx: Sender<LogMessage>,
     /// The specific context/name for this logger instance (e.g., "`IceAgent`").
     context: String,
-    file_path: Arc<String>,
 }
 
 impl Logger {
@@ -74,14 +70,12 @@ impl Logger {
     /// # Errors
     /// Returns an `std::io::Error` if the log file cannot be created or opened.
     pub fn new(file_path: &str) -> Result<Self, std::io::Error> {
-        OpenOptions::new()
+        let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(file_path)?;
 
         let (tx, rx): (Sender<LogMessage>, Receiver<LogMessage>) = mpsc::channel();
-        let file_path_arc = Arc::new(file_path.to_string());
-        let writer_path = Arc::clone(&file_path_arc);
 
         thread::spawn(move || {
             for msg in rx {
@@ -90,15 +84,8 @@ impl Logger {
                     msg.timestamp, msg.level, msg.context, msg.message
                 );
 
-                // Open file in append mode.
-                match OpenOptions::new().append(true).open(writer_path.as_str()) {
-                    Ok(mut writer) => {
-                        let _ = writer.write_all(log_line.as_bytes());
-                    }
-                    Err(e) => {
-                        // Logging failure: print to stderr
-                        eprintln!("FATAL: Failed to open log file for write: {e}");
-                    }
+                if file.write_all(log_line.as_bytes()).is_err() {
+                    return;
                 }
             }
         });
@@ -106,15 +93,15 @@ impl Logger {
         Ok(Self {
             message_tx: tx,
             context: String::new(),
-            file_path: file_path_arc,
         })
     }
 
+    /// Creates a clone of the logger with a specific context string.
+    /// Useful for identifying logs from specific sub-components (e.g. "IceAgent").
     pub fn context(&self, context: impl Into<String>) -> Self {
         Self {
             message_tx: self.message_tx.clone(),
             context: context.into(),
-            file_path: Arc::clone(&self.file_path),
         }
     }
 

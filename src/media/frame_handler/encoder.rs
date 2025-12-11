@@ -50,8 +50,8 @@ impl Encoder {
 
     /// Encodes a raw frame into H.264 byte chunks.
     ///
-    /// Takes a [`Frame`] containing raw YUV data, converts it into a
-    /// [`YUVBuffer`], and encodes it using `OpenH264`.
+    /// Takes a [`Frame`] containing raw RGB data, converts it into a
+    /// YUV420 planar buffer, and encodes it using `OpenH264`.
     /// The result is split into smaller chunks, each up to `max_chunk_size`
     /// bytes, ready for transmission.
     ///
@@ -97,6 +97,9 @@ impl Encoder {
 
 /// Splits the encoded NALUs into smaller chunks based on the
 /// `max_chunk_size`.
+///
+/// This helper ensures each chunk is at most `max_chunk_size` bytes,
+/// which is useful for transport over datagram protocols like UDP.
 fn generate_chunks_from_nalus(nalus: &EncodedBitStream, max_chunk_size: usize) -> Vec<Vec<u8>> {
     let nalu_units = nalus.to_vec();
     let mut chunks = Vec::new();

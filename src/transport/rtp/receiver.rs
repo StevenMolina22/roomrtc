@@ -93,7 +93,7 @@ impl<S: Socket + Send + Sync + 'static> RtpReceiver<S> {
 
                 if connected.load(Ordering::SeqCst) {
                     connected.store(false, Ordering::SeqCst);
-                    event_tx.send(AppEvent::CallEnded);
+                    let _ = event_tx.send(AppEvent::CallEnded);
                 }
                 logger.info("RtpReceiver thread terminated");
             }

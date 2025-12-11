@@ -11,6 +11,7 @@ use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+/// Core server logic for user authentication and call signaling.
 pub struct OperatingServer {
     users: Arc<RwLock<HashMap<String, UserData>>>,
     users_connected: Arc<AtomicUsize>,
@@ -690,7 +691,7 @@ fn send_message(
             return;
         }
     };
-    guard.write_all(&message.to_bytes());
+    let _ = guard.write_all(&message.to_bytes());
 }
 
 fn notify_status_update(
@@ -900,7 +901,7 @@ mod tests {
     fn logout_user_success() {
         let mut op_s = setup_with_users(vec![("alice", "1233", UserStatus::Available)]);
 
-        let result = op_s.logout_user("alice".to_string());
+        let _result = op_s.logout_user("alice".to_string());
 
         let users = op_s.users.read().unwrap();
         let user = users.get("alice").unwrap();

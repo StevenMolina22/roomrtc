@@ -87,7 +87,7 @@ impl CentralServer {
                     break;
                 }
                 Ok(_) => {}
-                Err(e) => {
+                Err(_) => {
                     self.on.store(false, Ordering::SeqCst);
                     break;
                 }
@@ -95,11 +95,9 @@ impl CentralServer {
         }
         Ok(())
     }
-    /// Spawns the initial TCP listener thread.
-    ///
-    /// This thread accepts incoming client connections and
-    /// spawns a new thread per connection. Each worker thread receives
-    /// references to the shared user map and the shared connected-user counter.
+    // Spawns the initial TCP listener thread.
+    // Accepts incoming client connections and spawns one worker per connection,
+    // sharing the user map and the connected-user counter across threads.
     fn await_for_connections(&mut self) -> Result<(), Error> {
         let config = self.config.clone();
         let tls_config = self.tls_config.clone();
@@ -197,12 +195,13 @@ impl CentralServer {
     }
 }
 
+// Loads user credentials from disk; creates an empty file if it is missing.
 fn load_users_from_mem(filename: &String) -> Result<HashMap<String, UserData>, Error> {
     let file = if let Ok(f) = File::open(filename) {
         f
     } else {
         OpenOptions::new()
-            .create(true)
+            .truncate(true)
             .write(true)
             .open(filename)
             .map_err(|e| Error::MapError(e.to_string()))?;
@@ -230,6 +229,7 @@ fn load_users_from_mem(filename: &String) -> Result<HashMap<String, UserData>, E
     Ok(users)
 }
 
+// Reads certificate and private key files from disk, returning them ready for TLS setup.
 fn generate_certs_and_key(
     config: Arc<Config>,
 ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), Error> {
@@ -263,7 +263,7 @@ pub fn map_stream_to_user(
     users: Arc<RwLock<HashMap<String, UserData>>>,
     mut stream: StreamOwned<ServerConnection, TcpStream>,
 ) {
-    if let Err(_) = stream.write_all(&ServerMessage::UsernameRequest.to_bytes()) {
+    if stream.write_all(&ServerMessage::UsernameRequest.to_bytes()).is_err() {
         return;
     }
 
@@ -291,6 +291,7 @@ pub fn map_stream_to_user(
     }
 }
 
+// Retrieves the first non-loopback IPv4 address from available interfaces.
 fn get_server_ip() -> Result<String, Error> {
     let interfaces = if_addrs::get_if_addrs().map_err(|e| Error::MapError(e.to_string()))?;
 

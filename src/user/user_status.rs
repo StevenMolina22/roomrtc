@@ -1,13 +1,32 @@
 use std::fmt::Display;
 
+/// Represents the availability status of a user.
+///
+/// Users can be available for calls, occupied with a description of their current activity,
+/// or offline.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum UserStatus {
+    /// User is available and can receive calls.
     Available,
+    /// User is occupied with a description of their activity (e.g., "In a meeting").
     Occupied(String),
+    /// User is offline and unavailable.
     Offline,
 }
 
 impl UserStatus {
+    /// Parses a byte slice into a `UserStatus`.
+    ///
+    /// Expected formats:
+    /// - `"Available"` -> `UserStatus::Available`
+    /// - `"Offline"` -> `UserStatus::Offline`
+    /// - `"Occupied:description"` -> `UserStatus::Occupied(description)`
+    ///
+    /// # Arguments
+    /// * `bytes` - A byte slice representing the status.
+    ///
+    /// # Returns
+    /// `Some(UserStatus)` if parsing succeeds, `None` otherwise.
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let s = std::str::from_utf8(bytes).ok()?.trim();

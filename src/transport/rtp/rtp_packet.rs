@@ -1,5 +1,4 @@
 use std::default::Default;
-use std::fmt::{Display};
 
 /// RTP packet used by the project transport layer.
 ///
@@ -127,7 +126,7 @@ mod tests {
 
         assert_eq!(original_packet.total_chunks, deserialized.total_chunks);
         assert_eq!(original_packet.is_i_frame, deserialized.is_i_frame);
-        assert_eq!(deserialized.is_i_frame, true);
+        assert!(deserialized.is_i_frame);
     }
 
     #[test]
@@ -139,6 +138,6 @@ mod tests {
         assert_eq!(bytes[2], 0, "False in binary should be 0");
 
         let deserialized = RtpPacket::from_bytes(&bytes).unwrap();
-        assert_eq!(deserialized.is_i_frame, false);
+        assert!(!deserialized.is_i_frame);
     }
 }

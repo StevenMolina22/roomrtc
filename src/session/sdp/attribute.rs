@@ -186,7 +186,7 @@ impl FromStr for Attribute {
     }
 }
 
-/// Parse an `rtpmap` attribute value part into `Attribute::RTPMap`.
+// Parse an `rtpmap` attribute value part into `Attribute::RTPMap`.
 fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
     let parts = values.split_whitespace().collect::<Vec<&str>>();
     if parts.len() < 2 {
@@ -221,7 +221,7 @@ fn parse_rptmap_attr_values(values: &str) -> Result<Attribute, Error> {
     ))
 }
 
-/// Parse a `candidate` attribute value into `Attribute::Candidate`.
+// Parse a `candidate` attribute value into `Attribute::Candidate`.
 fn parse_candidate_attr_values(values: &str) -> Result<Attribute, Error> {
     let parts = values.split_whitespace().collect::<Vec<&str>>();
     if parts.len() < 8 {
@@ -251,7 +251,7 @@ fn parse_candidate_attr_values(values: &str) -> Result<Attribute, Error> {
     )))
 }
 
-/// Parse a fingerprint attribute.
+// Parse a fingerprint attribute.
 fn parse_fingerprint_attr_values(values: &str) -> Result<Attribute, Error> {
     let mut parts = values.split_whitespace();
     let algorithm = parts
@@ -267,7 +267,7 @@ fn parse_fingerprint_attr_values(values: &str) -> Result<Attribute, Error> {
     Ok(Attribute::Fingerprint(fingerprint))
 }
 
-/// Parse a setup attribute.
+// Parse a setup attribute.
 fn parse_setup_attr_values(value: &str) -> Result<Attribute, Error> {
     let role = DtlsSetupRole::from_str(value.trim())?;
     Ok(Attribute::Setup(role))

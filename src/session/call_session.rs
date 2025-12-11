@@ -170,9 +170,8 @@ impl CallSession {
         self.sdp.clone()
     }
 
-    /// Internal helper that walks a remote `SessionDescriptionProtocol`,
-    /// adds remote ICE candidates to the `IceAgent` and starts
-    /// connectivity checks.
+    // Walks a remote `SessionDescriptionProtocol`, adds remote ICE candidates,
+    // and starts connectivity checks.
     fn process_remote_sdp(
         &mut self,
         sdp: &SessionDescriptionProtocol,
@@ -199,12 +198,14 @@ impl CallSession {
         Ok(())
     }
 
+    /// Return the currently selected ICE candidate pair if connectivity checks succeeded.
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.ice_agent
             .get_selected_pair()
             .map_err(|e| Error::IceConnectionError(e.to_string()))
     }
 
+    // Chooses the local DTLS role based on the remote SDP and whether it is an offer/answer.
     fn determine_local_role(
         &self,
         remote_sdp: &SessionDescriptionProtocol,

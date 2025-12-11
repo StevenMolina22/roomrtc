@@ -12,8 +12,14 @@ use crate::controller::AppEvent;
 use crate::clock::Clock;
 
 
+/// Maximum number of RTP packets buffered for jitter compensation.
 const JITTER_BUFF_SIZE: usize = 1024;
 
+/// Coordinates camera capture, encoding/decoding, and RTP transport.
+///
+/// `MediaPipeline` starts the local camera, encodes outgoing frames to RTP,
+/// and decodes incoming RTP into displayable frames. It also dispatches UI
+/// events for errors and call termination.
 pub struct MediaPipeline {
     camera: Camera,
     config: Arc<Config>,
@@ -23,6 +29,7 @@ pub struct MediaPipeline {
 }
 
 impl MediaPipeline {
+    /// Creates a new media pipeline with its own clock and camera.
     #[must_use]
     pub fn new(config: &Arc<Config>, ssrc: u32, logger: Logger) -> Self {
         let clock = Arc::new(Clock::new());
@@ -35,6 +42,11 @@ impl MediaPipeline {
         }
     }
 
+    /// Starts local capture/encoding and remote decoding pipelines.
+    ///
+    /// Spawns threads for sending local camera frames as RTP and for receiving
+    /// rendering remote frames. Returns receivers for local (preview) and
+    /// remote frames.
     pub fn start(
         &mut self,
         rtp_tx: Sender<RtpPacket>,
@@ -48,11 +60,13 @@ impl MediaPipeline {
         Ok((local_frame_rx, remote_frame_rx))
     }
 
+    /// Stops camera capture and related media components.
     pub fn stop(&self) {
         self.logger.info("Stopping MediaPipeline...");
         self.camera.stop();
     }
 
+    // Builds the remote receive pipeline: jitter buffer + decoder.
     fn start_remote_frame_pipeline(
         &self,
         rtp_rx: Receiver<RtpPacket>,
@@ -92,12 +106,9 @@ impl MediaPipeline {
 
                     if let Some(chunks) = jitter_buffer.pop()
                         && let Some(frame_data) = generate_frame_from_chunks(&chunks, &mut decoder)
-                    {
-                        if let Err(_) = remote_frame_tx.send(frame_data.clone()) {
+                        && remote_frame_tx.send(frame_data.clone()).is_err() {
                             break;
                         }
-                    }
-
                 }
                 if connected.load(Ordering::SeqCst) {
                     connected.store(false, Ordering::SeqCst);
@@ -109,6 +120,7 @@ impl MediaPipeline {
         Ok(remote_frame_rx)
     }
 
+    // Builds the local capture pipeline and returns preview frames.
     fn start_local_frame_pipeline(
         &mut self,
         rtp_tx: Sender<RtpPacket>,
@@ -143,6 +155,7 @@ impl MediaPipeline {
         Ok(local_frame_rx)
     }
 
+    // Spawns the encoding thread that turns raw frames into RTP packets.
     fn start_encoding_thread(&mut self, raw_rx: Receiver<Frame>, event_tx: Sender<AppEvent>, rtp_tx: Sender<RtpPacket>, connected: Arc<AtomicBool>) -> Result<(), Error> {
         let mut encoder = match Encoder::new(&self.config.media) {
             Ok(d) => d,
@@ -180,6 +193,7 @@ impl MediaPipeline {
     }
 }
 
+/// Sends an encoded frame as RTP packets over the provided channel.
 fn send_encoded_frame(
     encoded_frame: EncodedFrame,
     rtp_tx: &Sender<RtpPacket>,
@@ -214,8 +228,9 @@ fn send_encoded_frame(
     Ok(())
 }
 
+/// Reassembles and decodes RTP chunks into a displayable frame.
 fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<Frame> {
-    let (decoded_data, width, height) = match decoder.decode_frame(&data) {
+    let (decoded_data, width, height) = match decoder.decode_frame(data) {
         Ok(data) => {
             data
         },
@@ -233,7 +248,7 @@ fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<F
 }
 
 fn send_message_to_ui(event_tx: Sender<AppEvent>, event: AppEvent) {
-    event_tx.send(event);
+    let _ = event_tx.send(event);
 }
 
 #[cfg(test)]

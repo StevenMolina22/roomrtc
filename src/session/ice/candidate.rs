@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn calculate_priority_for_host() {
-        let ice_config = IceConfig {
+        let _ice_config = IceConfig {
             foundation: "1".to_string(),
             transport: "UDP".to_string(),
             component_id: 1,

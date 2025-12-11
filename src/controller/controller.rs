@@ -19,6 +19,17 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
+/// Main controller for managing RTC calls and server communication.
+///
+/// `Controller` orchestrates all aspects of the RTC application, including:
+/// - User authentication (login/logout, registration)
+/// - Call initiation, acceptance, rejection, and termination
+/// - Media transport and processing
+/// - Event propagation to the UI layer
+/// - Server communication and message handling
+///
+/// The controller maintains connections to both the signaling server (via TLS)
+/// and coordinates RTP/RTCP media transport for active calls.
 pub struct Controller {
     config: Arc<Config>,
     users_status: Arc<RwLock<HashMap<String, UserStatus>>>,
@@ -37,6 +48,22 @@ pub struct Controller {
 }
 
 impl Controller {
+    /// Creates a new controller instance with TLS connection to the server.
+    ///
+    /// Initializes all media components (media pipeline, transport, and call session)
+    /// and establishes a secure connection to the signaling server.
+    ///
+    /// # Parameters
+    ///
+    /// * `event_tx` - Channel sender for sending application events to the UI.
+    /// * `config` - Application configuration containing server settings.
+    /// * `sv_addr` - Socket address of the signaling server.
+    /// * `logger` - Logger instance for recording operations.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Controller)` - Successfully created controller.
+    /// * `Err(Error)` - Failed to create controller or establish connection.
     pub fn new(
         event_tx: Sender<AppEvent>,
         config: &Arc<Config>,
@@ -76,15 +103,29 @@ impl Controller {
 
     // ---------------------------------------------------------------------------------------------------------------------------
     // CALLS
+    
+    /// Initiates an outgoing call to a peer.
+    ///
+    /// Sends a call request message to the server with the local SDP offer.
+    /// The peer will receive a `CallIncoming` event to accept or reject the call.
+    ///
+    /// # Parameters
+    ///
+    /// * `peer_username` - Username of the peer to call.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Call request sent successfully.
+    /// * `Err(Error)` - Failed to send call request.
     pub fn call(
         &mut self,
-        peer_username: &String,
+        peer_username: &str,
     ) -> Result<(), Error> {
         let token = self.get_token()?;
         let msg = ClientMessage::CallRequest {
             token: token.clone(),
             offer_sdp: self.call_session.get_offer(),
-            to: peer_username.clone(),
+            to: peer_username.to_owned(),
         };
         match send_message(msg, &mut self.client_server_stream)? {
             ServerResponse::CallRequestOk => Ok(()),
@@ -93,6 +134,19 @@ impl Controller {
         }
     }
 
+    /// Processes an accepted call and starts media transport.
+    ///
+    /// After the peer accepts a call, processes the SDP answer, performs ICE checks,
+    /// and starts the media transport to exchange frames with the peer.
+    ///
+    /// # Parameters
+    ///
+    /// * `sdp_answer` - SDP answer from the peer.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((audio_rx, video_rx))` - Receivers for audio and video frames.
+    /// * `Err(Error)` - Failed to process the answer or start media.
     pub fn get_in_call(&mut self, sdp_answer: SessionDescriptionProtocol) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         self.logger.info("Call request ok");
         self.call_session
@@ -107,6 +161,15 @@ impl Controller {
         self.join_call()
     }
 
+    /// Terminates an active call.
+    ///
+    /// Sends a hang-up message to the server, stops media components,
+    /// and reinitializes call session for potential future calls.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Call terminated successfully.
+    /// * `Err(Error)` - Failed to terminate call.
     pub fn hang_up(&mut self) -> Result<(), Error> {
         let msg = ClientMessage::CallHangup {
             token: self.get_token()?,
@@ -137,6 +200,14 @@ impl Controller {
         Ok(())
     }
 
+    /// Stops media pipeline and transport components.
+    ///
+    /// Gracefully stops all active media processing and network transport.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Media components stopped successfully.
+    /// * `Err(Error)` - Failed to stop components.
     pub fn stop_media_components(&mut self) -> Result<(), Error> {
         self.media_pipeline.stop();
         self.transport
@@ -144,6 +215,20 @@ impl Controller {
             .map_err(|e| Error::MapError(e.to_string()))
     }
 
+    /// Accepts an incoming call from a peer.
+    ///
+    /// Processes the peer's SDP offer, sends an SDP answer to the server,
+    /// performs ICE checks, and starts media transport.
+    ///
+    /// # Parameters
+    ///
+    /// * `to_usr` - Username of the peer who initiated the call.
+    /// * `offer_sdp` - SDP offer from the peer.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((audio_rx, video_rx))` - Receivers for audio and video frames.
+    /// * `Err(Error)` - Failed to accept call.
     pub fn accept_call(
         &mut self,
         to_usr: String,
@@ -174,6 +259,18 @@ impl Controller {
         }
     }
 
+    /// Rejects an incoming call.
+    ///
+    /// Sends a call rejection message to the server to notify the peer.
+    ///
+    /// # Parameters
+    ///
+    /// * `to_usr` - Username of the peer whose call is being rejected.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Call rejection sent successfully.
+    /// * `Err(Error)` - Failed to reject call.
     pub fn reject_call(&mut self, to_usr: String) -> Result<(), Error> {
         let token = self.get_token()?;
         let msg = ClientMessage::CallReject {
@@ -192,6 +289,7 @@ impl Controller {
         Ok(())
     }
 
+    // Helper function to join an active call by setting up media transport and pipeline
     pub(crate) fn join_call(&mut self) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         let pair = self
             .call_session
@@ -237,7 +335,21 @@ impl Controller {
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------
-    // LOG
+    // AUTHENTICATION
+
+    /// Registers a new user account.
+    ///
+    /// Sends a signup message to the server with the provided credentials.
+    ///
+    /// # Parameters
+    ///
+    /// * `username` - Desired username for the new account.
+    /// * `password` - Password for the new account.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Registration successful.
+    /// * `Err(Error)` - Registration failed.
     pub fn sign_up(&mut self, username: String, password: String) -> Result<(), Error> {
         let msg = ClientMessage::SignUp { username, password };
         match send_message(msg, &mut self.client_server_stream)? {
@@ -247,17 +359,31 @@ impl Controller {
         }
     }
 
-    pub fn log_in(&mut self, username: &String, password: &String) -> Result<(), Error> {
+    /// Authenticates a user and starts the server communication thread.
+    ///
+    /// Sends login credentials to the server, receives a session token and list of online users,
+    /// and spawns a background thread to handle incoming server messages.
+    ///
+    /// # Parameters
+    ///
+    /// * `username` - Username for authentication.
+    /// * `password` - Password for authentication.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Login successful.
+    /// * `Err(Error)` - Login failed.
+    pub fn log_in(&mut self, username: &str, password: &str) -> Result<(), Error> {
         let msg = ClientMessage::LogIn {
-            username: username.clone(),
-            password: password.clone(),
+            username: username.to_owned(),
+            password: password.to_owned(),
         };
         match send_message(msg, &mut self.client_server_stream)? {
             ServerResponse::LoginOk(token, server_client_addr, users_status) => {
                 self.users_status = Arc::new(RwLock::new(users_status));
                 self.token = Some(token);
                 self.logged_in.store(true, Ordering::SeqCst);
-                self.username = Some(username.clone());
+                self.username = Some(username.to_owned());
                 self.start_server_receiver(username, server_client_addr)?;
                 Ok(())
             }
@@ -266,6 +392,15 @@ impl Controller {
         }
     }
 
+    /// Logs out the current user.
+    ///
+    /// Sends a logout message to the server, invalidates the session token,
+    /// and clears the user's status and token.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Logout successful.
+    /// * `Err(Error)` - Logout failed.
     pub fn log_out(&mut self) -> Result<(), Error> {
         let token = self.get_token()?;
 
@@ -283,17 +418,18 @@ impl Controller {
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------
-    // SERVER COMS THREAD
+    // SERVER COMMUNICATION THREAD
 
+    // Spawns a background thread to receive and handle messages from the signaling server
     fn start_server_receiver(
         &self,
-        username: &String,
+        username: &str,
         server_client_addr: SocketAddr,
     ) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let logged_in = self.logged_in.clone();
         let config = self.config.clone();
-        let username = username.clone();
+        let username = username.to_owned();
         let user_status = self.users_status.clone();
 
         let mut stream = connect_tls(
@@ -364,13 +500,20 @@ impl Controller {
     }
 
     //----------------------------------------------------------------------------------------------------------------------------
-    // GETTERS
+    // PUBLIC ACCESSORS
 
+    /// Retrieves the status of all known users.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(HashMap)` - Map of usernames to their current status.
+    /// * `Err(Error)` - Failed to read user status (poisoned lock).
     pub fn get_users_status(&self) -> Result<HashMap<String, UserStatus>, Error> {
         let users_status = self.users_status.read().map_err(|_| Error::PoisonedLock)?;
         Ok(users_status.clone())
     }
 
+    // Helper function to retrieve the session token if the user is logged in
     fn get_token(&self) -> Result<String, Error> {
         if let Some(token) = &self.token {
             Ok(token.clone())
@@ -381,24 +524,27 @@ impl Controller {
         }
     }
 
+    // Helper function to retrieve the current username
     pub(crate) fn get_username(&self) -> Result<String, Error> {
         self.get_token()
     }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------
-// UI COMS
+// PRIVATE HELPER FUNCTIONS
 
+// Sends an event to the UI and logs out if the channel is disconnected
 fn send_event_or_log_out(
     event_tx: &Sender<AppEvent>,
     event: AppEvent,
     logged_in: &Arc<AtomicBool>,
 ) {
-    if let Err(_) = event_tx.send(event) {
+    if event_tx.send(event).is_err() {
         logged_in.store(false, Ordering::SeqCst);
     }
 }
 
+// Sends a client message and waits for the server response
 fn send_message(
     msg: ClientMessage,
     stream: &mut StreamOwned<ClientConnection, TcpStream>,
@@ -414,6 +560,7 @@ fn send_message(
     }
 }
 
+// Sends a client response to the server
 fn send_response(
     response: ClientResponse,
     stream: &mut StreamOwned<ClientConnection, TcpStream>,
@@ -423,6 +570,7 @@ fn send_response(
         .map_err(|e| Error::MapError(e.to_string()))
 }
 
+// Processes a server message and generates the appropriate response
 fn get_response_for_server_message(
     server_msg: ServerMessage,
     event_tx: &Sender<AppEvent>,
@@ -463,6 +611,7 @@ fn get_response_for_server_message(
     }
 }
 
+// Updates the status of a user in the shared status map
 fn update_status(
     username: String,
     status: UserStatus,
@@ -477,6 +626,21 @@ fn update_status(
     Ok(())
 }
 
+/// Establishes a secure TLS connection to the signaling server.
+///
+/// Creates a TCP connection to the server and wraps it with TLS encryption using
+/// the provided certificate and server name for verification.
+///
+/// # Parameters
+///
+/// * `server_addr` - Socket address of the server.
+/// * `ca_cert_path` - Path to the CA certificate file for server verification.
+/// * `server_name_str` - Expected server name for TLS verification.
+///
+/// # Returns
+///
+/// * `Ok(stream)` - Secure TLS stream to the server.
+/// * `Err(Error)` - Failed to establish connection or configure TLS.
 pub fn connect_tls(
     server_addr: SocketAddr,
     ca_cert_path: String,

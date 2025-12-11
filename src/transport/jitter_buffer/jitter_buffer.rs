@@ -42,7 +42,7 @@ impl<const N: usize> JitterBuffer<N>  {
 
     pub(crate) fn add(&mut self, packet: RtpPacket) {
         let seq = packet.sequence_number;
-        if (self.i_frame_needed && !packet.is_i_frame)
+        if self.i_frame_needed && !packet.is_i_frame
         {
             return
         }
@@ -70,7 +70,7 @@ impl<const N: usize> JitterBuffer<N>  {
                     self.write_seq = Some(seq);
                     self.packets[pos] = Some(packet);
 
-                    if  (self.read_idx > old_write_idx && self.read_idx <= self.write_idx) {
+                    if  self.read_idx > old_write_idx && self.read_idx <= self.write_idx {
                     }
 
                     if (self.read_idx <= old_write_idx && pos >= self.read_idx && pos <= old_write_idx)
@@ -120,10 +120,7 @@ impl<const N: usize> JitterBuffer<N>  {
         let mut chunks_processed = 0;
 
         for _ in 0..N {
-            let packet = match self.packets[idx].clone() {
-                Some(p) => p,
-                None => return None
-            };
+            let packet = self.packets[idx].clone()?;
 
             if packet.timestamp != ts {
                 return None;

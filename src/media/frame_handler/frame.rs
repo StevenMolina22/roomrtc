@@ -1,12 +1,13 @@
 use super::FrameError as Error;
-use opencv::{imgproc, core};
+use opencv::{imgproc};
 use opencv::prelude::*;
 
 /// An in-memory video frame used by the frame handler.
 ///
 /// `Frame` represents raw (decoded) frame data or intermediate
 /// conversions (for example, RGB data produced from YUV input). The
-/// struct carries the pixel bytes, the frame dimensions and an id.
+/// struct carries the pixel bytes, the frame dimensions and the capture
+/// timestamp in milliseconds.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     /// Raw pixel bytes.
@@ -43,7 +44,7 @@ impl Frame {
 
         let mut rgb_mat = Mat::default();
 
-        imgproc::cvt_color(&yuv_mat, &mut rgb_mat, imgproc::COLOR_YUV2RGB_I420, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT)
+        imgproc::cvt_color(&yuv_mat, &mut rgb_mat, imgproc::COLOR_YUV2RGB_I420, 0)
             .map_err(|_| Error::TypeConversionError)?;
 
         Ok(Self {
@@ -62,10 +63,10 @@ impl Frame {
     /// properly formatted.
     ///
     /// Expected layout:
-    /// - bytes 0..8: `id`
-    /// - bytes 8..12: `width`
-    /// - bytes 12..16: `height`
-    /// - bytes 16..: raw pixel bytes
+    /// - bytes 0..16: `frame_time` as little-endian `u128`
+    /// - bytes 16..20: `width` as little-endian `u32`
+    /// - bytes 20..24: `height` as little-endian `u32`
+    /// - bytes 24..: raw pixel bytes
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < 24 {
@@ -88,6 +89,11 @@ impl Frame {
 
     /// Serialize the `Frame` into bytes in the same layout consumed by
     /// `from_bytes`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DimensionConversionError`] if width or height
+    /// cannot be converted to `u32`.
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::with_capacity(24 + self.data.len());
         buf.extend_from_slice(&self.frame_time.to_le_bytes());

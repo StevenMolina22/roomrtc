@@ -134,8 +134,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
                     break;
                 }
 
-                if let Err(e) =
-                    report_socket.send(&RtcpPacket::ConnectivityReport(local_ssrc).to_bytes())
+                if report_socket.send(&RtcpPacket::ConnectivityReport(local_ssrc).to_bytes()).is_err()
                 {
                     break;
                 }
@@ -144,7 +143,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
             if connected.load(Ordering::SeqCst) {
                 connected.store(false, Ordering::SeqCst);
-                event_tx.send(AppEvent::CallEnded);
+                let _ = event_tx.send(AppEvent::CallEnded);
             }
         });
     }
@@ -194,7 +193,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 
             if connected.load(Ordering::SeqCst) {
                 connected.store(false, Ordering::SeqCst);
-                event_tx.send(AppEvent::CallEnded);
+                let _ = event_tx.send(AppEvent::CallEnded);
             }
         });
         Ok(())

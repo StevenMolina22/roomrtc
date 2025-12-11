@@ -40,7 +40,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
         })
     }
 
-    pub fn start(&self, event_tx: Sender<AppEvent>) -> Result<Sender<Vec<u8>>, Error> {
+    pub fn start(&self, _event_tx: Sender<AppEvent>) -> Result<Sender<Vec<u8>>, Error> {
         let (tx, rx) = mpsc::channel();
 
         let rtp_socket = self
@@ -59,7 +59,7 @@ impl<S: Socket + Send + Sync + 'static> RtpSender<S> {
 
                 let protected_data = match rx.recv() {
                     Ok(p) => p,
-                    Err(e) => {
+                    Err(_) => {
                         break;
                     }
                 };

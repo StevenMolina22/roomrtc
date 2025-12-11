@@ -4,19 +4,53 @@ use std::net::AddrParseError;
 /// Errors that can occur when operating the controller.
 ///
 /// This enum collects the various failure modes the controller may
-/// expose when creating sockets, interacting with RTP senders and
-/// receivers, managing threads, or working with internal maps and
-/// locks. Variants carry contextual error information where
-/// available.
+/// expose when creating sockets, interacting with RTP media components,
+/// managing threads, authentication operations, call handling, or working
+/// with internal locks and maps. Variants carry contextual error information
+/// where available.
+///
+/// # Variants
+///
+/// - `Error`: Generic error with a message.
+/// - `ConnectingToServerFailed`: Failed to establish connection to server.
+/// - `IOError`: Input/output operation failed.
+/// - `BadResponse`: Unexpected response format from server.
+/// - `LogInFailed`: Authentication login failed.
+/// - `SignUpFailed`: User registration failed.
+/// - `LogOutFailed`: Logout operation failed.
+/// - `ParsingSocketAddressError`: Failed to parse socket address.
+/// - `BindingAddressError`: Failed to bind socket to address.
+/// - `ConnectionSocketError`: Socket connection establishment failed.
+/// - `CloningSocketError`: Failed to clone socket for multi-threaded use.
+/// - `PoisonedLock`: Poisoned mutex or RwLock encountered.
+/// - `MapError`: Generic mapping/lookup operation error.
+/// - `ConnectionNotStarted`: Connection not initialized when required.
+/// - `ConnectionClosed`: Connection closed unexpectedly.
+/// - `NotLoggedInError`: User not authenticated.
+/// - `CallError`: Call operation failed.
+/// - `CallRefused`: Call was rejected by peer.
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ControllerError {
+    /// Generic error with a message.
     Error(String),
+    
+    /// Failed to establish connection to the server.
     ConnectingToServerFailed,
+    
+    /// Input/output operation error.
     IOError(String),
+    
+    /// Unexpected or malformed response from server.
     BadResponse,
+    
+    /// Login authentication failed.
     LogInFailed(String),
+    
+    /// User registration/signup failed.
     SignUpFailed(String),
+    
+    /// Logout operation failed.
     LogOutFailed(String),
 
     /// Failed to parse a socket address.
@@ -43,15 +77,21 @@ pub enum ControllerError {
     /// The connection was closed while an operation was in progress.
     ConnectionClosed,
 
+    /// User is not logged in.
     NotLoggedInError,
+    
+    /// Call operation failed with details.
     CallError(String),
+    
+    /// Call was rejected by the peer.
     CallRefused,
 }
 
 impl Display for ControllerError {
-    /// Format a readable representation of the controller error.
+    /// Formats a readable representation of the controller error.
     ///
-    /// These messages include brief context and the underlying error details where present.
+    /// This implementation provides human-readable error messages that include
+    /// context and underlying error details where available.
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match self {
             Self::Error(e) => write!(f, "{e}"),

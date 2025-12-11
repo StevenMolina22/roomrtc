@@ -2,13 +2,26 @@ use crate::tools::socket::Socket;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// A mock socket implementation for testing purposes.
+///
+/// This struct simulates socket operations by maintaining internal buffers
+/// for sent and received data, allowing controlled testing of network behavior.
 #[derive(Clone)]
 pub struct MockSocket {
+    /// Buffer containing data that will be returned by `recv_from` operations.
     pub(crate) data_to_receive: Arc<Mutex<Vec<Vec<u8>>>>,
+    /// Buffer storing data that was sent through `send` operations.
     pub(crate) sent_data: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
 impl MockSocket {
+    /// Creates a new mock socket with pre-defined data to receive.
+    ///
+    /// # Arguments
+    /// * `data` - A vector of byte vectors representing packets to be received.
+    ///
+    /// # Returns
+    /// A new `MockSocket` instance.
     #[must_use]
     pub fn new(data: Vec<Vec<u8>>) -> Self {
         Self {
@@ -19,6 +32,7 @@ impl MockSocket {
 }
 
 impl Socket for MockSocket {
+    /// Stores the sent data in the internal buffer.
     fn send(&self, buf: &[u8]) -> Result<usize, std::io::Error> {
         self.sent_data
             .lock()
@@ -28,6 +42,7 @@ impl Socket for MockSocket {
         Ok(buf.len())
     }
 
+    /// Retrieves the next packet from the mock buffer and copies it to the provided buffer.
     fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, std::net::SocketAddr), std::io::Error> {
         let mut data = self
             .data_to_receive
@@ -47,12 +62,13 @@ impl Socket for MockSocket {
         Ok((len, "127.0.0.1:1234".parse().unwrap()))
     }
 
+    /// Mock implementation that does nothing (timeout not simulated).
     fn set_read_timeout(&self, _dur: Option<Duration>) -> Result<(), std::io::Error> {
         Ok(())
     }
 
+    /// Clones the socket sharing the same internal state.
     fn try_clone(&self) -> Result<Self, std::io::Error> {
-        // Clona el socket compartiendo el mismo estado interno
         Ok(self.clone())
     }
 }

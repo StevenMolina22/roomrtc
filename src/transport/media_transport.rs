@@ -134,10 +134,10 @@ impl MediaTransport {
         self.connected.store(false, Ordering::SeqCst);
         self.rtp_socket
             .set_read_timeout(None)
-            .map_err(|e| Error::SocketConfigFailed)?;
+            .map_err(|_| Error::SocketConfigFailed)?;
         self.rtcp_socket
             .set_read_timeout(None)
-            .map_err(|e| Error::SocketConfigFailed)?;
+            .map_err(|_| Error::SocketConfigFailed)?;
 
         if let Some(rtcp_handler) = &self.rtcp_handler
             && let Ok(rtcp_handler) = rtcp_handler.lock()

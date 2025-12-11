@@ -1,17 +1,29 @@
 use std::fmt::Display;
 
 #[derive(Debug)]
+/// Errors emitted by the server layer when handling connections and users.
 pub enum ServerError {
+    /// Failed to open the user data file.
     OpenUserDataFileError,
+    /// Failed to write the user data file.
     WriteUserDataFileError,
+    /// Attempted to operate on an unknown user.
     UserDoesNotExist(String),
+    /// A synchronization primitive was poisoned.
     PoisonedLock,
+    /// User is busy or otherwise unavailable.
     UserNotAvailable(String),
+    /// Generic mapping/conversion error wrapper.
     MapError(String),
+    /// Could not determine a valid server IP address.
     IPNotFound(String),
+    /// Failed to bind a listening socket.
     FailedToBindAddress,
+    /// Failed to establish a connection.
     ConnectionError(String),
+    /// Server has been turned off.
     ServerOff,
+    /// Input did not meet expected format.
     InvalidFormat,
 }
 

@@ -5,7 +5,7 @@ use openh264::formats::YUVSource;
 /// A basic H.264 video decoder using the `OpenH264` library.
 ///
 /// This struct wraps the `OpenH264` decoder and provides a simple way to
-/// decode encoded H.264 frame data (`&[u8]`) into a YUV.
+/// decode encoded H.264 frame data (`&[u8]`) into RGB bytes.
 ///
 /// Typically, this is used on the receiving side of a video stream,
 /// after collecting and reassembling encoded RTP/UDP packets into a full frame.
@@ -27,11 +27,10 @@ impl Decoder {
         Ok(Self { decoder })
     }
 
-    /// Decodes a single H.264-encoded frame into raw YUV data.
+    /// Decodes a single H.264-encoded frame into raw RGB data.
     ///
-    /// Takes a slice of encoded H.264 bytes and attempts to decode it
-    /// into a `RGB` frame data.
-    /// The decoded frame data can then be displayed.
+    /// Takes a slice of encoded H.264 bytes, decodes it to YUV, and converts
+    /// the result to RGB bytes along with the frame dimensions.
     ///
     /// # Errors
     ///

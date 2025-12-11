@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
-use opencv::{imgproc, prelude::*, videoio, core};
+use opencv::{imgproc, prelude::*, videoio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc};
 use std::sync::atomic::AtomicBool;
@@ -9,39 +9,65 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
 use crate::clock::Clock;
 
+/// Trait for objects that produce frames from a video source.
+///
+/// Implementers of this trait are responsible for capturing frames from
+/// a media source and delivering them through a channel.
 pub trait FrameSource: Send {
-    /// Start the capture thread.
-    /// Returns a Receiver to get frames from.
+    /// Starts the capture thread.
+    ///
+    /// Spawns a background thread that continuously captures frames from the source
+    /// and sends them through the returned receiver.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Receiver<Frame>)` - Channel receiver for frame delivery.
+    /// * `Err(Error)` - If the source cannot be started.
     fn start(&mut self) -> Result<Receiver<Frame>, Error>;
 
-    /// Signal the capture thread to stop.
+    /// Signals the capture thread to stop.
+    ///
+    /// Gracefully stops frame capture and terminates the background thread.
     fn stop(&self);
 }
 
-/// A camera that runs a capture thread and produces
-/// `Frame` instances over a channel.
+/// A camera device that captures frames and produces them through a channel.
 ///
-/// `Camera` is a convenience wrapper around `OpenCV`'s `VideoCapture`.
-/// It exposes `start`/`stop` operations and internally uses shared
-/// state (`Arc<RwLock<...>>`) to control the capture thread and to
-/// produce incremental frame ids.
+/// `Camera` is a wrapper around OpenCV's `VideoCapture` that provides convenient
+/// frame capture with thread safety. It manages a background capture thread that
+/// reads frames from the camera device, converts them to RGB format, and sends
+/// them through a channel.
+///
+/// # Fields
+///
+/// * `running` - Atomic flag to control the capture thread lifecycle.
+/// * `config` - Application configuration containing camera settings.
+/// * `clock` - Clock instance for timestamping captured frames.
 pub struct Camera {
     /// Flag used to signal the capture thread to keep running.
     running: Arc<AtomicBool>,
 
-    /// Config file 
+    /// Application configuration with camera parameters.
     config: Arc<Config>,
     
-    /// Clock of the program
+    /// Clock for frame timestamping.
     clock: Arc<Clock>
 }
 
 impl Camera {
-    /// Create a new `Camera` configured with `media_config`.
+    /// Creates a new camera instance with the provided configuration.
+    ///
+    /// Initializes the camera with the given clock and media configuration,
+    /// but does not start capturing frames until `start()` is called.
     ///
     /// # Parameters
-    /// - `media_config`: media capture configuration (camera index,
-    ///   frame size and frame rate).
+    ///
+    /// * `clock` - Clock instance for frame timestamping.
+    /// * `media_config` - Application configuration with camera index, frame size, and frame rate.
+    ///
+    /// # Returns
+    ///
+    /// A new `Camera` instance ready to be started.
     #[must_use]
     pub fn new(clock: Arc<Clock>, media_config: &Arc<Config>) -> Self {
         Self {
@@ -51,14 +77,16 @@ impl Camera {
         }
     }
 
-    /// Start the capture thread and return a channel `Receiver<Frame>`
-    /// where captured frames will be sent.
+    /// Starts the capture thread and returns a frame receiver.
     ///
-    /// The returned receiver receives `Frame` instances continuously
-    /// until `stop()` is called or the sender is dropped. This method
-    /// spawns a background thread that captures frames from `OpenCV`'s
-    /// `VideoCapture` and converts them to RGB `Frame`s at the
-    /// configured frame rate.
+    /// Spawns a background thread that continuously captures frames from the camera device,
+    /// converts them from BGR to RGB format, and sends them through the returned channel.
+    /// Frames are captured at the configured frame rate and resolution.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Receiver<Frame>)` - Channel receiver for captured frames.
+    /// * `Err(Error)` - If the camera cannot be opened, configured, or capture fails.
     fn start_internal(&mut self) -> Result<Receiver<Frame>, Error> {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
@@ -106,7 +134,6 @@ impl Camera {
                     &mut rgb,
                     imgproc::COLOR_BGR2RGB,
                     0,
-                    core::AlgorithmHint::ALGO_HINT_DEFAULT
                 )
                 .is_err()
                 {
@@ -136,18 +163,26 @@ impl Camera {
         Ok(rx)
     }
 
-    /// Stop the capture thread by clearing the running flag. The
-    /// capture thread will observe this and exit shortly.
+    /// Stops the capture thread.
+    ///
+    /// Clears the running flag, which signals the background capture thread to exit gracefully.
+    /// The thread will observe this flag and stop capturing frames.
     fn stop_internal(&self) {
         self.running.store(false, SeqCst);
     }
 }
 
 impl FrameSource for Camera {
+    /// Starts the camera frame capture.
+    ///
+    /// Delegates to the internal start implementation.
     fn start(&mut self) -> Result<Receiver<Frame>, Error> {
         self.start_internal()
     }
 
+    /// Stops the camera frame capture.
+    ///
+    /// Delegates to the internal stop implementation.
     fn stop(&self) {
         self.stop_internal()
     }

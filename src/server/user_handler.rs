@@ -10,6 +10,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
+/// Manages a single client connection and delegates to `OperatingServer`.
 pub struct UserHandler {
     op_server: OperatingServer,
     logger: Logger,
@@ -26,7 +27,6 @@ pub struct UserHandler {
 /// - the client disconnects,
 /// - any I/O error occurs,
 /// - the received bytes cannot be parsed into a valid message.
-
 impl UserHandler {
     pub fn new(
         users: Arc<RwLock<HashMap<String, UserData>>>,
@@ -147,7 +147,7 @@ impl UserHandler {
 ///
 /// Any I/O error is logged but not returned to the caller.
 fn send_response(stream: &mut StreamOwned<ServerConnection, TcpStream>, response: ServerResponse) {
-    stream.write_all(&response.to_bytes());
+    let _ = stream.write_all(&response.to_bytes());
 }
 
 #[cfg(test)]
@@ -233,11 +233,11 @@ mod tests {
         
         assert!(matches!(response, ServerResponse::Error(_))); 
         
-        if let Ok(users) = users_ref.read() {
-            if let Some(user) = users.get("leaver") {
+        if let Ok(users) = users_ref.read()
+            && let Some(user) = users.get("leaver") {
                 assert_eq!(user.status, UserStatus::Offline);
             }
-        }
+        
     }
 
     #[test]
@@ -247,11 +247,11 @@ mod tests {
         // Creamos usuario
         handler.op_server.signup_user("busy".into(), "pass".into());
         
-        if let Ok(mut u) = users_ref.write() {
-            if let Some(data) = u.get_mut("busy") {
+        if let Ok(mut u) = users_ref.write()
+            && let Some(data) = u.get_mut("busy") {
                 data.status = UserStatus::Occupied("other".into());
             }
-        }
+        
 
         let msg = ClientMessage::CallHangup { token: "busy".into() };
         let response = handler.handle_client_message(msg);

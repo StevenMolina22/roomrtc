@@ -1,6 +1,11 @@
 use openh264::formats::YUVSource;
 use yuv::YuvPlanarImageMut;
 
+/// Adapter that exposes a `YuvPlanarImageMut` as an `openh264` `YUVSource`.
+///
+/// This is used by the encoder to feed raw YUV420 planar images into
+/// `OpenH264`. It provides dimensions, strides, and plane accessors
+/// expected by the encoder API.
 pub struct YuvImgSource<'a> {
     pub(crate) img: &'a YuvPlanarImageMut<'a, u8>,
 }

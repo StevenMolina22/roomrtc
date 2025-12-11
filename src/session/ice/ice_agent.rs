@@ -124,7 +124,6 @@ impl IceAgent {
     ///
     /// Note: server-reflexive (srflx) candidates discovered via STUN are
     /// skipped when forming Host-Host pairs in this implementation.
-
     fn create_candidate_pair(&mut self) -> Result<(), Error> {
         if self.local_candidates.is_empty() {
             return Err(Error::NoLocalCandidates);
@@ -416,7 +415,7 @@ mod tests {
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
 
-            loop {
+            while let Ok((amt, src)) = remote_socket.recv_from(&mut buf) {
                 if let Ok((amt, src)) = remote_socket.recv_from(&mut buf) {
                     let msg = &buf[..amt];
                     if msg == b"PING" {

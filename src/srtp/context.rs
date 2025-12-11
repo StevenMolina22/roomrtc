@@ -114,6 +114,10 @@ impl SrtpContext {
 }
 
 impl SrtpContext {
+    /// Returns the write keys (encryption key and salt) based on the perspective.
+    ///
+    /// # Arguments
+    /// * `is_client` - If true, returns client keys; otherwise returns server keys.
     fn get_write_keys(&self, is_client: bool) -> (&[u8], &[u8]) {
         if is_client {
             (&self.client_write_key, &self.client_write_salt)
@@ -122,6 +126,10 @@ impl SrtpContext {
         }
     }
 
+    /// Returns the read keys (decryption key and salt) based on the perspective.
+    ///
+    /// # Arguments
+    /// * `is_client` - If true, returns server keys (client reads from server); otherwise returns client keys.
     fn get_read_keys(&self, is_client: bool) -> (&[u8], &[u8]) {
         if is_client {
             (&self.server_write_key, &self.server_write_salt)
@@ -130,6 +138,16 @@ impl SrtpContext {
         }
     }
 
+    /// Applies AES-128 in CTR mode for encryption or decryption.
+    ///
+    /// # Arguments
+    /// * `key` - The encryption/decryption key.
+    /// * `iv` - The initialization vector.
+    /// * `data` - The data to encrypt or decrypt.
+    /// * `encrypting` - If true, encrypts; otherwise decrypts.
+    ///
+    /// # Errors
+    /// Returns `SrtpError` if the cryptographic operation fails.
     fn apply_aes_ctr(
         key: &[u8],
         iv: &[u8],
@@ -145,6 +163,16 @@ impl SrtpContext {
         result.map_err(SrtpError::from)
     }
 
+    /// Calculates the HMAC-SHA1 authentication tag for the given data.
+    ///
+    /// Returns the first 10 bytes of the HMAC as specified by SRTP.
+    ///
+    /// # Arguments
+    /// * `key` - The HMAC key.
+    /// * `data` - The data to authenticate.
+    ///
+    /// # Errors
+    /// Returns `SrtpError` if the HMAC calculation fails.
     fn calculate_hmac(key: &[u8], data: &[u8]) -> Result<Vec<u8>, SrtpError> {
         let pkey = PKey::hmac(key).map_err(SrtpError::from)?;
         let mut signer = Signer::new(MessageDigest::sha1(), &pkey).map_err(SrtpError::from)?;
@@ -154,6 +182,17 @@ impl SrtpContext {
         Ok(full_hmac[0..10].to_vec())
     }
 
+    /// Generates the initialization vector (IV) for AES-CTR encryption.
+    ///
+    /// Combines the salt with the SSRC and sequence number according to SRTP specifications.
+    ///
+    /// # Arguments
+    /// * `salt` - The salt value.
+    /// * `ssrc` - The synchronization source identifier.
+    /// * `sequence_number` - The packet sequence number.
+    ///
+    /// # Returns
+    /// A 16-byte initialization vector.
     fn get_iv(salt: &[u8], ssrc: u32, sequence_number: u64) -> [u8; 16] {
         let mut iv = [0u8; 16];
 

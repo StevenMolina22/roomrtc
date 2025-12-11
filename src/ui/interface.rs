@@ -328,7 +328,7 @@ impl RoomRTCApp {
 
             if let Err(e) = self.update_video_textures(ctx) {
                 self.warning_msg = Some(e.to_string());
-                if let Err(_) = self.controller.hang_up() {
+                if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
                     self.reset_after_call();
@@ -356,7 +356,7 @@ impl RoomRTCApp {
 
             let exit_btn = egui::Button::new("End call").min_size(egui::vec2(150.0, 40.0));
             if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
-                if let Err(_) = self.controller.hang_up() {
+                if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
                     self.reset_after_call();
@@ -508,7 +508,7 @@ impl RoomRTCApp {
                 self.view = View::CallIncoming(peer, offer_sdp);
             }
             AppEvent::CallEnded => {
-                if let Err(_) = self.controller.hang_up() {
+                if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
                     self.view = View::CallEnded;
@@ -516,7 +516,7 @@ impl RoomRTCApp {
                 self.reset_after_call();
             }
             AppEvent::Error(e) => {
-                if let Err(_) = self.controller.hang_up() {
+                if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
                     self.warning_msg = Some(e);

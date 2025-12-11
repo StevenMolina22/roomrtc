@@ -18,21 +18,53 @@ use std::thread;
 use udp_dtls::{DtlsAcceptor, DtlsConnector, DtlsStream, SignatureAlgorithm, UdpChannel};
 use crate::transport::rtcp::metrics::{ReceiverStats, SenderStats};
 
+/// Media transport layer managing RTP/RTCP communication over DTLS/SRTP.
+///
+/// This struct orchestrates the complete media transport pipeline including:
+/// - DTLS handshake for secure key exchange
+/// - SRTP encryption/decryption of RTP packets
+/// - RTP sender and receiver threads
+/// - RTCP reporting for quality monitoring
+///
+/// The transport binds to local UDP sockets for RTP and RTCP (port+1),
+/// establishes a DTLS connection with the remote peer, derives SRTP keys,
+/// and spawns background threads for sending and receiving encrypted media.
 pub struct MediaTransport {
+    /// Application configuration (network, RTCP, RTP settings).
     config: Arc<Config>,
 
+    /// Local address where the RTP socket is bound.
     pub rtp_address: SocketAddr,
 
+    /// UDP socket for RTP media packets.
     pub rtp_socket: UdpSocket,
+    /// UDP socket for RTCP control packets (typically RTP port + 1).
     rtcp_socket: UdpSocket,
 
+    /// RTCP report handler managing periodic connectivity reports.
     rtcp_handler: Option<Arc<Mutex<RtcpReportHandler<UdpSocket>>>>,
 
+    /// Shared connection status flag coordinating thread lifecycle.
     connected: Arc<AtomicBool>,
+    /// Logger instance for transport-level logging.
     logger: Logger,
 }
 
 impl MediaTransport {
+    /// Create a new `MediaTransport` instance by binding local RTP and RTCP sockets.
+    ///
+    /// Binds a UDP socket to an ephemeral port for RTP and another socket to port+1
+    /// for RTCP. The bind address is taken from the application configuration.
+    ///
+    /// # Parameters
+    /// - `config`: application configuration containing network settings.
+    /// - `logger`: logger instance for transport-level messages.
+    ///
+    /// # Returns
+    /// A configured `MediaTransport` ready to `start()`, or an error if binding fails.
+    ///
+    /// # Errors
+    /// Returns `Error::BindingError` if socket binding fails.
     pub fn new(config: &Arc<Config>, logger: Logger) -> Result<Self, Error> {
         let rtp_socket = UdpSocket::bind(format!("{}:0", config.network.bind_address))
             .map_err(|e| Error::BindingError(e.to_string()))?;
@@ -60,6 +92,31 @@ impl MediaTransport {
         })
     }
 
+    /// Start the media transport by establishing DTLS, deriving SRTP keys, and spawning RTP/RTCP threads.
+    ///
+    /// This method performs the following steps:
+    /// 1. Establishes a DTLS connection with the remote peer and verifies the fingerprint
+    /// 2. Exports keying material and initializes SRTP context
+    /// 3. Starts the RTCP report handler for connectivity monitoring
+    /// 4. Spawns RTP sender and receiver threads with SRTP protection/unprotection layers
+    ///
+    /// # Parameters
+    /// - `remote_rtp_address`: remote peer's RTP socket address.
+    /// - `remote_rtcp_address`: remote peer's RTCP socket address.
+    /// - `event_tx`: channel for application events (stats updates, call end).
+    /// - `local_setup_role`: DTLS setup role (active/passive/actpass/holdconn).
+    /// - `expected_fingerprint`: peer's certificate fingerprint for verification.
+    /// - `local_cert`: local certificate for DTLS handshake.
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// - Sender channel for outgoing RTP packets
+    /// - Receiver channel for incoming RTP packets
+    /// - Shared connection status flag
+    /// - Shared receiver statistics
+    ///
+    /// # Errors
+    /// Returns an error if DTLS handshake, key export, SRTP setup, or thread spawning fails.
     pub fn start(
         &mut self,
         remote_rtp_address: SocketAddr,
@@ -134,6 +191,17 @@ impl MediaTransport {
         ))
     }
 
+    /// Stop the media transport by closing the connection and sending RTCP goodbye.
+    ///
+    /// This method sets the connection flag to false (signaling all threads to terminate),
+    /// clears socket timeouts, and sends an RTCP goodbye packet to notify the remote peer.
+    ///
+    /// # Returns
+    /// `Ok(())` on success, or an error if socket configuration or goodbye transmission fails.
+    ///
+    /// # Errors
+    /// Returns `Error::SocketConfigFailed` if clearing timeouts fails, or other errors
+    /// if RTCP goodbye transmission fails.
     pub fn stop(&mut self) -> Result<(), Error> {
         self.logger.info("Stopping MediaTransport...");
         self.connected.store(false, Ordering::SeqCst);
@@ -155,6 +223,23 @@ impl MediaTransport {
         Ok(())
     }
 
+    /// Spawn RTP sender and receiver threads with SRTP protection/unprotection layers.
+    ///
+    /// This internal method creates a four-layer pipeline for each direction:
+    /// - Outgoing: Application → Protection (encrypt) → Sender (network)
+    /// - Incoming: Receiver (network) → Unprotection (decrypt) → Application
+    ///
+    /// # Parameters
+    /// - `event_tx`: channel for application events.
+    /// - `srtp_ctx`: SRTP context for encryption/decryption.
+    /// - `role`: DTLS role determining key usage.
+    /// - `sender_metrics`: shared sender statistics for RTCP reporting.
+    ///
+    /// # Returns
+    /// A tuple of (sender channel for unprotected packets, receiver channel for unprotected packets).
+    ///
+    /// # Errors
+    /// Returns an error if RTCP handler is not initialized or thread spawning fails.
     fn spawn_rtp_threads(
         &self,
         event_tx: Sender<AppEvent>,
@@ -186,7 +271,19 @@ impl MediaTransport {
         Ok((local_unprotected_data_tx, remote_unprotected_data_rx))
     }
 
-    
+    /// Start the SRTP unprotection (decryption) layer for incoming packets.
+    ///
+    /// Spawns a thread that receives protected (encrypted) RTP packets from the network,
+    /// decrypts them using the SRTP context, deserializes them into `RtpPacket` structs,
+    /// and forwards them to the application layer.
+    ///
+    /// # Parameters
+    /// - `protected_rx`: receiver channel for incoming encrypted RTP data.
+    /// - `srtp_ctx`: shared SRTP context for decryption.
+    /// - `is_client`: whether this endpoint is the DTLS client (affects key selection).
+    ///
+    /// # Returns
+    /// A receiver channel for decrypted `RtpPacket` instances.
     fn start_unprotection_layer(&self, protected_rx: Receiver<Vec<u8>>, srtp_ctx: Arc<Mutex<SrtpContext>>, is_client: bool) -> Receiver<RtpPacket> {
         let (unprotected_tx, unprotected_rx) = mpsc::channel();
         let srtp_ctx = srtp_ctx.clone();
@@ -235,7 +332,19 @@ impl MediaTransport {
 
         unprotected_rx
     }
-    
+    /// Start the SRTP protection (encryption) layer for outgoing packets.
+    ///
+    /// Spawns a thread that receives unprotected `RtpPacket` instances from the application,
+    /// encrypts them using the SRTP context, and forwards the encrypted data to the network
+    /// sender thread.
+    ///
+    /// # Parameters
+    /// - `protected_tx`: sender channel for encrypted RTP data to be sent over the network.
+    /// - `srtp_ctx`: shared SRTP context for encryption.
+    /// - `is_client`: whether this endpoint is the DTLS client (affects key selection).
+    ///
+    /// # Returns
+    /// A sender channel for unprotected `RtpPacket` instances from the application.
     fn start_protection_layer(&self, protected_tx: Sender<Vec<u8>>, srtp_ctx: Arc<Mutex<SrtpContext>>, is_client: bool) -> Sender<RtpPacket> {
         let (unprotected_tx, unprotected_rx) = mpsc::channel();
         let srtp_ctx = srtp_ctx.clone();
@@ -267,7 +376,21 @@ impl MediaTransport {
         
         unprotected_tx
     }
-    
+    /// Start the SRTP sender for transmitting encrypted RTP packets to the network.
+    ///
+    /// Creates an `RtpSender` instance with a cloned socket and starts its background thread.
+    /// The sender receives encrypted RTP data and transmits it to the remote peer while
+    /// updating sender statistics for RTCP reporting.
+    ///
+    /// # Parameters
+    /// - `rtcp_handler`: RTCP report handler for session management.
+    /// - `sender_metrics`: shared sender statistics.
+    ///
+    /// # Returns
+    /// A sender channel for encrypted RTP data.
+    ///
+    /// # Errors
+    /// Returns an error if socket cloning or sender initialization fails.
     fn start_srtp_sender(
         &self,
         rtcp_handler: &Arc<Mutex<RtcpReportHandler<UdpSocket>>>,
@@ -292,6 +415,21 @@ impl MediaTransport {
             .map_err(|e| Error::MapError(e.to_string()))
     }
 
+    /// Start the SRTP receiver for receiving encrypted RTP packets from the network.
+    ///
+    /// Creates an `RtpReceiver` instance with a cloned socket and starts its background thread.
+    /// The receiver listens for incoming encrypted RTP data and forwards it to the
+    /// unprotection layer for decryption.
+    ///
+    /// # Parameters
+    /// - `rtcp_handler`: RTCP report handler for session management.
+    /// - `event_tx`: channel for application events.
+    ///
+    /// # Returns
+    /// A receiver channel for encrypted RTP data from the network.
+    ///
+    /// # Errors
+    /// Returns an error if socket cloning or receiver initialization fails.
     fn start_srtp_receiver(
         &self,
         rtcp_handler: &Arc<Mutex<RtcpReportHandler<UdpSocket>>>,
@@ -316,6 +454,24 @@ impl MediaTransport {
             .map_err(|e| Error::MapError(e.to_string()))
     }
 
+    /// Create a DTLS socket by performing handshake with the remote peer.
+    ///
+    /// Normalizes the DTLS setup role (actpass → active, holdconn → passive),
+    /// performs the DTLS handshake as client or server, and verifies the peer's
+    /// certificate fingerprint against the expected value from SDP.
+    ///
+    /// # Parameters
+    /// - `socket`: UDP socket for DTLS communication.
+    /// - `remote_addr`: remote peer's socket address.
+    /// - `local_setup_role`: DTLS setup role from SDP negotiation.
+    /// - `expected_fingerprint`: peer's certificate fingerprint for verification.
+    /// - `local_cert`: local certificate for DTLS handshake.
+    ///
+    /// # Returns
+    /// A `DtlsSocket` wrapper over the established DTLS connection.
+    ///
+    /// # Errors
+    /// Returns an error if handshake or fingerprint verification fails.
     fn create_dtls_socket(
         &self,
         socket: UdpSocket,
@@ -392,6 +548,24 @@ impl MediaTransport {
         Ok(DtlsSocket::new(stream, remote_addr))
     }
 
+    /// Verify the peer's certificate fingerprint against the expected value from SDP.
+    ///
+    /// Extracts the peer's certificate from the DTLS stream, computes its SHA-256
+    /// fingerprint, and compares it with the fingerprint advertised in the SDP offer/answer.
+    /// This prevents man-in-the-middle attacks by ensuring the certificate matches.
+    ///
+    /// # Parameters
+    /// - `stream`: established DTLS stream.
+    /// - `expected`: fingerprint from SDP (algorithm and bytes).
+    ///
+    /// # Returns
+    /// `Ok(())` if the fingerprint matches, otherwise an error.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The fingerprint algorithm is not SHA-256
+    /// - The peer certificate is missing
+    /// - The computed fingerprint doesn't match the expected value
     fn verify_peer_fingerprint(
         &self,
         stream: &DtlsStream<UdpChannel>,

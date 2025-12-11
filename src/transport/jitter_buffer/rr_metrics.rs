@@ -38,6 +38,17 @@ pub struct RrMetrics {
 }
 
 impl RrMetrics {
+    /// Create a new `RrMetrics` instance initialized with default values.
+    ///
+    /// All counters start at zero, and the max sequence number is set to `None`
+    /// (uninitialized state). The provided clock is used for calculating jitter
+    /// and arrival times.
+    ///
+    /// # Parameters
+    /// - `clock`: shared reference to the clock for timestamp calculations.
+    ///
+    /// # Returns
+    /// A new `RrMetrics` instance ready to track incoming RTP packets.
     pub(crate) fn new(clock: Arc<Clock>) -> RrMetrics {
         Self {
             max_sequence_number: None,
@@ -53,6 +64,23 @@ impl RrMetrics {
 }
 
 impl RrMetrics {
+    /// Update receiver metrics based on a newly received RTP packet.
+    ///
+    /// This method processes a received RTP packet and updates the internal metrics:
+    /// - Increments the packet received counter
+    /// - Detects packet loss based on sequence number gaps
+    /// - Calculates interarrival jitter using the RFC 3550 algorithm
+    /// - Records the latest RTP timestamp and arrival time
+    ///
+    /// # Parameters
+    /// - `packet`: the RTP packet to process and measure.
+    ///
+    /// # Algorithm Notes
+    /// - The sequence number is tracked with wrapping arithmetic to handle resets.
+    /// - Dropouts greater than `MAX_DROPOUT` (3000) are interpreted as sequence number
+    ///   wraparound rather than packet loss.
+    /// - Jitter is calculated as an exponential moving average of the absolute differences
+    ///   between the observed inter-packet time deltas and the RTP timestamp deltas.
     pub fn update_rr_metrics(&mut self, packet: &RtpPacket) {
         let seq_num = packet.sequence_number;
 

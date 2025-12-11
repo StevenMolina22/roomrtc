@@ -8,29 +8,70 @@ use crate::transport::rtcp::ReceiverStats;
 
 const TOLERANCE_MILLIS: u128 = 120;
 
+/// A ring buffer for managing out-of-order and delayed RTP packets.
+///
+/// This jitter buffer stores incoming RTP packets and delivers complete video frames
+/// in playout order. It handles out-of-order arrival, packet loss, and enforces playout
+/// deadlines to maintain real-time streaming quality.
+///
+/// # Overview
+/// - Uses a fixed-size circular buffer with generic capacity `N`.
+/// - Maintains separate read and write pointers for thread-safe operation.
+/// - Tracks sequence numbers to detect gaps and reordering.
+/// - Requires an I-frame before accepting any P-frames (video codec requirement).
+/// - Implements tolerance-based playout timing to balance latency and resilience.
+/// - Collects receiver statistics (packet loss, jitter) for RTCP reporting.
+///
+/// # Generic Parameters
+/// - `N`: the maximum number of RTP packets that can be buffered.
 pub struct JitterBuffer<const N: usize> {
+    /// Array of buffered RTP packets; `None` indicates an empty slot.
     packets: [Option<RtpPacket>; N],
 
+    /// Current read position in the circular buffer.
     read_idx: usize,
+    /// Current write position in the circular buffer.
     write_idx: usize,
 
+    /// Sequence number of the packet at the read position (tracks read progress).
     read_seq: Option<u64>,
+    /// Sequence number of the packet at the write position (tracks write progress).
     write_seq: Option<u64>,
 
+    /// Flag indicating whether an I-frame is required before accepting P-frames.
     i_frame_needed: bool,
 
+    /// RTP timestamp of the last frame that was successfully delivered to the decoder.
     last_frame_completed_timestamp: u128,
+    /// Local time of the last frame delivered, used for playout timing synchronization.
     last_deliver_timestamp: u128,
 
+    /// Shared reference to the system clock for timing calculations.
     clock: Arc<Clock>,
 
+    /// Shared receiver statistics (packet counts, loss, jitter) for RTCP reporting.
     metrics: Arc<Mutex<ReceiverStats>>,
+    /// Previous transit time (used in jitter calculation).
     last_transit: Option<i64>,
+    /// Time of the last received packet (for timeout detection).
     last_arrival: Option<Instant>,
+    /// Highest sequence number seen so far (for gap detection).
     max_seq_seen: u64,
 }
 
 impl<const N: usize> JitterBuffer<N>  {
+    /// Create a new `JitterBuffer` with the specified capacity and shared metrics.
+    ///
+    /// Initializes an empty circular buffer in the initial state, requiring an I-frame
+    /// before any packets are accepted. The buffer uses wrapping arithmetic for sequence
+    /// numbers to detect packet loss and reordering.
+    ///
+    /// # Parameters
+    /// - `clock`: shared reference to the system clock for playout timing.
+    /// - `metrics`: shared receiver statistics structure for tracking packet loss and jitter.
+    ///
+    /// # Returns
+    /// A new `JitterBuffer` ready to accept incoming RTP packets.
     pub fn new(clock: Arc<Clock>, metrics: Arc<Mutex<ReceiverStats>>) -> Self {
         Self {
             packets: std::array::from_fn(|_| None),
@@ -49,6 +90,19 @@ impl<const N: usize> JitterBuffer<N>  {
         }
     }
 
+    /// Add an RTP packet to the jitter buffer.
+    ///
+    /// This method inserts a packet into the circular buffer if it passes validation checks.
+    /// Packets are rejected if:
+    /// - An I-frame is required but this is a P-frame (delta frame).
+    /// - The packet timestamp is older than the last delivered frame.
+    /// - The sequence number is outside the valid acceptance window.
+    ///
+    /// If the packet is accepted, it is stored at the position determined by its sequence
+    /// number modulo the buffer capacity. Out-of-order arrival is handled transparently.
+    ///
+    /// # Parameters
+    /// - `packet`: the RTP packet to add to the buffer.
     pub(crate) fn add(&mut self, packet: RtpPacket) {
         self.update_stats(&packet);
 
@@ -104,6 +158,22 @@ impl<const N: usize> JitterBuffer<N>  {
         }
     }
 
+    /// Extract the next complete frame from the buffer for decoding.
+    ///
+    /// This method attempts to retrieve a complete video frame (all chunks) from the buffer.
+    /// If a complete frame is ready and within the playout deadline, it is removed from the
+    /// buffer and its payload data is returned. The method also applies playout delay
+    /// synchronization to maintain consistent frame delivery timing.
+    ///
+    /// # Returns
+    /// - `Some(data)`: the concatenated payload of a complete frame, ready for decoding.
+    /// - `None`: if no complete frame is available or if all frames have expired their
+    ///   playout deadline (triggering buffer resynchronization).
+    ///
+    /// # Playout Timing
+    /// The buffer enforces a tolerance window (`TOLERANCE_MILLIS`) to balance latency and
+    /// resilience. If frames arrive late (beyond the tolerance), the buffer resyncs and
+    /// requires a new I-frame.
     pub(crate) fn pop(&mut self) -> Option<Vec<u8>> {
         let mut ts;
         loop {
@@ -193,6 +263,17 @@ impl<const N: usize> JitterBuffer<N>  {
         None
     }
 
+    /// Resynchronize the buffer to the next I-frame or clear all buffered data.
+    ///
+    /// This method is called when the playout deadline has been exceeded or when
+    /// buffer overflow is detected. It searches forward for the next I-frame starting
+    /// from the read position. If found, the read pointer jumps to that I-frame and
+    /// the buffer continues. Otherwise, the entire buffer is cleared and reset to
+    /// the initial state (requiring a new I-frame).
+    ///
+    /// # Behavior
+    /// - If an I-frame is found: move to it and continue streaming.
+    /// - If no I-frame is found: clear all packets and reset read/write pointers.
     fn resync_or_clear(&mut self) {
         // NO ESTOY CONSIDERANDO EL CASO DE QUE WRITE ESCRIBA DESPUES DEL READ, CONSIDERAR DESPUES
         let read_timestamp = self.packets[self.read_idx].as_ref().unwrap().timestamp;
@@ -222,6 +303,17 @@ impl<const N: usize> JitterBuffer<N>  {
         self.i_frame_needed = true;
     }
 
+    /// Check if a packet's sequence number is within the valid acceptance window.
+    ///
+    /// This method validates whether a packet should be accepted based on its sequence
+    /// number relative to the buffer's read and write positions. It prevents acceptance
+    /// of packets that are too far in the past or otherwise outside the valid range.
+    ///
+    /// # Parameters
+    /// - `seq_num`: the RTP sequence number to validate.
+    ///
+    /// # Returns
+    /// `true` if the sequence number is within the acceptable range, `false` otherwise.
     fn valid_packet_seq_num(&self, seq_num: u64) -> bool {
         match &self.packets[self.read_idx] {
             Some(read_packet) => {
@@ -237,6 +329,18 @@ impl<const N: usize> JitterBuffer<N>  {
         }
     }
 
+    /// Check if a frame is within its playout deadline.
+    ///
+    /// This method determines whether a frame at the read position has arrived in time
+    /// to be played out. It uses the expected playout time (derived from the previous frame's
+    /// timing and the RTP timestamp delta) and compares it to the current clock time.
+    /// A tolerance window (`TOLERANCE_MILLIS`) is applied to balance latency and resilience.
+    ///
+    /// # Parameters
+    /// - `frame_timestamp`: the RTP timestamp of the frame to check.
+    ///
+    /// # Returns
+    /// `true` if the frame is within the playout deadline, `false` if it has expired.
     fn valid_playout_time(&self, frame_timestamp: u128) -> bool {
         if self.last_deliver_timestamp == 0 {
             return true;
@@ -250,6 +354,15 @@ impl<const N: usize> JitterBuffer<N>  {
         expiration_deadline >= actual
     }
 
+    /// Update receiver statistics based on a newly received packet.
+    ///
+    /// This method updates the shared receiver metrics with information about the
+    /// incoming packet, including packet count, loss detection, and jitter estimation.
+    /// The jitter is calculated using an exponential moving average of the transit time
+    /// (arrival time minus RTP timestamp) variations, as specified in RFC 3550.
+    ///
+    /// # Parameters
+    /// - `packet`: the RTP packet whose metrics should be recorded.
     fn update_stats(&mut self, packet: &RtpPacket) {
         let now = Instant::now();
         let arrival_time_ms = self.clock.now();

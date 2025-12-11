@@ -1,16 +1,24 @@
 use crate::transport::rtcp::metrics::{ReceiverStats, SenderStats};
 use std::fmt::Display;
 
+/// RTCP packet types for session control and quality reporting.
+///
+/// This enum represents the different types of RTCP packets exchanged
+/// between peers for monitoring connection quality and coordinating
+/// session lifecycle events (handshake, goodbye).
 #[derive(Debug, Clone, PartialEq)]
 pub enum RtcpPacket {
-    /// SR: Sender Report (Yo informo cuánto envié)
+    /// Sender Report containing statistics about transmitted media (packets sent, bytes sent).
     SenderReport(SenderStats),
 
-    /// RR: Receiver Report (Yo informo cómo recibo lo tuyo)
+    /// Receiver Report containing statistics about received media (packets received, lost, jitter).
     ReceiverReport(ReceiverStats),
 
+    /// Goodbye packet indicating session termination.
     Goodbye,
+    /// Hello packet for initial handshake phase.
     Hello,
+    /// Ready packet confirming readiness to proceed with the session.
     Ready,
 }
 
@@ -27,6 +35,16 @@ impl Display for RtcpPacket {
 }
 
 impl RtcpPacket {
+    /// Serialize the RTCP packet into bytes for network transmission.
+    ///
+    /// Each packet type has a specific binary format with a header followed by data:
+    /// - SenderReport: "SR" + packets_sent (4 bytes) + bytes_sent (8 bytes)
+    /// - ReceiverReport: "RR" + packets_received (4) + packets_lost (4) + jitter (4)
+    /// - Goodbye, Hello, Ready: Simple ASCII strings
+    ///
+    /// # Returns
+    /// A byte vector suitable for sending over the network.
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         match self {
@@ -48,6 +66,18 @@ impl RtcpPacket {
         buf
     }
 
+    /// Deserialize an RTCP packet from a byte slice.
+    ///
+    /// Parses the packet header to determine the type, then extracts the
+    /// payload fields in network byte order (big-endian). Returns `None`
+    /// if the data is too short or doesn't match any known packet format.
+    ///
+    /// # Parameters
+    /// - `data`: byte slice containing the serialized packet.
+    ///
+    /// # Returns
+    /// `Some(RtcpPacket)` if parsing succeeds, `None` otherwise.
+    #[must_use]
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
         // Sender Report: Header (2) + u32 (4) + u64 (8) = 14 bytes
         if data.starts_with(b"SR") && data.len() >= 14 {

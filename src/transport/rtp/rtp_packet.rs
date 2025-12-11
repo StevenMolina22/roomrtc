@@ -4,45 +4,58 @@ use std::default::Default;
 ///
 /// This struct models a simplified RTP-like packet used on top of the
 /// project's UDP sockets. The packet uses a custom binary layout
-/// that packs a small header followed by payload
-/// bytes.
+/// that packs a small header followed by payload bytes.
+///
+/// # Custom Header Format
+/// The packet serializes to a 33-byte header plus payload:
+/// - Byte 0: version (2 bits in upper bits)
+/// - Byte 1: marker flag (indicates last chunk of a frame)
+/// - Byte 2: total_chunks (number of chunks in complete frame)
+/// - Byte 3: is_i_frame flag (1 for I-frame, 0 for P-frame)
+/// - Byte 4: payload_type
+/// - Bytes 5-12: sequence_number (u64, big-endian)
+/// - Bytes 13-28: timestamp (u128, big-endian)
+/// - Bytes 29-32: ssrc (u32, big-endian)
+/// - Bytes 33+: payload data
 #[derive(Debug, Clone, Default)]
 pub struct RtpPacket {
-    /// Packet format version.
+    /// Packet format version (typically 2).
     pub version: u8,
     
-    /// Indicates if it is the last packet from a frame
+    /// Marker flag: 1 if this is the last packet of a frame, 0 otherwise.
     pub marker: u8,
 
-    /// Amount of chunks that compose a unique frame.
+    /// Total number of chunks (packets) that compose the complete frame.
     pub total_chunks: u8,
 
-    /// Determines if the frame is an intra frame or not.
+    /// Flag indicating if this frame is an I-frame (intra/keyframe) or P-frame (delta).
     pub is_i_frame: bool,
 
-    /// Payload type.
+    /// RTP payload type identifier.
     pub payload_type: u8,
 
-    /// Logical frame identifier for the packet's media frame.
+    /// Sequence number for ordering and loss detection.
     pub sequence_number: u64,
 
-    /// Timestamp associated with the sample/frame.
+    /// RTP timestamp associated with the media sample/frame.
     pub timestamp: u128,
 
-    /// SSRC (synchronization source) identifier.
+    /// Synchronization source (SSRC) identifier.
     pub ssrc: u32,
 
-    /// Payload bytes of the packet.
+    /// Encoded media payload bytes.
     pub payload: Vec<u8>,
 }
 
 impl RtpPacket {
-    /// Encode the packet into a sequence of bytes suitable for sending
-    /// over the network.
+    /// Encode the packet into a byte sequence suitable for network transmission.
     ///
-    /// The layout used here is a simple custom header followed by the
-    /// payload. The method allocates a buffer and appends fields in
-    /// network byte order.
+    /// Serializes the packet header and payload into a custom binary format
+    /// with all multi-byte integers in network byte order (big-endian). The
+    /// resulting buffer can be sent over UDP and reconstructed with `from_bytes`.
+    ///
+    /// # Returns
+    /// A byte vector containing the serialized packet (33 bytes + payload length).
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(33 + self.payload.len());
@@ -60,8 +73,17 @@ impl RtpPacket {
         buf
     }
 
-    /// Decode an `RtpPacket` from a byte slice previously produced by
-    /// `to_bytes`. Returns `None` if the slice is too short or malformed.
+    /// Decode an `RtpPacket` from a byte slice.
+    ///
+    /// Parses a byte slice previously produced by `to_bytes` and reconstructs
+    /// the original packet structure. All multi-byte integers are decoded from
+    /// network byte order (big-endian).
+    ///
+    /// # Parameters
+    /// - `data`: byte slice containing the serialized packet.
+    ///
+    /// # Returns
+    /// `Some(RtpPacket)` if the slice is valid and at least 33 bytes long, `None` otherwise.
     #[must_use]
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
         if data.len() < 33 {
@@ -92,7 +114,13 @@ impl RtpPacket {
     }
 }
 
-/// Helper: copy `N` bytes from the slice into a fixed-size array.
+/// Helper function to copy `N` bytes from a slice into a fixed-size array.
+///
+/// # Parameters
+/// - `slice`: byte slice to copy from (must have at least N bytes).
+///
+/// # Returns
+/// A fixed-size array containing the first N bytes.
 fn array_from_slice<const N: usize>(slice: &[u8]) -> [u8; N] {
     let mut arr = [0u8; N];
     arr.copy_from_slice(&slice[..N]);

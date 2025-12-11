@@ -16,11 +16,23 @@ use crate::transport::rtcp::metrics::{CallStats, ReceiverStats, SenderStats};
 ///
 /// It spawns a sender thread and a receiver thread; both threads share
 /// a connection status flag to indicate when the session is closed.
+///
+/// # Overview
+/// This handler manages the lifecycle of an RTCP reporting session, including:
+/// - Initial handshake with the remote peer
+/// - Periodic transmission of sender and receiver reports
+/// - Reception and processing of incoming reports
+/// - Connection state management via an atomic boolean flag
 pub struct RtcpReportHandler<S: Socket + Send + Sync + 'static> {
+    /// Socket used for sending and receiving RTCP packets.
     socket: Arc<S>,
+    /// Shared connection status flag indicating if the session is open.
     connected: Arc<AtomicBool>,
+    /// Configuration parameters for RTCP reporting (periods, timeouts, etc).
     config: RtcpConfig,
+    /// Local sender statistics for outgoing media (packets sent, bytes sent).
     local_sender_stats: Arc<Mutex<SenderStats>>,
+    /// Local receiver statistics for incoming media (packets received, losses, jitter).
     local_receiver_stats: Arc<Mutex<ReceiverStats>>,
 }
 
@@ -59,11 +71,38 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         }
     }
 
+    /// Start the RTCP reporting session by performing a handshake with the remote peer
+    /// and spawning background sender and receiver threads.
+    ///
+    /// This method initiates the RTCP session, then launches threads to periodically send reports and
+    /// listen for incoming reports from the peer.
+    ///
+    /// # Parameters
+    /// - `event_tx`: channel for sending application events (stats updates, call end notifications).
+    ///
+    /// # Returns
+    /// `Ok(())` on successful startup, or an `Error` if the handshake or thread spawning fails.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The socket handshake fails
+    /// - Thread spawning encounters an OS-level issue
     pub fn start(&self, event_tx: Sender<AppEvent>) -> Result<(), Error> {
         self.connection_handshake()?;
         self.start_report_handler(event_tx)
     }
 
+    /// Spawn the report sender and receiver threads that manage the active session.
+    ///
+    /// This is an internal helper that sets up both the background sender thread
+    /// (which transmits periodic reports) and the receiver thread (which listens
+    /// for incoming reports and goodbye messages).
+    ///
+    /// # Parameters
+    /// - `event_tx`: channel for dispatching RTCP-related events to the application.
+    ///
+    /// # Returns
+    /// `Ok(())` if threads are spawned successfully, otherwise an `Error`.
     fn start_report_handler(&self, event_tx: Sender<AppEvent>) -> Result<(), Error> {
         let sender_socket = Arc::clone(&self.socket);
         let receiver_socket = Arc::clone(&self.socket);
@@ -119,8 +158,16 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         Ok(())
     }
 
-    /// Spawn the background sender thread that periodically sends
-    /// connectivity reports until the connection is closed.
+    /// Spawn the background sender thread that periodically sends connectivity reports.
+    ///
+    /// The sender thread runs in the background and periodically transmits sender reports
+    /// and receiver reports according to the configured report period. It retrieves the
+    /// latest local statistics and sends them to the remote peer. The thread continues
+    /// until the connection flag is set to false, at which point it emits a call-end event.
+    ///
+    /// # Parameters
+    /// - `report_socket`: shared socket for sending RTCP packets to the remote peer.
+    /// - `event_tx`: channel for emitting local statistics updates and call-end events.
     fn start_report_sender(&self, report_socket: Arc<S>, event_tx: Sender<AppEvent>) {
         let connected = Arc::clone(&self.connected);
         let report_period_millis = self.config.report_period_millis;
@@ -169,11 +216,22 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         });
     }
 
-    /// Spawn the background receiver thread which listens for incoming
-    /// RTCP-style packets and updates the `connection_status` accordingly.
+    /// Spawn the background receiver thread that listens for incoming RTCP packets.
     ///
-    /// The receiver runs with a read timeout configured to `REPORT_RECEIVE_LIMIT`
-    /// and uses `try_receive_report` to parse and handle incoming data.
+    /// The receiver thread monitors incoming RTCP reports and goodbye messages from the
+    /// remote peer. It maintains a timeout counter and closes the session if no valid
+    /// packets are received within the configured timeout window. The thread will exit
+    /// after reaching the retry limit or upon receiving a goodbye packet.
+    ///
+    /// # Parameters
+    /// - `report_socket`: shared socket for receiving RTCP packets from the remote peer.
+    /// - `event_tx`: channel for emitting remote statistics updates and call-end events.
+    ///
+    /// # Returns
+    /// `Ok(())` if the receiver thread is spawned successfully, otherwise an `Error`.
+    ///
+    /// # Errors
+    /// Returns an error if socket configuration (setting read timeout) fails.
     fn start_report_receiver(
         &self,
         report_socket: Arc<S>,
@@ -220,11 +278,17 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         Ok(())
     }
 
-    /// Close the reporting connection by sending a `Goodbye` packet
-    /// and updating the `connection_status` to `Closed`.
+    /// Close the reporting connection by sending a `Goodbye` packet.
+    ///
+    /// This method signals to the remote peer that the RTCP session is ending
+    /// by transmitting a goodbye packet. The sender and receiver threads will
+    /// eventually notice the connection closure via the shared status flag.
     ///
     /// # Returns
-    /// A result indicating success or failure.
+    /// `Ok(())` on successful transmission, or an `Error` if the socket send fails.
+    ///
+    /// # Errors
+    /// Returns `Error::SendFailed` if the goodbye packet cannot be sent.
     pub fn report_goodbye(&self) -> Result<(), Error> {
         self.socket
             .send(&RtcpPacket::Goodbye.to_bytes())
@@ -233,10 +297,27 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
     }
 }
 
-/// Try to receive a report from the socket. Updates `last_report_time`
-/// on successful connectivity reports, returns `GoodbyeReceived` on a
-/// goodbye, `TimedOut` when no valid packet is received, and propagates
-/// other errors.
+/// Try to receive and process a single RTCP report from the socket.
+///
+/// This function attempts to receive and parse an RTCP packet. If a valid connectivity
+/// report (Sender or Receiver Report) is received, it updates the `last_report_time` and
+/// emits a remote statistics update event. If a goodbye packet is received, it returns
+/// `Error::GoodbyeReceived`. If no valid packet is received within the specified timeout
+/// window, it returns `Error::TimedOut`.
+///
+/// # Parameters
+/// - `report_socket`: the socket to receive data from.
+/// - `last_report_time`: mutable reference to the timestamp of the last valid report;
+///   updated on successful report reception.
+/// - `receive_limit`: maximum duration to wait without receiving a valid packet before
+///   considering the session timed out.
+/// - `event_tx`: channel for sending remote statistics updates to the application.
+///
+/// # Returns
+/// - `Ok(())` if a valid report is processed successfully.
+/// - `Err(Error::GoodbyeReceived)` if a goodbye packet is received.
+/// - `Err(Error::TimedOut)` if no valid packet arrives within the receive limit.
+/// - `Err(Error::UnexpectedMessage)` if an unknown packet type is received.
 fn try_receive_report<S: Socket + Send + Sync + 'static>(
     report_socket: &S,
     last_report_time: &mut DateTime<Local>,

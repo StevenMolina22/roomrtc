@@ -571,7 +571,8 @@ impl RoomRTCApp {
                 }
                 self.reset_after_call();
             }
-            AppEvent::FatalError(_) => {
+            AppEvent::FatalError => {
+                let _ = self.controller.stop_media_components();
                 self.view = View::FatalError;
             }
             AppEvent::CallAccepted(answer_sdp, username, peer_username) => {
@@ -601,14 +602,8 @@ impl RoomRTCApp {
             }
             AppEvent::RemoteStatsUpdate(new_stats) => {
                 if let Some(current) = &mut self.last_stats {
-                    // Si el evento trae data de sender remoto, actualizamos eso
-                    if new_stats.remote_sender.packets_sent > 0 {
-                        current.remote_sender = new_stats.remote_sender;
-                    }
-                    // Si trae data de receiver remoto (Jitter/Loss), actualizamos eso
-                    if new_stats.remote_receiver.packets_received > 0 || new_stats.remote_receiver.jitter > 0 {
-                        current.remote_receiver = new_stats.remote_receiver;
-                    }
+                    current.remote_sender = new_stats.remote_sender;
+                    current.remote_receiver = new_stats.remote_receiver;
                 } else {
                     self.last_stats = Some(new_stats);
                 }

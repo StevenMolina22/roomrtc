@@ -159,7 +159,6 @@ impl MediaPipeline {
         let ssrc = self.ssrc;
         let config = Arc::clone(&self.config);
         let logger = self.logger.clone();
-        let clock = self.clock.clone();
 
         thread::spawn(move || {
             let mut seq_num: u64 = 0;
@@ -179,8 +178,8 @@ impl MediaPipeline {
                     ssrc, 
                     &connected, 
                     &mut seq_num, 
-                    &config, 
-                    &clock) 
+                    &config
+                ) 
                 {
                     logger.error(&Error::SendError(e.to_string()).to_string());
                     break
@@ -199,14 +198,12 @@ fn send_encoded_frame(
     connected: &Arc<AtomicBool>,
     sequence_number: &mut u64,
     config: &Arc<Config>,
-    clock: &Clock
 ) -> Result<(), Error> {
     if !connected.load(Ordering::SeqCst) {
         return Err(Error::SendError("Media pipeline turned off".into()));
     }
 
     let total_chunks = encoded_frame.chunks.len();
-    let timestamp = clock.now();
 
     for (i, payload) in encoded_frame.chunks.iter().enumerate() {
         let packet = RtpPacket {
@@ -216,7 +213,7 @@ fn send_encoded_frame(
             is_i_frame: encoded_frame.is_i_frame,
             sequence_number: *sequence_number,
             payload_type: config.media.rtp_payload_type,
-            timestamp,
+            timestamp: encoded_frame.frame_time,
             ssrc,
             payload: payload.clone(),
         };
@@ -242,6 +239,7 @@ fn generate_frame_from_chunks(data: &Vec<u8>, decoder: &mut Decoder) -> Option<F
         data: decoded_data,
         width,
         height,
+        frame_time: 0
     })
 }
 
@@ -271,6 +269,7 @@ mod tests {
             data: raw_data.clone(),
             width,
             height,
+            frame_time: 0
         };
 
         // ------- Encode -------

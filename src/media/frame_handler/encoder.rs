@@ -89,6 +89,7 @@ impl Encoder {
             chunks,
             width: frame.width,
             height: frame.height,
+            frame_time: frame.frame_time,
             is_i_frame,
         })
     }

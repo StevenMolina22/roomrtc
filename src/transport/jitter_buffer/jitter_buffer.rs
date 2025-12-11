@@ -3,7 +3,6 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 use crate::transport::rtp::RtpPacket;
 use crate::clock::Clock;
-use crate::transport::jitter_buffer::RrMetrics;
 use crate::transport::rtcp::ReceiverStats;
 
 const TOLERANCE_MILLIS: u128 = 120;
@@ -253,32 +252,37 @@ impl<const N: usize> JitterBuffer<N>  {
     fn update_stats(&mut self, packet: &RtpPacket) {
         let now = Instant::now();
         let arrival_time_ms = self.clock.now();
-
-        let mut metrics = self.metrics.lock().unwrap();
+        
+        let mut metrics = match self.metrics.lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
 
         metrics.packets_received += 1;
 
         if metrics.packets_received == 1 {
             self.max_seq_seen = packet.sequence_number;
         } else if packet.sequence_number > self.max_seq_seen {
-
             let gap = packet.sequence_number - self.max_seq_seen - 1;
+            
             if gap > 0 && gap < 1000 {
                 metrics.packets_lost += gap as u32;
             }
             self.max_seq_seen = packet.sequence_number;
+
+        } else {
+            if metrics.packets_lost > 0 {
+                metrics.packets_lost -= 1;
+            }
         }
-
+        
         let transit = arrival_time_ms as i64 - (packet.timestamp as i64);
-
         if let Some(last_transit) = self.last_transit {
             let d = (transit - last_transit).abs();
             let prev_jitter = metrics.jitter as f64;
-
             let new_jitter = prev_jitter + ((d as f64 - prev_jitter) / 16.0);
             metrics.jitter = new_jitter as u32;
         }
-
         self.last_transit = Some(transit);
         self.last_arrival = Some(now);
     }

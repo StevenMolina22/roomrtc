@@ -365,11 +365,11 @@ impl Controller {
 
         Ok(())
     }
-    
+
     pub fn initial_handshake(&mut self) -> Result<(), Error> {
         let msg = ClientMessage::Hello;
         let ans = send_message(msg, &mut self.client_server_stream, &self.event_tx)?;
-        
+
         match ans {
             ServerResponse::Welcome => Ok(()),
             ServerResponse::ServerFull => {
@@ -424,7 +424,7 @@ fn send_message(
     event_tx: &Sender<AppEvent>,
 ) -> Result<ServerResponse, Error> {
     if let Err(e) = stream.write_all(&msg.to_bytes()) {
-        let _ = event_tx.send(AppEvent::FullServerError);
+        let _ = event_tx.send(AppEvent::FatalError);
         return Err(Error::IOError(e.to_string()));
     }
 
@@ -432,14 +432,14 @@ fn send_message(
 
     match stream.read(&mut buff) {
         Ok(0) => {
-            let _ = event_tx.send(AppEvent::FullServerError);
+            let _ = event_tx.send(AppEvent::FatalError);
             Err(Error::IOError("Connection closed by server".to_string()))
         },
         Ok(size) => {
             ServerResponse::from_bytes(&buff[..size]).ok_or(Error::BadResponse)
         },
         Err(e) => {
-            let _ = event_tx.send(AppEvent::FullServerError);
+            let _ = event_tx.send(AppEvent::FatalError);
             Err(Error::IOError(e.to_string()))
         }
     }

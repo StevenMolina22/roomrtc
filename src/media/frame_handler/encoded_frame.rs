@@ -13,6 +13,9 @@ pub struct EncodedFrame {
 
     /// Frame height in pixels (decoded size).
     pub height: usize,
+    
+    /// Frame time
+    pub frame_time: u128,
 
     /// Asserts if the encoded frame is Intra
     pub is_i_frame: bool,

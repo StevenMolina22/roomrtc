@@ -8,7 +8,7 @@ pub enum AppEvent {
     CallRejected,
     CallEnded,
     Error(String),
-    FatalError(String),
+    FatalError,
     LocalStatsUpdate(CallStats),
     RemoteStatsUpdate(CallStats),
 }

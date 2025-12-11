@@ -89,7 +89,6 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
             .map_err(|e| Error::SendFailed(e.to_string()))?;
 
         let mut ready = false;
-        println!("HANDSHAKE INIT");
         loop {
             let mut buff = [0u8; 1024];
             match self.socket.recv_from(&mut buff) {

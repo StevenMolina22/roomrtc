@@ -53,7 +53,6 @@ fn main() -> Result<(), eframe::Error> {
         "RoomRTC App",
         options,
         Box::new(|cc| {
-            cc.egui_ctx.set_visuals(egui::Visuals::light());
             egui_extras::install_image_loaders(&cc.egui_ctx);
             Ok(Box::new(RoomRTCApp::new(config, server_addr, logger)))
         }),

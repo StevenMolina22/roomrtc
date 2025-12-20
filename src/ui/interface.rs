@@ -143,6 +143,7 @@ impl RoomRTCApp {
             ui.add(
                 egui::Image::new(logo)
                     .max_width(300.0)
+                    .maintain_aspect_ratio(true)
             );
 
             ui.add_space(30.0);
@@ -158,14 +159,18 @@ impl RoomRTCApp {
                 let signup_text = RichText::new("Sign Up")
                     .size(18.0)
                     .strong();
-                if ui.add_sized([button_width, 40.0], egui::Button::new(signup_text).fill(Color32::from_rgb(45,120,255))).clicked() {
+                if ui.add_sized([button_width, 40.0], egui::Button::new(signup_text)
+                    .fill(Color32::from_rgb(45,120,255))
+                    .corner_radius(8.0)).clicked() {
                     self.view = View::SignUp;
                 }
 
-                let login_text = RichText::new("Sign Up")
+                let login_text = RichText::new("Log In")
                     .size(18.0)
                     .strong();
-                if ui.add_sized([button_width, 40.0], egui::Button::new(login_text).fill(Color32::from_rgb(45,120,255))).clicked() {
+                if ui.add_sized([button_width, 40.0], egui::Button::new(login_text)
+                    .fill(Color32::from_rgb(45,120,255))
+                    .corner_radius(8.0)).clicked() {
                     self.view = View::LogIn;
                 }
             });
@@ -175,7 +180,9 @@ impl RoomRTCApp {
             let quit_text = RichText::new("Quit")
                 .size(18.0)
                 .strong();
-            if ui.add_sized([120.0, 40.0], egui::Button::new(quit_text).fill(Color32::from_rgb(180, 50, 50))).clicked() {
+            if ui.add_sized([120.0, 40.0], egui::Button::new(quit_text)
+                .fill(Color32::from_rgb(180, 50, 50))
+                .corner_radius(8.0)).clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -183,69 +190,157 @@ impl RoomRTCApp {
 
     fn show_sign_up(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading("Sign Up");
-            ui.add(egui::TextEdit::singleline(&mut self.username_buff).hint_text("Username"));
-            ui.separator();
+            ui.add_space(20.0);
+
             ui.add(
-                egui::TextEdit::singleline(&mut self.password_buff)
-                    .password(true)
-                    .hint_text("Password"),
+                egui::Image::new(egui::include_image!("assets/logo.png"))
+                    .max_width(80.0)
+                    .maintain_aspect_ratio(true)
             );
-        });
 
-        if !self.username_buff.is_empty()
-            && !self.password_buff.is_empty()
-            && ui.button("Sign Up").clicked()
-        {
-            match self
-                .controller
-                .sign_up(self.username_buff.clone(), self.password_buff.clone())
-            {
-                Ok(()) => self.view = View::LogIn,
-                Err(e) => self.warning_msg = Some(e.to_string()),
+            ui.add_space(10.0);
+
+            ui.label(
+                    RichText::new("SIGN UP")
+                    .size(32.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
+            ui.add_space(30.0);
+
+            let field_width = 280.0;
+            let field_height = 35.0;
+
+            let username_edit = egui::TextEdit::singleline(&mut self.username_buff)
+                .hint_text(RichText::new("Username").size(16.0))
+                .margin(egui::vec2(10.0, 10.0));
+
+            ui.add_sized([field_width, field_height], username_edit);
+
+            ui.add_space(15.0);
+
+            let password_edit = egui::TextEdit::singleline(&mut self.password_buff)
+                .password(true)
+                .hint_text(RichText::new("Password").size(16.0))
+                .margin(egui::vec2(10.0, 10.0));
+
+            ui.add_sized([field_width, field_height], password_edit);
+
+            ui.add_space(40.0);
+
+            let btn_size = egui::vec2(210.0, 45.0);
+
+            let can_sign_up = !self.username_buff.is_empty() && !self.password_buff.is_empty();
+
+            let signup_btn = egui::Button::new(
+                RichText::new("Sign Up").size(18.0).strong().color(Color32::WHITE)
+            ).fill(Color32::from_rgb(0, 122, 255)).corner_radius(8.0);
+
+            ui.add_enabled_ui(can_sign_up, |ui| {
+                if ui.add_sized(btn_size, signup_btn).clicked() {
+                    match self.controller.sign_up(self.username_buff.clone(), self.password_buff.clone()) {
+                        Ok(()) => self.view = View::LogIn,
+                        Err(e) => self.warning_msg = Some(e.to_string()),
+                    }
+                    self.username_buff.clear();
+                    self.password_buff.clear();
+                }
+            });
+
+            ui.add_space(15.0);
+
+            let back_btn = egui::Button::new(
+                RichText::new("Back").size(16.0).color(Color32::LIGHT_GRAY)
+            ).corner_radius(8.0);
+
+            if ui.add_sized(btn_size, back_btn).clicked() {
+                self.username_buff.clear();
+                self.password_buff.clear();
+                self.view = View::Welcome;
             }
-            self.username_buff.clear();
-            self.password_buff.clear();
-        }
-
-        if ui.button("Back").clicked() {
-            self.username_buff.clear();
-            self.password_buff.clear();
-            self.view = View::Welcome;
-        }
+        });
     }
 
     fn show_log_in(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading("Log In");
-            ui.add(egui::TextEdit::singleline(&mut self.username_buff).hint_text("Username"));
-            ui.separator();
+            ui.add_space(20.0);
+
             ui.add(
-                egui::TextEdit::singleline(&mut self.password_buff)
-                    .password(true)
-                    .hint_text("Password"),
+                egui::Image::new(egui::include_image!("assets/logo.png"))
+                    .max_width(80.0)
+                    .maintain_aspect_ratio(true)
             );
-        });
 
-        if !self.username_buff.is_empty()
-            && !self.password_buff.is_empty()
-            && ui.button("Log In").clicked()
-        {
-            let username = self.username_buff.clone();
-            let password = self.password_buff.clone();
-            match self.controller.log_in(&username, &password) {
-                Ok(()) => self.view = View::CallHub,
-                Err(e) => self.warning_msg = Some(e.to_string()),
+            ui.add_space(10.0);
+
+            ui.label(
+                RichText::new("LOG IN")
+                    .size(32.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
+            ui.add_space(30.0);
+
+            let field_width = 280.0;
+            let field_height = 35.0;
+
+            ui.visuals_mut().widgets.inactive.bg_fill = Color32::from_rgb(30, 30, 30);
+            ui.visuals_mut().selection.bg_fill = Color32::from_rgb(0, 122, 255);
+
+            let username_edit = egui::TextEdit::singleline(&mut self.username_buff)
+                .hint_text(RichText::new("Username").size(16.0).color(Color32::GRAY))
+                .margin(egui::vec2(10.0, 10.0))
+                .text_color(Color32::WHITE);
+
+            ui.add_sized([field_width, field_height], username_edit);
+
+            ui.add_space(15.0);
+
+            let password_edit = egui::TextEdit::singleline(&mut self.password_buff)
+                .password(true)
+                .hint_text(RichText::new("Password").size(16.0).color(Color32::GRAY))
+                .margin(egui::vec2(10.0, 10.0))
+                .text_color(Color32::WHITE);
+
+            ui.add_sized([field_width, field_height], password_edit);
+
+            ui.add_space(40.0);
+
+            let btn_size = egui::vec2(210.0, 45.0);
+            let can_log_in = !self.username_buff.is_empty() && !self.password_buff.is_empty();
+
+
+            let login_btn = egui::Button::new(
+                RichText::new("Log In").size(18.0).strong().color(Color32::WHITE)
+            ).fill(Color32::from_rgb(0, 122, 255)).corner_radius(8.0);
+
+            ui.add_enabled_ui(can_log_in, |ui| {
+                if ui.add_sized(btn_size, login_btn).clicked() {
+                    let username = self.username_buff.clone();
+                    let password = self.password_buff.clone();
+                    match self.controller.log_in(&username, &password) {
+                        Ok(()) => self.view = View::CallHub,
+                        Err(e) => self.warning_msg = Some(e.to_string()),
+                    }
+                    self.username_buff.clear();
+                    self.password_buff.clear();
+                }
+            });
+
+            ui.add_space(15.0);
+
+            let back_btn = egui::Button::new(
+                RichText::new("Back").size(16.0).color(Color32::LIGHT_GRAY)
+            ).corner_radius(8.0);
+
+            if ui.add_sized(btn_size, back_btn).clicked() {
+                self.username_buff.clear();
+                self.password_buff.clear();
+                self.view = View::Welcome;
             }
-            self.username_buff.clear();
-            self.password_buff.clear();
-        }
-
-        if ui.button("Back").clicked() {
-            self.username_buff.clear();
-            self.password_buff.clear();
-            self.view = View::Welcome;
-        }
+        });
     }
 
     fn show_call_hub(&mut self, ui: &mut Ui) {

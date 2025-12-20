@@ -7,6 +7,11 @@ use std::path::Path;
 use std::str::FromStr;
 
 fn main() -> Result<(), eframe::Error> {
+    if rustls::crypto::ring::default_provider().install_default().is_err() {
+        println!("error initializing client");
+        std::process::exit(1);
+    }
+
     let args: Vec<String> = env::args().collect();
 
     if args.len() != 3 {
@@ -47,6 +52,10 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "RoomRTC App",
         options,
-        Box::new(|_cc| Ok(Box::new(RoomRTCApp::new(config, server_addr, logger)))),
+        Box::new(|cc| {
+            cc.egui_ctx.set_visuals(egui::Visuals::light());
+            egui_extras::install_image_loaders(&cc.egui_ctx);
+            Ok(Box::new(RoomRTCApp::new(config, server_addr, logger)))
+        }),
     )
 }

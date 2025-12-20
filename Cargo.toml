@@ -6,13 +6,14 @@ edition = "2024"
 [dependencies]
 eframe = "0.33.0"
 egui = "0.33.0"
+egui_extras = { version = "0.33", features = ["all_loaders"] }
 chrono = "0.4.42"
 openh264 = "0.9.0"
-opencv = { version="0.96.0", features = ["clang-runtime"] }
+opencv = { version = "0.96.0", features = ["clang-runtime"] }
 if-addrs = "0.14.0"
 rust-ini = "0.21.3"
 rand = "0.9.2"
-rustls = "0.23.35"
+rustls = { version = "0.23.35", features = ["ring"] }
 rustls-pemfile = "2.2.0"
 udp-dtls = "0.1"
 openssl = { version = "0.10", features = ["v110"] }

@@ -57,7 +57,7 @@ impl RoomRTCApp {
     ///   `Controller` and to configure the session behavior.
     ///
     /// Outputs:
-    /// - A fully initialised `RoomRTCApp` with channels created for
+    /// - A fully initialized `RoomRTCApp` with channels created for
     ///   receiving local frames, remote frames and events. The
     ///   `Controller` is created and returned in a running state.
     #[must_use]
@@ -139,16 +139,44 @@ impl eframe::App for RoomRTCApp {
 impl RoomRTCApp {
     fn show_welcome(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            let signup_btn = egui::Button::new("Sign Up").min_size(egui::vec2(200.0, 40.0));
-            if ui.add_sized([200.0, 40.0], signup_btn).clicked() {
-                self.view = View::SignUp;
-            }
+            let logo = egui::include_image!("assets/logo.png");
+            ui.add(
+                egui::Image::new(logo)
+                    .max_width(300.0)
+            );
 
-            ui.add_space(10.0);
+            ui.add_space(30.0);
 
-            let login_btn = egui::Button::new("Log In").min_size(egui::vec2(200.0, 40.0));
-            if ui.add_sized([200.0, 40.0], login_btn).clicked() {
-                self.view = View::LogIn;
+            ui.horizontal(|ui| {
+                let button_width = 120.0;
+                let spacing = ui.spacing().item_spacing.x;
+                let total_width = (button_width * 2.0) + spacing;
+
+                let x_offset = (ui.available_width() - total_width) / 2.0;
+                ui.add_space(x_offset);
+
+                let signup_text = RichText::new("Sign Up")
+                    .size(18.0)
+                    .strong();
+                if ui.add_sized([button_width, 40.0], egui::Button::new(signup_text).fill(Color32::from_rgb(45,120,255))).clicked() {
+                    self.view = View::SignUp;
+                }
+
+                let login_text = RichText::new("Sign Up")
+                    .size(18.0)
+                    .strong();
+                if ui.add_sized([button_width, 40.0], egui::Button::new(login_text).fill(Color32::from_rgb(45,120,255))).clicked() {
+                    self.view = View::LogIn;
+                }
+            });
+
+            ui.add_space(20.0);
+
+            let quit_text = RichText::new("Quit")
+                .size(18.0)
+                .strong();
+            if ui.add_sized([120.0, 40.0], egui::Button::new(quit_text).fill(Color32::from_rgb(180, 50, 50))).clicked() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
     }
@@ -430,7 +458,7 @@ impl RoomRTCApp {
                 .add_sized([200.0, 40.0], egui::Button::new("Close App"))
                 .clicked()
             {
-                std::process::exit(0);
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
     }

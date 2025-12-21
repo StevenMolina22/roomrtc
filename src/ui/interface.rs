@@ -344,59 +344,118 @@ impl RoomRTCApp {
     }
 
     fn show_call_hub(&mut self, ui: &mut Ui) {
+        ui.spacing_mut().item_spacing.y = 0.0;
         ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                let username = match self.controller.get_username() {
-                    Ok(username) => username,
-                    Err(_) => {
-                        self.view = View::FatalError;
-                        return;
-                    }
-                };
 
-                ui.label(username);
-
-                if ui.button("Log Out").clicked() {
-                    match self.controller.log_out() {
-                        Ok(()) => {
-                            self.view = View::Welcome;
-                        }
-                        Err(_) => {
-                            self.view = View::Error;
-                        }
-                    }
-                }
+            ui.vertical_centered(|ui| {
+                ui.add(
+                    egui::Image::new(egui::include_image!("assets/logo.png"))
+                        .max_width(150.0)
+                        .maintain_aspect_ratio(true)
+                );
             });
 
+            ui.add_space(7.5);
+
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 60.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add_space(15.0);
+
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("👤").size(22.0));
+                        let username = self.controller.get_username().unwrap_or_default();
+                        ui.label(RichText::new(&username).strong().size(18.0).color(Color32::WHITE));
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(15.0);
+
+                        let logout_img = egui::include_image!("assets/exit_logo.png");
+                        let logout_btn = egui::Button::image(
+                            egui::Image::new(logout_img).fit_to_exact_size(egui::vec2(40.0, 40.0))
+                        )
+                            .fill(Color32::TRANSPARENT)
+                            .frame(false);
+
+                        let btn_response = ui.add(logout_btn);
+
+                        if btn_response.on_hover_text("Log Out").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            if self.controller.log_out().is_ok() {
+                                self.view = View::Welcome;
+                            }
+                        }
+                    });
+                }
+            );
+
             ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(10.0);
+
+            ui.label(RichText::new(" CONTACTS").color(Color32::GRAY).size(13.0).strong());
+
+            ui.add_space(15.0);
 
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
-
+                    ui.add_space(5.0);
                     let users_status = match self.controller.get_users_status() {
                         Ok(users_status) => users_status,
-                        Err(_) => {
-                            self.view = View::FatalError;
-                            return;
-                        }
+                        Err(_) => return,
                     };
 
                     for (username, status) in &users_status {
-                        ui.horizontal(|ui| {
-                            ui.label(username);
-                            ui.label(status.to_string());
+                        egui::Frame::new()
+                            .fill(Color32::from_rgb(20, 20, 20))
+                            .corner_radius(8.0)
+                            .inner_margin(8.0)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let dot_color = match status {
+                                        UserStatus::Available => Color32::from_rgb(50, 200, 50),
+                                        UserStatus::Offline => Color32::from_rgb(60, 60, 60),
+                                        UserStatus::Occupied(_) => Color32::from_rgb(200, 50, 50)
+                                    };
+                                    let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                                    ui.painter().circle_filled(rect.center(), 6.0, dot_color);
 
-                            if *status == UserStatus::Available && ui.button("Call").clicked() {
-                                if let Err(e) = self.controller.call(username) {
-                                    self.warning_msg = Some(e.to_string());
-                                } else {
-                                    self.view = View::Calling(username.clone());
-                                }
-                            }
-                        });
-                        ui.separator();
+                                    ui.add_space(5.0);
+
+                                    ui.vertical(|ui| {
+                                        ui.label(RichText::new(username).strong().color(Color32::WHITE).size(16.0));
+                                        ui.label(RichText::new(status.to_string()).size(11.0).color(Color32::GRAY));
+                                    });
+
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        match status {
+                                            UserStatus::Available => {
+                                                let call_btn = egui::Button::new(RichText::new("Call").color(Color32::WHITE).strong())
+                                                    .fill(Color32::from_rgb(0, 122, 255))
+                                                    .corner_radius(8.0);
+
+                                                if ui.add_sized([70.0, 28.0], call_btn).clicked() {
+                                                    if self.controller.call(username).is_ok() {
+                                                        self.view = View::Calling(username.clone());
+                                                    }
+                                                }
+                                            },
+                                            UserStatus::Offline => {},
+                                            UserStatus::Occupied(peer_name) => {
+                                                ui.label(
+                                                    RichText::new(format!("In call with {}", peer_name))
+                                                        .size(12.0)
+                                                        .italics()
+                                                        .color(Color32::from_rgb(200, 200, 200))
+                                                );
+                                            },
+                                        }
+                                    });
+                                });
+                            });
+                        ui.add_space(4.0);
                     }
                 });
         });

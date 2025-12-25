@@ -463,10 +463,36 @@ impl RoomRTCApp {
 
     fn show_calling(&mut self, peer_username: String, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading(format!("Calling {peer_username}"));
-            ui.separator();
-            ui.label("Connecting…");
-            ui.separator();
+            ui.add_space(60.0);
+
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, egui::Color32::from_rgb(30, 30, 30));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "👤",
+                FontId::proportional(80.0),
+                Color32::LIGHT_GRAY,
+            );
+
+            ui.add_space(30.0);
+
+            ui.label(
+                RichText::new(&peer_username)
+                    .size(40.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
+            ui.add_space(10.0);
+
+            ui.label(
+                RichText::new("Calling...")
+                    .size(20.0)
+                    .color(Color32::from_rgb(0, 122, 255))
+            );
+
+            ui.add_space(80.0);
         });
     }
 
@@ -477,27 +503,44 @@ impl RoomRTCApp {
         ui: &mut Ui,
     ) {
         ui.vertical_centered(|ui| {
-            ui.separator();
-            ui.heading(format!("{peer_username} is calling you..."));
-            ui.separator();
+            ui.add_space(60.0);
+
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, Color32::from_rgb(30, 30, 30));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "👤",
+                FontId::proportional(80.0),
+                Color32::LIGHT_GRAY,
+            );
+
+            ui.add_space(30.0);
+
+            ui.label(RichText::new(&peer_username).size(40.0).strong().color(Color32::WHITE));
+            ui.label(RichText::new("Incoming call...").size(20.0).color(Color32::from_rgb(0, 122, 255)));
+
+            ui.add_space(60.0);
 
             ui.horizontal(|ui| {
-                if ui.button("Accept").clicked() {
-                    match self
-                        .controller
-                        .accept_call(peer_username.clone(), &sdp_offer)
-                    {
+                let buttons_width = (130.0 * 2.0) + 40.0;
+                let start_space = (ui.available_width() - buttons_width) / 2.0;
+                ui.add_space(start_space);
+
+                // BOTÓN ACEPTAR
+                let accept_btn = egui::Button::new(
+                    RichText::new("Accept").size(18.0).strong().color(Color32::WHITE)
+                )
+                    .fill(Color32::from_rgb(50, 180, 50))
+                    .corner_radius(30.0);
+
+                if ui.add_sized([130.0, 60.0], accept_btn).clicked() {
+                    match self.controller.accept_call(peer_username.clone(), &sdp_offer) {
                         Ok((local_frame_rx, remote_frame_rx)) => {
-                            match self.controller.get_username() {
-                                Ok(username) => {
-                                    self.local_frame_rx = Some(local_frame_rx);
-                                    self.remote_frame_rx = Some(remote_frame_rx);
-                                    self.view = View::Call(username, peer_username.clone());
-                                }
-                                Err(e) => {
-                                    self.error_msg = Some(e.to_string());
-                                    self.view = View::Error;
-                                }
+                            if let Ok(username) = self.controller.get_username() {
+                                self.local_frame_rx = Some(local_frame_rx);
+                                self.remote_frame_rx = Some(remote_frame_rx);
+                                self.view = View::Call(username, peer_username.clone());
                             }
                         }
                         Err(e) => {
@@ -506,14 +549,24 @@ impl RoomRTCApp {
                         }
                     }
                 }
-                if ui.button("Decline").clicked() {
-                    match self.controller.reject_call(peer_username) {
+
+                ui.add_space(40.0);
+
+                let decline_btn = egui::Button::new(
+                    RichText::new("Decline").size(18.0).strong().color(Color32::WHITE)
+                )
+                    .fill(Color32::from_rgb(220, 50, 50))
+                    .corner_radius(30.0);
+
+                if ui.add_sized([130.0, 60.0], decline_btn).clicked() {
+                    match self.controller.reject_call(peer_username.clone()) {
                         Ok(()) => self.view = View::CallHub,
                         Err(e) => self.warning_msg = Some(e.to_string()),
                     }
                 }
             });
-            ui.separator();
+
+            ui.add_space(40.0);
         });
     }
 

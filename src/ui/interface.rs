@@ -527,7 +527,6 @@ impl RoomRTCApp {
                 let start_space = (ui.available_width() - buttons_width) / 2.0;
                 ui.add_space(start_space);
 
-                // BOTÓN ACEPTAR
                 let accept_btn = egui::Button::new(
                     RichText::new("Accept").size(18.0).strong().color(Color32::WHITE)
                 )
@@ -571,40 +570,53 @@ impl RoomRTCApp {
     }
 
     fn show_call(&mut self, username: String, peer_username: String, ctx: &Context, ui: &mut Ui) {
-        ui.vertical_centered(|ui| {
-            ui.heading("Call");
-            ui.add_space(20.0);
-
-            if let Err(e) = self.update_video_textures(ctx) {
-                self.warning_msg = Some(e.to_string());
-                if self.controller.hang_up().is_err() {
-                    self.view = View::FatalError;
-                } else {
-                    self.reset_after_call();
-                    self.view = View::CallHub;
-                }
-                return;
+        if let Err(e) = self.update_video_textures(ctx) {
+            self.warning_msg = Some(e.to_string());
+            if self.controller.hang_up().is_err() {
+                self.view = View::FatalError;
+            } else {
+                self.reset_after_call();
+                self.view = View::CallHub;
             }
+            return;
+        }
 
-            ui.horizontal_centered(|ui| {
+        ui.vertical_centered(|ui| {
+            ui.add_space(10.0);
+
+            ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(username).size(16.0).strong());
+                    ui.label(RichText::new(format!("YOU ({})", username)).size(14.0).color(Color32::GRAY));
+                    ui.add_space(5.0);
 
-                    ui.add_space(4.0);
-                    self.show_local_camera(ui);
-                    ctx.request_repaint();
+                    egui::Frame::canvas(ui.style())
+                        .fill(Color32::BLACK)
+                        .corner_radius(12.0)
+                        .show(ui, |ui| {
+                            self.show_local_camera(ui);
+                        });
                 });
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(peer_username.to_string()).size(16.0).strong());
 
-                    ui.add_space(4.0);
-                    self.show_remote_camera(ui);
-                    ctx.request_repaint();
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(&peer_username).size(14.0).strong().color(Color32::WHITE));
+                    ui.add_space(5.0);
+
+                    egui::Frame::canvas(ui.style())
+                        .fill(Color32::BLACK)
+                        .corner_radius(12.0)
+                        .show(ui, |ui| {
+                            self.show_remote_camera(ui);
+                        });
                 });
             });
 
-            let exit_btn = egui::Button::new("End call").min_size(egui::vec2(150.0, 40.0));
-            if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
+            ui.add_space(25.0);
+
+            let exit_btn = egui::Button::new(RichText::new("End Call").strong().color(Color32::WHITE))
+                .fill(Color32::from_rgb(200, 40, 40))
+                .corner_radius(20.0);
+
+            if ui.add_sized([180.0, 45.0], exit_btn).clicked() {
                 if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
@@ -613,60 +625,146 @@ impl RoomRTCApp {
                 }
             }
 
+            ui.add_space(20.0);
             ui.separator();
+            ui.add_space(10.0);
+
             if let Some(stats) = &self.last_stats {
-                ui.scope(|ui| {
-                    ui.style_mut().override_text_style = Some(egui::TextStyle::Small);
-                    ui.label(RichText::new("📊 Network Stats").strong());
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(25, 25, 25))
+                    .corner_radius(10.0)
+                    .inner_margin(12.0)
+                    .show(ui, |ui| {
+                        ui.set_max_width(400.0);
 
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Jitter: {}ms", stats.remote_receiver.jitter));
-                        ui.label(format!("Lost: {} pkts", stats.remote_receiver.packets_lost));
-                    });
+                        ui.label(RichText::new("📊 NETWORK DIAGNOSTICS").size(12.0).strong().color(Color32::from_rgb(0, 150, 255)));
+                        ui.add_space(8.0);
 
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Sent: {}", stats.local_sender.packets_sent));
-                        ui.label(format!(
-                            "Received: {}",
-                            stats.local_receiver.packets_received
-                        ));
+                        egui::Grid::new("stats_grid")
+                            .num_columns(2)
+                            .spacing([40.0, 8.0])
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("Jitter:").color(Color32::GRAY));
+                                ui.label(format!("{} ms", stats.remote_receiver.jitter));
+                                ui.end_row();
+
+                                ui.label(RichText::new("Packets Lost:").color(Color32::GRAY));
+                                ui.label(RichText::new(format!("{}", stats.remote_receiver.packets_lost))
+                                    .color(if stats.remote_receiver.packets_lost > 0 { Color32::KHAKI } else { Color32::GREEN }));
+                                ui.end_row();
+
+                                ui.label(RichText::new("Sent / Received:").color(Color32::GRAY));
+                                ui.label(format!("{} / {}", stats.local_sender.packets_sent, stats.local_receiver.packets_received));
+                                ui.end_row();
+                            });
                     });
-                });
             } else {
-                ui.label("Esperando reporte RTCP...");
+                ui.add_space(10.0);
+                ui.spinner();
+                ui.label(RichText::new("Waiting for RTCP reports...").italics().color(Color32::GRAY));
             }
+
+            ctx.request_repaint();
         });
     }
 
     fn show_call_ended(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading("Call Ended");
+            ui.add_space(80.0);
+
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, Color32::from_rgb(30, 30, 30));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "📵",
+                FontId::proportional(80.0),
+                Color32::from_rgb(150, 150, 150),
+            );
+
+            ui.add_space(30.0);
+
+            ui.label(
+                RichText::new("Call Ended")
+                    .size(40.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
             ui.add_space(10.0);
 
-            if ui.button("Back to menu").clicked() {
+            ui.label(
+                RichText::new("The other user has disconnected.")
+                    .size(18.0)
+                    .color(Color32::from_rgb(140, 140, 140))
+            );
+
+            ui.add_space(80.0);
+
+            let back_btn = egui::Button::new(
+                RichText::new("Back to hub").size(18.0).strong().color(Color32::WHITE)
+            )
+                .fill(Color32::from_rgb(0, 122, 255))
+                .corner_radius(30.0);
+
+            if ui.add_sized([240.0, 60.0], back_btn)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 self.view = View::CallHub;
             }
+
+            ui.add_space(40.0);
         });
     }
 
     fn show_full_server(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(50.0);
+            ui.add_space(80.0);
 
-            ui.label(
-                RichText::new("Server is full. Try again soon!")
-                    .color(Color32::RED)
-                    .font(FontId::proportional(24.0)),
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, Color32::from_rgb(40, 20, 20));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "🚫",
+                FontId::proportional(80.0),
+                Color32::from_rgb(220, 50, 50),
             );
 
-            ui.add_space(20.0);
+            ui.add_space(30.0);
 
-            if ui
-                .add_sized([200.0, 40.0], egui::Button::new("Close App"))
+            ui.label(
+                RichText::new("Server Full")
+                    .size(40.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
+            ui.add_space(10.0);
+
+            ui.label(
+                RichText::new("Maximum capacity reached.\nPlease try again in a few minutes.")
+                    .size(18.0)
+                    .color(Color32::from_rgb(160, 160, 160))
+            );
+
+            ui.add_space(80.0);
+
+            let close_btn = egui::Button::new(
+                RichText::new("Close Application").size(18.0).strong().color(Color32::WHITE)
+            )
+                .fill(Color32::from_rgb(60, 60, 60))
+                .corner_radius(30.0);
+
+            if ui.add_sized([240.0, 60.0], close_btn)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
+
+            ui.add_space(40.0);
         });
     }
 
@@ -768,22 +866,51 @@ impl RoomRTCApp {
 
     fn show_fatal_error(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(50.0);
+            ui.add_space(80.0);
 
-            ui.label(
-                RichText::new("An unexpected error occurred")
-                    .color(Color32::RED)
-                    .font(FontId::proportional(24.0)),
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, Color32::from_rgb(60, 20, 20));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "⚠",
+                FontId::proportional(80.0),
+                Color32::WHITE,
             );
 
-            ui.add_space(20.0);
+            ui.add_space(30.0);
 
-            if ui
-                .add_sized([200.0, 40.0], egui::Button::new("Close App"))
+            ui.label(
+                RichText::new("Fatal Error")
+                    .size(40.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
+            ui.add_space(10.0);
+
+            ui.label(
+                RichText::new("An unexpected error occurred and the\napplication needs to close.")
+                    .size(18.0)
+                    .color(Color32::from_rgb(180, 150, 150))
+            );
+
+            ui.add_space(80.0);
+
+            let close_btn = egui::Button::new(
+                RichText::new("Exit Application").size(18.0).strong().color(Color32::WHITE)
+            )
+                .fill(Color32::from_rgb(180, 40, 40))
+                .corner_radius(30.0);
+
+            if ui.add_sized([240.0, 60.0], close_btn)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
                 std::process::exit(0);
             }
+
+            ui.add_space(40.0);
         });
     }
 

@@ -6,6 +6,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 fn main() {
+    if rustls::crypto::ring::default_provider().install_default().is_err() {
+        println!("error initializing client");
+        std::process::exit(1);
+    }
     let args: Vec<String> = env::args().collect();
 
     if args.len() != 2 {

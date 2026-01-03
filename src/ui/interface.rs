@@ -57,7 +57,7 @@ impl RoomRTCApp {
     ///   `Controller` and to configure the session behavior.
     ///
     /// Outputs:
-    /// - A fully initialised `RoomRTCApp` with channels created for
+    /// - A fully initialized `RoomRTCApp` with channels created for
     ///   receiving local frames, remote frames and events. The
     ///   `Controller` is created and returned in a running state.
     #[must_use]
@@ -139,141 +139,323 @@ impl eframe::App for RoomRTCApp {
 impl RoomRTCApp {
     fn show_welcome(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            let signup_btn = egui::Button::new("Sign Up").min_size(egui::vec2(200.0, 40.0));
-            if ui.add_sized([200.0, 40.0], signup_btn).clicked() {
-                self.view = View::SignUp;
-            }
+            let logo = egui::include_image!("assets/logo.png");
+            ui.add(
+                egui::Image::new(logo)
+                    .max_width(300.0)
+                    .maintain_aspect_ratio(true)
+            );
 
-            ui.add_space(10.0);
+            ui.add_space(30.0);
 
-            let login_btn = egui::Button::new("Log In").min_size(egui::vec2(200.0, 40.0));
-            if ui.add_sized([200.0, 40.0], login_btn).clicked() {
-                self.view = View::LogIn;
+            ui.horizontal(|ui| {
+                let button_width = 120.0;
+                let spacing = ui.spacing().item_spacing.x;
+                let total_width = (button_width * 2.0) + spacing;
+
+                let x_offset = (ui.available_width() - total_width) / 2.0;
+                ui.add_space(x_offset);
+
+                let signup_text = RichText::new("Sign Up")
+                    .size(18.0)
+                    .strong();
+                if ui.add_sized([button_width, 40.0], egui::Button::new(signup_text)
+                    .fill(Color32::from_rgb(45,120,255))
+                    .corner_radius(8.0)).clicked() {
+                    self.view = View::SignUp;
+                }
+
+                let login_text = RichText::new("Log In")
+                    .size(18.0)
+                    .strong();
+                if ui.add_sized([button_width, 40.0], egui::Button::new(login_text)
+                    .fill(Color32::from_rgb(45,120,255))
+                    .corner_radius(8.0)).clicked() {
+                    self.view = View::LogIn;
+                }
+            });
+
+            ui.add_space(20.0);
+
+            let quit_text = RichText::new("Quit")
+                .size(18.0)
+                .strong();
+            if ui.add_sized([120.0, 40.0], egui::Button::new(quit_text)
+                .fill(Color32::from_rgb(180, 50, 50))
+                .corner_radius(8.0)).clicked() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
     }
 
     fn show_sign_up(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading("Sign Up");
-            ui.add(egui::TextEdit::singleline(&mut self.username_buff).hint_text("Username"));
-            ui.separator();
+            ui.add_space(20.0);
+
             ui.add(
-                egui::TextEdit::singleline(&mut self.password_buff)
-                    .password(true)
-                    .hint_text("Password"),
+                egui::Image::new(egui::include_image!("assets/logo.png"))
+                    .max_width(80.0)
+                    .maintain_aspect_ratio(true)
             );
-        });
 
-        if !self.username_buff.is_empty()
-            && !self.password_buff.is_empty()
-            && ui.button("Sign Up").clicked()
-        {
-            match self
-                .controller
-                .sign_up(self.username_buff.clone(), self.password_buff.clone())
-            {
-                Ok(()) => self.view = View::LogIn,
-                Err(e) => self.warning_msg = Some(e.to_string()),
+            ui.add_space(10.0);
+
+            ui.label(
+                    RichText::new("SIGN UP")
+                    .size(32.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
+            ui.add_space(30.0);
+
+            let field_width = 280.0;
+            let field_height = 35.0;
+
+            let username_edit = egui::TextEdit::singleline(&mut self.username_buff)
+                .hint_text(RichText::new("Username").size(16.0))
+                .margin(egui::vec2(10.0, 10.0));
+
+            ui.add_sized([field_width, field_height], username_edit);
+
+            ui.add_space(15.0);
+
+            let password_edit = egui::TextEdit::singleline(&mut self.password_buff)
+                .password(true)
+                .hint_text(RichText::new("Password").size(16.0))
+                .margin(egui::vec2(10.0, 10.0));
+
+            ui.add_sized([field_width, field_height], password_edit);
+
+            ui.add_space(40.0);
+
+            let btn_size = egui::vec2(210.0, 45.0);
+
+            let can_sign_up = !self.username_buff.is_empty() && !self.password_buff.is_empty();
+
+            let signup_btn = egui::Button::new(
+                RichText::new("Sign Up").size(18.0).strong().color(Color32::WHITE)
+            ).fill(Color32::from_rgb(0, 122, 255)).corner_radius(8.0);
+
+            ui.add_enabled_ui(can_sign_up, |ui| {
+                if ui.add_sized(btn_size, signup_btn).clicked() {
+                    match self.controller.sign_up(self.username_buff.clone(), self.password_buff.clone()) {
+                        Ok(()) => self.view = View::LogIn,
+                        Err(e) => self.warning_msg = Some(e.to_string()),
+                    }
+                    self.username_buff.clear();
+                    self.password_buff.clear();
+                }
+            });
+
+            ui.add_space(15.0);
+
+            let back_btn = egui::Button::new(
+                RichText::new("Back").size(16.0).color(Color32::LIGHT_GRAY)
+            ).corner_radius(8.0);
+
+            if ui.add_sized(btn_size, back_btn).clicked() {
+                self.username_buff.clear();
+                self.password_buff.clear();
+                self.view = View::Welcome;
             }
-            self.username_buff.clear();
-            self.password_buff.clear();
-        }
-
-        if ui.button("Back").clicked() {
-            self.username_buff.clear();
-            self.password_buff.clear();
-            self.view = View::Welcome;
-        }
+        });
     }
 
     fn show_log_in(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading("Log In");
-            ui.add(egui::TextEdit::singleline(&mut self.username_buff).hint_text("Username"));
-            ui.separator();
+            ui.add_space(20.0);
+
             ui.add(
-                egui::TextEdit::singleline(&mut self.password_buff)
-                    .password(true)
-                    .hint_text("Password"),
+                egui::Image::new(egui::include_image!("assets/logo.png"))
+                    .max_width(80.0)
+                    .maintain_aspect_ratio(true)
             );
-        });
 
-        if !self.username_buff.is_empty()
-            && !self.password_buff.is_empty()
-            && ui.button("Log In").clicked()
-        {
-            let username = self.username_buff.clone();
-            let password = self.password_buff.clone();
-            match self.controller.log_in(&username, &password) {
-                Ok(()) => self.view = View::CallHub,
-                Err(e) => self.warning_msg = Some(e.to_string()),
-            }
-            self.username_buff.clear();
-            self.password_buff.clear();
-        }
+            ui.add_space(10.0);
 
-        if ui.button("Back").clicked() {
-            self.username_buff.clear();
-            self.password_buff.clear();
-            self.view = View::Welcome;
-        }
-    }
+            ui.label(
+                RichText::new("LOG IN")
+                    .size(32.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
 
-    fn show_call_hub(&mut self, ui: &mut Ui) {
-        ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                let username = match self.controller.get_username() {
-                    Ok(username) => username,
-                    Err(_) => {
-                        self.view = View::FatalError;
-                        return;
+            ui.add_space(30.0);
+
+            let field_width = 280.0;
+            let field_height = 35.0;
+
+            ui.visuals_mut().widgets.inactive.bg_fill = Color32::from_rgb(30, 30, 30);
+            ui.visuals_mut().selection.bg_fill = Color32::from_rgb(0, 122, 255);
+
+            let username_edit = egui::TextEdit::singleline(&mut self.username_buff)
+                .hint_text(RichText::new("Username").size(16.0).color(Color32::GRAY))
+                .margin(egui::vec2(10.0, 10.0))
+                .text_color(Color32::WHITE);
+
+            ui.add_sized([field_width, field_height], username_edit);
+
+            ui.add_space(15.0);
+
+            let password_edit = egui::TextEdit::singleline(&mut self.password_buff)
+                .password(true)
+                .hint_text(RichText::new("Password").size(16.0).color(Color32::GRAY))
+                .margin(egui::vec2(10.0, 10.0))
+                .text_color(Color32::WHITE);
+
+            ui.add_sized([field_width, field_height], password_edit);
+
+            ui.add_space(40.0);
+
+            let btn_size = egui::vec2(210.0, 45.0);
+            let can_log_in = !self.username_buff.is_empty() && !self.password_buff.is_empty();
+
+
+            let login_btn = egui::Button::new(
+                RichText::new("Log In").size(18.0).strong().color(Color32::WHITE)
+            ).fill(Color32::from_rgb(0, 122, 255)).corner_radius(8.0);
+
+            ui.add_enabled_ui(can_log_in, |ui| {
+                if ui.add_sized(btn_size, login_btn).clicked() {
+                    let username = self.username_buff.clone();
+                    let password = self.password_buff.clone();
+                    match self.controller.log_in(&username, &password) {
+                        Ok(()) => self.view = View::CallHub,
+                        Err(e) => self.warning_msg = Some(e.to_string()),
                     }
-                };
-
-                ui.label(username);
-
-                if ui.button("Log Out").clicked() {
-                    match self.controller.log_out() {
-                        Ok(()) => {
-                            self.view = View::Welcome;
-                        }
-                        Err(_) => {
-                            self.view = View::Error;
-                        }
-                    }
+                    self.username_buff.clear();
+                    self.password_buff.clear();
                 }
             });
 
+            ui.add_space(15.0);
+
+            let back_btn = egui::Button::new(
+                RichText::new("Back").size(16.0).color(Color32::LIGHT_GRAY)
+            ).corner_radius(8.0);
+
+            if ui.add_sized(btn_size, back_btn).clicked() {
+                self.username_buff.clear();
+                self.password_buff.clear();
+                self.view = View::Welcome;
+            }
+        });
+    }
+
+    fn show_call_hub(&mut self, ui: &mut Ui) {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.vertical(|ui| {
+
+            ui.vertical_centered(|ui| {
+                ui.add(
+                    egui::Image::new(egui::include_image!("assets/logo.png"))
+                        .max_width(150.0)
+                        .maintain_aspect_ratio(true)
+                );
+            });
+
+            ui.add_space(7.5);
+
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 60.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add_space(15.0);
+
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("👤").size(22.0));
+                        let username = self.controller.get_username().unwrap_or_default();
+                        ui.label(RichText::new(&username).strong().size(18.0).color(Color32::WHITE));
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(15.0);
+
+                        let logout_img = egui::include_image!("assets/exit_logo.png");
+                        let logout_btn = egui::Button::image(
+                            egui::Image::new(logout_img).fit_to_exact_size(egui::vec2(40.0, 40.0))
+                        )
+                            .fill(Color32::TRANSPARENT)
+                            .frame(false);
+
+                        let btn_response = ui.add(logout_btn);
+
+                        if btn_response.on_hover_text("Log Out").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            if self.controller.log_out().is_ok() {
+                                self.view = View::Welcome;
+                            }
+                        }
+                    });
+                }
+            );
+
             ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(10.0);
+
+            ui.label(RichText::new(" CONTACTS").color(Color32::GRAY).size(13.0).strong());
+
+            ui.add_space(15.0);
 
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
-
+                    ui.add_space(5.0);
                     let users_status = match self.controller.get_users_status() {
                         Ok(users_status) => users_status,
-                        Err(_) => {
-                            self.view = View::FatalError;
-                            return;
-                        }
+                        Err(_) => return,
                     };
 
                     for (username, status) in &users_status {
-                        ui.horizontal(|ui| {
-                            ui.label(username);
-                            ui.label(status.to_string());
+                        egui::Frame::new()
+                            .fill(Color32::from_rgb(20, 20, 20))
+                            .corner_radius(8.0)
+                            .inner_margin(8.0)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let dot_color = match status {
+                                        UserStatus::Available => Color32::from_rgb(50, 200, 50),
+                                        UserStatus::Offline => Color32::from_rgb(60, 60, 60),
+                                        UserStatus::Occupied(_) => Color32::from_rgb(200, 50, 50)
+                                    };
+                                    let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                                    ui.painter().circle_filled(rect.center(), 6.0, dot_color);
 
-                            if *status == UserStatus::Available && ui.button("Call").clicked() {
-                                if let Err(e) = self.controller.call(username) {
-                                    self.warning_msg = Some(e.to_string());
-                                } else {
-                                    self.view = View::Calling(username.clone());
-                                }
-                            }
-                        });
-                        ui.separator();
+                                    ui.add_space(5.0);
+
+                                    ui.vertical(|ui| {
+                                        ui.label(RichText::new(username).strong().color(Color32::WHITE).size(16.0));
+                                        ui.label(RichText::new(status.to_string()).size(11.0).color(Color32::GRAY));
+                                    });
+
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        match status {
+                                            UserStatus::Available => {
+                                                let call_btn = egui::Button::new(RichText::new("Call").color(Color32::WHITE).strong())
+                                                    .fill(Color32::from_rgb(0, 122, 255))
+                                                    .corner_radius(8.0);
+
+                                                if ui.add_sized([70.0, 28.0], call_btn).clicked() {
+                                                    if self.controller.call(username).is_ok() {
+                                                        self.view = View::Calling(username.clone());
+                                                    }
+                                                }
+                                            },
+                                            UserStatus::Offline => {},
+                                            UserStatus::Occupied(peer_name) => {
+                                                ui.label(
+                                                    RichText::new(format!("In call with {}", peer_name))
+                                                        .size(12.0)
+                                                        .italics()
+                                                        .color(Color32::from_rgb(200, 200, 200))
+                                                );
+                                            },
+                                        }
+                                    });
+                                });
+                            });
+                        ui.add_space(4.0);
                     }
                 });
         });
@@ -281,10 +463,36 @@ impl RoomRTCApp {
 
     fn show_calling(&mut self, peer_username: String, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading(format!("Calling {peer_username}"));
-            ui.separator();
-            ui.label("Connecting…");
-            ui.separator();
+            ui.add_space(60.0);
+
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, egui::Color32::from_rgb(30, 30, 30));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "👤",
+                FontId::proportional(80.0),
+                Color32::LIGHT_GRAY,
+            );
+
+            ui.add_space(30.0);
+
+            ui.label(
+                RichText::new(&peer_username)
+                    .size(40.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
+            ui.add_space(10.0);
+
+            ui.label(
+                RichText::new("Calling...")
+                    .size(20.0)
+                    .color(Color32::from_rgb(0, 122, 255))
+            );
+
+            ui.add_space(80.0);
         });
     }
 
@@ -295,27 +503,43 @@ impl RoomRTCApp {
         ui: &mut Ui,
     ) {
         ui.vertical_centered(|ui| {
-            ui.separator();
-            ui.heading(format!("{peer_username} is calling you..."));
-            ui.separator();
+            ui.add_space(60.0);
+
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, Color32::from_rgb(30, 30, 30));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "👤",
+                FontId::proportional(80.0),
+                Color32::LIGHT_GRAY,
+            );
+
+            ui.add_space(30.0);
+
+            ui.label(RichText::new(&peer_username).size(40.0).strong().color(Color32::WHITE));
+            ui.label(RichText::new("Incoming call...").size(20.0).color(Color32::from_rgb(0, 122, 255)));
+
+            ui.add_space(60.0);
 
             ui.horizontal(|ui| {
-                if ui.button("Accept").clicked() {
-                    match self
-                        .controller
-                        .accept_call(peer_username.clone(), &sdp_offer)
-                    {
+                let buttons_width = (130.0 * 2.0) + 40.0;
+                let start_space = (ui.available_width() - buttons_width) / 2.0;
+                ui.add_space(start_space);
+
+                let accept_btn = egui::Button::new(
+                    RichText::new("Accept").size(18.0).strong().color(Color32::WHITE)
+                )
+                    .fill(Color32::from_rgb(50, 180, 50))
+                    .corner_radius(30.0);
+
+                if ui.add_sized([130.0, 60.0], accept_btn).clicked() {
+                    match self.controller.accept_call(peer_username.clone(), &sdp_offer) {
                         Ok((local_frame_rx, remote_frame_rx)) => {
-                            match self.controller.get_username() {
-                                Ok(username) => {
-                                    self.local_frame_rx = Some(local_frame_rx);
-                                    self.remote_frame_rx = Some(remote_frame_rx);
-                                    self.view = View::Call(username, peer_username.clone());
-                                }
-                                Err(e) => {
-                                    self.error_msg = Some(e.to_string());
-                                    self.view = View::Error;
-                                }
+                            if let Ok(username) = self.controller.get_username() {
+                                self.local_frame_rx = Some(local_frame_rx);
+                                self.remote_frame_rx = Some(remote_frame_rx);
+                                self.view = View::Call(username, peer_username.clone());
                             }
                         }
                         Err(e) => {
@@ -324,52 +548,75 @@ impl RoomRTCApp {
                         }
                     }
                 }
-                if ui.button("Decline").clicked() {
-                    match self.controller.reject_call(peer_username) {
+
+                ui.add_space(40.0);
+
+                let decline_btn = egui::Button::new(
+                    RichText::new("Decline").size(18.0).strong().color(Color32::WHITE)
+                )
+                    .fill(Color32::from_rgb(220, 50, 50))
+                    .corner_radius(30.0);
+
+                if ui.add_sized([130.0, 60.0], decline_btn).clicked() {
+                    match self.controller.reject_call(peer_username.clone()) {
                         Ok(()) => self.view = View::CallHub,
                         Err(e) => self.warning_msg = Some(e.to_string()),
                     }
                 }
             });
-            ui.separator();
+
+            ui.add_space(40.0);
         });
     }
 
     fn show_call(&mut self, username: String, peer_username: String, ctx: &Context, ui: &mut Ui) {
-        ui.vertical_centered(|ui| {
-            ui.heading("Call");
-            ui.add_space(20.0);
-
-            if let Err(e) = self.update_video_textures(ctx) {
-                self.warning_msg = Some(e.to_string());
-                if self.controller.hang_up().is_err() {
-                    self.view = View::FatalError;
-                } else {
-                    self.reset_after_call();
-                    self.view = View::CallHub;
-                }
-                return;
+        if let Err(e) = self.update_video_textures(ctx) {
+            self.warning_msg = Some(e.to_string());
+            if self.controller.hang_up().is_err() {
+                self.view = View::FatalError;
+            } else {
+                self.reset_after_call();
+                self.view = View::CallHub;
             }
+            return;
+        }
 
-            ui.horizontal_centered(|ui| {
+        ui.vertical_centered(|ui| {
+            ui.add_space(10.0);
+
+            ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(username).size(16.0).strong());
+                    ui.label(RichText::new(format!("YOU ({})", username)).size(14.0).color(Color32::GRAY));
+                    ui.add_space(5.0);
 
-                    ui.add_space(4.0);
-                    self.show_local_camera(ui);
-                    ctx.request_repaint();
+                    egui::Frame::canvas(ui.style())
+                        .fill(Color32::BLACK)
+                        .corner_radius(12.0)
+                        .show(ui, |ui| {
+                            self.show_local_camera(ui);
+                        });
                 });
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(peer_username.to_string()).size(16.0).strong());
 
-                    ui.add_space(4.0);
-                    self.show_remote_camera(ui);
-                    ctx.request_repaint();
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(&peer_username).size(14.0).strong().color(Color32::WHITE));
+                    ui.add_space(5.0);
+
+                    egui::Frame::canvas(ui.style())
+                        .fill(Color32::BLACK)
+                        .corner_radius(12.0)
+                        .show(ui, |ui| {
+                            self.show_remote_camera(ui);
+                        });
                 });
             });
 
-            let exit_btn = egui::Button::new("End call").min_size(egui::vec2(150.0, 40.0));
-            if ui.add_sized([150.0, 40.0], exit_btn).clicked() {
+            ui.add_space(25.0);
+
+            let exit_btn = egui::Button::new(RichText::new("End Call").strong().color(Color32::WHITE))
+                .fill(Color32::from_rgb(200, 40, 40))
+                .corner_radius(20.0);
+
+            if ui.add_sized([180.0, 45.0], exit_btn).clicked() {
                 if self.controller.hang_up().is_err() {
                     self.view = View::FatalError;
                 } else {
@@ -378,60 +625,146 @@ impl RoomRTCApp {
                 }
             }
 
+            ui.add_space(20.0);
             ui.separator();
+            ui.add_space(10.0);
+
             if let Some(stats) = &self.last_stats {
-                ui.scope(|ui| {
-                    ui.style_mut().override_text_style = Some(egui::TextStyle::Small);
-                    ui.label(RichText::new("📊 Network Stats").strong());
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(25, 25, 25))
+                    .corner_radius(10.0)
+                    .inner_margin(12.0)
+                    .show(ui, |ui| {
+                        ui.set_max_width(400.0);
 
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Jitter: {}ms", stats.remote_receiver.jitter));
-                        ui.label(format!("Lost: {} pkts", stats.remote_receiver.packets_lost));
-                    });
+                        ui.label(RichText::new("📊 NETWORK DIAGNOSTICS").size(12.0).strong().color(Color32::from_rgb(0, 150, 255)));
+                        ui.add_space(8.0);
 
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Sent: {}", stats.local_sender.packets_sent));
-                        ui.label(format!(
-                            "Received: {}",
-                            stats.local_receiver.packets_received
-                        ));
+                        egui::Grid::new("stats_grid")
+                            .num_columns(2)
+                            .spacing([40.0, 8.0])
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("Jitter:").color(Color32::GRAY));
+                                ui.label(format!("{} ms", stats.remote_receiver.jitter));
+                                ui.end_row();
+
+                                ui.label(RichText::new("Packets Lost:").color(Color32::GRAY));
+                                ui.label(RichText::new(format!("{}", stats.remote_receiver.packets_lost))
+                                    .color(if stats.remote_receiver.packets_lost > 0 { Color32::KHAKI } else { Color32::GREEN }));
+                                ui.end_row();
+
+                                ui.label(RichText::new("Sent / Received:").color(Color32::GRAY));
+                                ui.label(format!("{} / {}", stats.local_sender.packets_sent, stats.local_receiver.packets_received));
+                                ui.end_row();
+                            });
                     });
-                });
             } else {
-                ui.label("Esperando reporte RTCP...");
+                ui.add_space(10.0);
+                ui.spinner();
+                ui.label(RichText::new("Waiting for RTCP reports...").italics().color(Color32::GRAY));
             }
+
+            ctx.request_repaint();
         });
     }
 
     fn show_call_ended(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading("Call Ended");
+            ui.add_space(80.0);
+
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, Color32::from_rgb(30, 30, 30));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "📵",
+                FontId::proportional(80.0),
+                Color32::from_rgb(150, 150, 150),
+            );
+
+            ui.add_space(30.0);
+
+            ui.label(
+                RichText::new("Call Ended")
+                    .size(40.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
             ui.add_space(10.0);
 
-            if ui.button("Back to menu").clicked() {
+            ui.label(
+                RichText::new("The other user has disconnected.")
+                    .size(18.0)
+                    .color(Color32::from_rgb(140, 140, 140))
+            );
+
+            ui.add_space(80.0);
+
+            let back_btn = egui::Button::new(
+                RichText::new("Back to hub").size(18.0).strong().color(Color32::WHITE)
+            )
+                .fill(Color32::from_rgb(0, 122, 255))
+                .corner_radius(30.0);
+
+            if ui.add_sized([240.0, 60.0], back_btn)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 self.view = View::CallHub;
             }
+
+            ui.add_space(40.0);
         });
     }
 
     fn show_full_server(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(50.0);
+            ui.add_space(80.0);
 
-            ui.label(
-                RichText::new("Server is full. Try again soon!")
-                    .color(Color32::RED)
-                    .font(FontId::proportional(24.0)),
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, Color32::from_rgb(40, 20, 20));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "🚫",
+                FontId::proportional(80.0),
+                Color32::from_rgb(220, 50, 50),
             );
 
-            ui.add_space(20.0);
+            ui.add_space(30.0);
 
-            if ui
-                .add_sized([200.0, 40.0], egui::Button::new("Close App"))
+            ui.label(
+                RichText::new("Server Full")
+                    .size(40.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
+            ui.add_space(10.0);
+
+            ui.label(
+                RichText::new("Maximum capacity reached.\nPlease try again in a few minutes.")
+                    .size(18.0)
+                    .color(Color32::from_rgb(160, 160, 160))
+            );
+
+            ui.add_space(80.0);
+
+            let close_btn = egui::Button::new(
+                RichText::new("Close Application").size(18.0).strong().color(Color32::WHITE)
+            )
+                .fill(Color32::from_rgb(60, 60, 60))
+                .corner_radius(30.0);
+
+            if ui.add_sized([240.0, 60.0], close_btn)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
-                std::process::exit(0);
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
+
+            ui.add_space(40.0);
         });
     }
 
@@ -533,22 +866,51 @@ impl RoomRTCApp {
 
     fn show_fatal_error(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(50.0);
+            ui.add_space(80.0);
 
-            ui.label(
-                RichText::new("An unexpected error occurred")
-                    .color(Color32::RED)
-                    .font(FontId::proportional(24.0)),
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 150.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 75.0, Color32::from_rgb(60, 20, 20));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "⚠",
+                FontId::proportional(80.0),
+                Color32::WHITE,
             );
 
-            ui.add_space(20.0);
+            ui.add_space(30.0);
 
-            if ui
-                .add_sized([200.0, 40.0], egui::Button::new("Close App"))
+            ui.label(
+                RichText::new("Fatal Error")
+                    .size(40.0)
+                    .strong()
+                    .color(Color32::WHITE)
+            );
+
+            ui.add_space(10.0);
+
+            ui.label(
+                RichText::new("An unexpected error occurred and the\napplication needs to close.")
+                    .size(18.0)
+                    .color(Color32::from_rgb(180, 150, 150))
+            );
+
+            ui.add_space(80.0);
+
+            let close_btn = egui::Button::new(
+                RichText::new("Exit Application").size(18.0).strong().color(Color32::WHITE)
+            )
+                .fill(Color32::from_rgb(180, 40, 40))
+                .corner_radius(30.0);
+
+            if ui.add_sized([240.0, 60.0], close_btn)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
                 std::process::exit(0);
             }
+
+            ui.add_space(40.0);
         });
     }
 

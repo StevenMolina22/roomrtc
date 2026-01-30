@@ -7,7 +7,6 @@ use crate::session::sdp::{DtlsSetupRole, Fingerprint};
 use std::collections::HashSet;
 use std::net::UdpSocket;
 use std::sync::Arc;
-
 use crate::logger::Logger;
 
 /// High-level session that exposes SDP and ICE operations used by the UI
@@ -58,31 +57,44 @@ impl CallSession {
                 Error::IceConnectionError(format!("Failed to gather ICE candidates: {e}"))
             })?;
 
-        let mut media_description = MediaDescription::new(
-            config.media.media_type.clone(),
-            stun_socket
-                .local_addr()
-                .map_err(|e| Error::IceConnectionError(e.to_string()))?
-                .port(),
+        let local_port = stun_socket
+            .local_addr()
+            .map_err(|e| Error::IceConnectionError(e.to_string()))?
+            .port();
+
+        // --- 1. CONFIGURACIÓN DE VIDEO ---
+        let mut video_media_description = MediaDescription::new(
+            config.media.video_media_type.clone(),
+            local_port,
             config.media.media_protocol.clone(),
-            HashSet::from([config.media.rtp_payload_type]),
+            HashSet::from([config.media.video_payload_type]),
         );
-        media_description
+
+        video_media_description
             .add_attribute(Attribute::RTPMap(
-                config.media.rtp_payload_type,
-                config.media.codec_name.clone(),
+                config.media.video_payload_type,
+                config.media.video_codec_name.clone(),
                 config.media.clock_rate,
                 None,
             ))
-            .map_err(|e| Error::SdpCreationError(format!("Failed to add RTPMap attribute: {e}")))?;
+            .map_err(|e| Error::SdpCreationError(format!("Failed to add Video RTPMap: {e}")))?;
 
-        for candidate in ice_agent.get_local_candidates() {
-            media_description
-                .add_attribute(Attribute::Candidate(candidate.clone()))
-                .map_err(|e| {
-                    Error::SdpCreationError(format!("Failed to add Candidate attribute: {e}"))
-                })?;
-        }
+        // --- 2. CONFIGURACIÓN DE AUDIO (NUEVO) ---
+        let mut audio_media_description = MediaDescription::new(
+            config.media.audio_media_type.clone(),
+            local_port,
+            config.media.media_protocol.clone(),
+            HashSet::from([config.media.audio_payload_type]),
+        );
+
+        audio_media_description
+            .add_attribute(Attribute::RTPMap(
+                config.media.audio_payload_type,
+                config.media.audio_codec_name.clone(),
+                config.media.audio_sample_rate,
+                Some(config.media.audio_channels.to_string()),
+            ))
+            .map_err(|e| Error::SdpCreationError(format!("Failed to add Audio RTPMap: {e}")))?;
 
         let local_cert = generate_self_signed_cert().map_err(|e| {
             Error::SecurityInitializationError(format!("Failed to generate local certificate: {e}"))
@@ -90,23 +102,30 @@ impl CallSession {
 
         let fingerprint = Fingerprint::from_hash_string("sha-256", &local_cert.fingerprint)
             .map_err(|e| {
-                Error::SdpCreationError(format!(
-                    "Failed to encode local fingerprint attribute: {e}"
-                ))
-            })?;
-
-        media_description
-            .add_attribute(Attribute::Fingerprint(fingerprint))
-            .map_err(|e| {
-                Error::SdpCreationError(format!("Failed to add fingerprint attribute: {e}"))
+                Error::SdpCreationError(format!("Failed to encode local fingerprint: {e}"))
             })?;
 
         let local_setup_role = DtlsSetupRole::ActPass;
-        media_description
-            .add_attribute(Attribute::Setup(local_setup_role))
-            .map_err(|e| Error::SdpCreationError(format!("Failed to add setup attribute: {e}")))?;
 
-        let mut sdp = SessionDescriptionProtocol::new(vec![media_description], &config.sdp);
+        let media_list = vec![&mut video_media_description, &mut audio_media_description];
+
+        for md in media_list {
+            md.add_attribute(Attribute::Fingerprint(fingerprint.clone()))
+                .map_err(|e| Error::SdpCreationError(e.to_string()))?;
+
+            md.add_attribute(Attribute::Setup(local_setup_role))
+                .map_err(|e| Error::SdpCreationError(e.to_string()))?;
+
+            for candidate in ice_agent.get_local_candidates() {
+                md.add_attribute(Attribute::Candidate(candidate.clone()))
+                    .map_err(|e| Error::SdpCreationError(e.to_string()))?;
+            }
+        }
+
+        let mut sdp = SessionDescriptionProtocol::new(
+            vec![video_media_description, audio_media_description],
+            &config.sdp
+        );
 
         if let Some(local_candidate) = ice_agent.get_local_candidate() {
             sdp.set_connection_data("IN", "IP4", local_candidate.address.clone().as_str());

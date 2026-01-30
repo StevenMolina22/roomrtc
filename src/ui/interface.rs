@@ -47,6 +47,9 @@ pub struct RoomRTCApp {
     warning_msg: Option<String>,
 
     last_stats: Option<CallStats>,
+
+    // Audio state
+    is_muted: bool,
 }
 
 impl RoomRTCApp {
@@ -92,6 +95,7 @@ impl RoomRTCApp {
             error_msg: None,
             warning_msg: None,
             last_stats: None,
+            is_muted: false,
         }
     }
 }
@@ -381,11 +385,11 @@ impl RoomRTCApp {
 
                         let btn_response = ui.add(logout_btn);
 
-                        if btn_response.on_hover_text("Log Out").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            if self.controller.log_out().is_ok() {
+                        if btn_response.on_hover_text("Log Out").on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+                            && self.controller.log_out().is_ok() {
                                 self.view = View::Welcome;
                             }
-                        }
+                        
                     });
                 }
             );
@@ -426,7 +430,7 @@ impl RoomRTCApp {
 
                                     ui.vertical(|ui| {
                                         ui.label(RichText::new(username).strong().color(Color32::WHITE).size(16.0));
-                                        ui.label(RichText::new(status.to_string()).size(11.0).color(Color32::GRAY));
+                                        ui.label(RichText::new(status.to_string().split(":").collect::<Vec<&str>>()[0]).size(11.0).color(Color32::GRAY));
                                     });
 
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -436,11 +440,11 @@ impl RoomRTCApp {
                                                     .fill(Color32::from_rgb(0, 122, 255))
                                                     .corner_radius(8.0);
 
-                                                if ui.add_sized([70.0, 28.0], call_btn).clicked() {
-                                                    if self.controller.call(username).is_ok() {
+                                                if ui.add_sized([70.0, 28.0], call_btn).clicked()
+                                                    && self.controller.call(username).is_ok() {
                                                         self.view = View::Calling(username.clone());
                                                     }
-                                                }
+                                                
                                             },
                                             UserStatus::Offline => {},
                                             UserStatus::Occupied(peer_name) => {
@@ -612,18 +616,44 @@ impl RoomRTCApp {
 
             ui.add_space(25.0);
 
-            let exit_btn = egui::Button::new(RichText::new("End Call").strong().color(Color32::WHITE))
-                .fill(Color32::from_rgb(200, 40, 40))
-                .corner_radius(20.0);
+            ui.horizontal(|ui| {
+                // Center the buttons horizontally
+                let buttons_width = 150.0 + 20.0 + 150.0; // btn1 width + spacing + btn2 width
+                let center_offset = (ui.available_width() - buttons_width) / 2.0;
+                ui.add_space(center_offset);
 
-            if ui.add_sized([180.0, 45.0], exit_btn).clicked() {
-                if self.controller.hang_up().is_err() {
-                    self.view = View::FatalError;
+                // 1. MUTE/UNMUTE button
+                let (mute_text, mute_color) = if self.is_muted {
+                    ("🔇 Unmute", Color32::from_rgb(200, 100, 0)) // Orange when muted
                 } else {
-                    self.reset_after_call();
-                    self.view = View::CallHub;
+                    ("🎤 Mute", Color32::from_rgb(60, 60, 60))    // Dark gray when normal
+                };
+
+                let mute_btn = egui::Button::new(RichText::new(mute_text).strong().color(Color32::WHITE))
+                    .fill(mute_color)
+                    .corner_radius(20.0);
+
+                if ui.add_sized([150.0, 45.0], mute_btn).clicked() {
+                    self.controller.toggle_audio();
+                    self.is_muted = !self.is_muted;
                 }
-            }
+
+                ui.add_space(20.0);
+
+                // 2. END CALL button
+                let exit_btn = egui::Button::new(RichText::new("End Call").strong().color(Color32::WHITE))
+                    .fill(Color32::from_rgb(200, 40, 40))
+                    .corner_radius(20.0);
+
+                if ui.add_sized([150.0, 45.0], exit_btn).clicked() {
+                    if self.controller.hang_up().is_err() {
+                        self.view = View::FatalError;
+                    } else {
+                        self.reset_after_call();
+                        self.view = View::CallHub;
+                    }
+                }
+            });
 
             ui.add_space(20.0);
             ui.separator();
@@ -920,6 +950,8 @@ impl RoomRTCApp {
 
         self.local_texture = None;
         self.remote_texture = None;
+
+        self.is_muted = false;
     }
 
     fn handle_event(&mut self, event: AppEvent) {

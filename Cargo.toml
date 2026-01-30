@@ -18,3 +18,5 @@ rustls-pemfile = "2.2.0"
 udp-dtls = "0.1"
 openssl = { version = "0.10", features = ["v110"] }
 yuv = "0.8.9"
+cpal = "0.17.1"
+audiopus = "0.2.0"

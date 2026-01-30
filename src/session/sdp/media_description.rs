@@ -160,10 +160,10 @@ mod tests {
 
     #[test]
     fn test_from_str_valid_media_description() -> Result<(), Error> {
-        let line = "audio 5004 RTP/AVP 96 97";
+        let line = "microphone 5004 RTP/AVP 96 97";
         let md = MediaDescription::from_str(line)?;
 
-        assert_eq!(md.media_type, "audio");
+        assert_eq!(md.media_type, "microphone");
         assert_eq!(md.port, 5004);
         assert_eq!(md.protocol, "RTP/AVP");
         assert!(md.fmts.contains(&96));
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_from_str_invalid_format_missing_fields() {
-        let line = "audio 5004 RTP/AVP";
+        let line = "microphone 5004 RTP/AVP";
         let result = MediaDescription::from_str(line);
         assert!(matches!(
             result,
@@ -184,14 +184,14 @@ mod tests {
 
     #[test]
     fn test_from_str_invalid_port() {
-        let line = "audio notaport RTP/AVP 96";
+        let line = "microphone notaport RTP/AVP 96";
         let result = MediaDescription::from_str(line);
         assert!(matches!(result, Err(Error::InvalidPortError)));
     }
 
     #[test]
     fn test_from_str_invalid_fmt() {
-        let line = "audio 5004 RTP/AVP x";
+        let line = "microphone 5004 RTP/AVP x";
         let result = MediaDescription::from_str(line);
         assert!(matches!(result, Err(Error::InvalidFmtError)));
     }
@@ -200,7 +200,7 @@ mod tests {
     fn test_add_attribute_valid() {
         let mut fmts = HashSet::new();
         fmts.insert(96);
-        let mut md = MediaDescription::new("audio".into(), 5004, "RTP/AVP".into(), fmts);
+        let mut md = MediaDescription::new("microphone".into(), 5004, "RTP/AVP".into(), fmts);
 
         let attr = Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into()));
         assert!(md.add_attribute(attr).is_ok());
@@ -211,7 +211,7 @@ mod tests {
     fn test_add_attribute_invalid_fmt() {
         let mut fmts = HashSet::new();
         fmts.insert(97);
-        let mut md = MediaDescription::new("audio".into(), 5004, "RTP/AVP".into(), fmts);
+        let mut md = MediaDescription::new("microphone".into(), 5004, "RTP/AVP".into(), fmts);
 
         let attr = Attribute::RTPMap(96, "opus".into(), 48000, Some("2".into()));
         let result = md.add_attribute(attr);

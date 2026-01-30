@@ -76,7 +76,7 @@ impl Controller {
             config.server.server_name.clone(),
         )?;
 
-        let media_pipeline = MediaPipeline::new(config, 0, logger.context("MediaPipeline"));
+        let media_pipeline = MediaPipeline::new(config, logger.context("MediaPipeline"));
         let transport = MediaTransport::new(config, logger.context("MediaTransport"))
             .map_err(|e| Error::MapError(e.to_string()))?;
         let socket_for_stun = transport
@@ -545,6 +545,14 @@ impl Controller {
     // Helper function to retrieve the current username
     pub(crate) fn get_username(&self) -> Result<String, Error> {
         self.get_token()
+    }
+
+    /// Toggles the microphone mute state.
+    ///
+    /// Delegates the action to the media pipeline. If audio is not active
+    /// or initialized, this operation does nothing.
+    pub fn toggle_audio(&self) {
+        self.media_pipeline.toggle_audio();
     }
 }
 

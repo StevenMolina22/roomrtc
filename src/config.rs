@@ -63,14 +63,17 @@ pub struct MediaConfig {
     /// Maximum size (bytes) of RTP payload chunks.
     pub rtp_max_chunk_size: usize,
 
-    /// Default SSRC to use for outgoing RTP streams.
-    pub default_ssrc: u32,
+    /// Frame ssrc
+    pub frame_ssrc: u32,
+
+    /// Audio ssrc
+    pub audio_ssrc: u32,
 
     /// RTP payload type number for the chosen codec.
-    pub rtp_payload_type: u8,
+    pub video_payload_type: u8,
 
-    /// Codec name (e.g. "H264"). Used in SDP generation.
-    pub codec_name: String,
+    /// Video Codec name. Used in SDP generation.
+    pub video_codec_name: String,
 
     /// Codec clock rate used in RTP timestamping and SDP.
     pub clock_rate: u32,
@@ -78,15 +81,34 @@ pub struct MediaConfig {
     /// RTP packet version.
     pub rtp_version: u8,
 
-    /// SDP media type (e.g. "video").
-    pub media_type: String,
+    /// "video" media type.
+    pub video_media_type: String,
+
+    /// "audio" media type.
+    pub audio_media_type: String,
 
     /// SDP media protocol (e.g. "RTP/AVP").
     pub media_protocol: String,
 
     /// Jitter buffer size
     pub jitter_buffer_size: usize,
+
+    /// Audio channels
+    pub audio_channels: u8,
+
+    /// Audio sample rate
+    pub audio_sample_rate: u32,
+
+    /// Audio frame size
+    pub audio_frame_size: usize,
+
+    /// RTP audio payload type
+    pub audio_payload_type: u8,
+
+    /// Audio Codec name. Used in SDP generation.
+    pub audio_codec_name: String,
 }
+
 
 #[derive(Debug, Clone)]
 /// Configuration for RTCP-style reporting used by the report handler.
@@ -251,17 +273,21 @@ impl Config {
                     .get("rtp_max_chunk_size")
                     .ok_or("Missing rtp_max_chunk_size")?
                     .parse()?,
-                default_ssrc: media_section
-                    .get("default_ssrc")
-                    .ok_or("Missing default_ssrc")?
+                frame_ssrc: media_section
+                    .get("frame_ssrc")
+                    .ok_or("Missing frame_ssrc")?
                     .parse()?,
-                rtp_payload_type: media_section
-                    .get("rtp_payload_type")
-                    .ok_or("Missing rtp_payload_type")?
+                audio_ssrc: media_section
+                    .get("audio_ssrc")
+                    .ok_or("Missing audio_ssrc")?
                     .parse()?,
-                codec_name: media_section
-                    .get("codec_name")
-                    .ok_or("Missing codec_name")?
+                video_payload_type: media_section
+                    .get("video_payload_type")
+                    .ok_or("Missing video_payload_type")?
+                    .parse()?,
+                video_codec_name: media_section
+                    .get("video_codec_name")
+                    .ok_or("Missing video_codec_name")?
                     .to_string(),
                 clock_rate: media_section
                     .get("clock_rate")
@@ -271,9 +297,13 @@ impl Config {
                     .get("rtp_version")
                     .ok_or("Missing rtp_version")?
                     .parse()?,
-                media_type: media_section
-                    .get("media_type")
-                    .ok_or("Missing media_type")?
+                video_media_type: media_section
+                    .get("video_media_type")
+                    .ok_or("Missing video_media_type")?
+                    .to_string(),
+                audio_media_type: media_section
+                    .get("audio_media_type")
+                    .ok_or("Missing audio_media_type")?
                     .to_string(),
                 media_protocol: media_section
                     .get("media_protocol")
@@ -283,6 +313,26 @@ impl Config {
                     .get("jitter_buffer_size")
                     .ok_or("Missing jitter_buffer_size")?
                     .parse()?,
+                audio_channels: media_section
+                    .get("audio_channels")
+                    .ok_or("Missing audio_channels")?
+                    .parse()?,
+                audio_sample_rate: media_section
+                    .get("audio_sample_rate")
+                    .ok_or("Missing audio_sample_rate")?
+                    .parse()?,
+                audio_frame_size: media_section
+                    .get("audio_frame_size")
+                    .ok_or("Missing audio_frame_size")?
+                    .parse()?,
+                audio_payload_type: media_section
+                    .get("audio_payload_type")
+                    .ok_or("Missing audio_payload_type")?
+                    .parse()?,
+                audio_codec_name: media_section
+                    .get("audio_codec_name")
+                    .ok_or("Missing audio_codec_name")?
+                    .to_string(),
             },
             rtcp: RtcpConfig {
                 report_period_millis: rtcp_section

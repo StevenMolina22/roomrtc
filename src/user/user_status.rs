@@ -45,7 +45,7 @@ impl Display for UserStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Available => write!(f, "Available"),
-            Self::Occupied(_) => write!(f, "Occupied"),
+            Self::Occupied(some) => write!(f, "Occupied:{some}"),
             Self::Offline => write!(f, "Offline"),
         }
     }

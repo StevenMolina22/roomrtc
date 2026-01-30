@@ -270,7 +270,7 @@ mod tests {
         let mut fmts = HashSet::new();
         fmts.insert(96);
 
-        let mut md = MediaDescription::new("audio".into(), 5004, "RTP/AVP".into(), fmts);
+        let mut md = MediaDescription::new("microphone".into(), 5004, "RTP/AVP".into(), fmts);
         md.add_attribute(Attribute::RTPMap(
             96,
             "opus".into(),
@@ -288,7 +288,7 @@ mod tests {
             s=-
             t=0 0
             c=IN IP4 127.0.0.1
-            m=audio 5004 RTP/AVP 96
+            m=microphone 5004 RTP/AVP 96
             a=rtpmap:96 opus/48000/2";
 
         let sdp = SessionDescriptionProtocol::from_str(sdp_line)?;
@@ -303,7 +303,7 @@ mod tests {
             .media_descriptions
             .first()
             .ok_or(Error::MissingMediaDescriptionError)?;
-        assert_eq!(md.media_type, "audio");
+        assert_eq!(md.media_type, "microphone");
         assert_eq!(md.protocol, "RTP/AVP");
         assert_eq!(md.port, 5004);
         assert!(
@@ -322,7 +322,7 @@ mod tests {
             s=-
             t=0 0
             c IN IP4 127.0.0.1
-            m=audio 5004 RTP/AVP 96
+            m=microphone 5004 RTP/AVP 96
             a=rtpmap:96 opus/48000/2";
 
         let sdp = SessionDescriptionProtocol::from_str(sdp_line);
@@ -341,7 +341,7 @@ mod tests {
 
         let out = format!("{sdp}");
         assert!(out.contains("v=0"));
-        assert!(out.contains("m=audio"));
+        assert!(out.contains("m=microphone"));
         assert!(out.contains("a=rtpmap:96 opus/48000/2"));
         Ok(())
     }
@@ -374,7 +374,7 @@ mod tests {
         let mut remote_fmts = HashSet::new();
         remote_fmts.insert(97);
         let mut remote_md =
-            MediaDescription::new("audio".into(), 6000, "RTP/AVP".into(), remote_fmts);
+            MediaDescription::new("microphone".into(), 6000, "RTP/AVP".into(), remote_fmts);
         remote_md.add_attribute(Attribute::RTPMap(97, "vp8".into(), 90000, Some("1".into())))?;
 
         let remote_sdp = SessionDescriptionProtocol::new(vec![remote_md], &make_test_sdp_config());
@@ -393,7 +393,7 @@ mod tests {
         let local_sdp = SessionDescriptionProtocol::new(vec![local_md], &make_test_sdp_config());
 
         let mut offer_md =
-            MediaDescription::new("audio".into(), 6000, "RTP/AVP".into(), HashSet::from([96]));
+            MediaDescription::new("microphone".into(), 6000, "RTP/AVP".into(), HashSet::from([96]));
         offer_md.add_attribute(Attribute::RTPMap(
             96,
             "opus".into(),

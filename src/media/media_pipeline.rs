@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::controller::AppEvent;
 use crate::logger::Logger;
 use crate::media::camera::{Camera, FrameSource};
+use crate::media::audio_pipeline::AudioPipeline;
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::color_space::rgb_to_yuv420;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
@@ -24,8 +25,8 @@ const JITTER_BUFF_SIZE: usize = 2048;
 /// events for errors and call termination.
 pub struct MediaPipeline {
     camera: Camera,
+    audio: Option<AudioPipeline>,
     config: Arc<Config>,
-    ssrc: u32,
     logger: Logger,
     clock: Arc<Clock>,
 }
@@ -33,12 +34,20 @@ pub struct MediaPipeline {
 impl MediaPipeline {
     /// Creates a new media pipeline with its own clock and camera.
     #[must_use]
-    pub fn new(config: &Arc<Config>, ssrc: u32, logger: Logger) -> Self {
+    pub fn new(config: &Arc<Config>, logger: Logger) -> Self {
         let clock = Arc::new(Clock::new());
+        let audio = match AudioPipeline::new(config, logger.clone(), clock.clone()) {
+            Ok(ap) => Some(ap),
+            Err(e) => {
+                logger.error(&format!("Audio init failed: {}", e));
+                None
+            }
+        };
+
         Self {
             camera: Camera::new(clock.clone(), config, logger.clone()),
+            audio,
             config: Arc::clone(config),
-            ssrc,
             logger,
             clock,
         }
@@ -57,24 +66,65 @@ impl MediaPipeline {
         connected: Arc<AtomicBool>,
         receiver_metrics: Arc<Mutex<ReceiverStats>>,
     ) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
+        // Local preview + encoded sender
         let local_frame_rx =
-            self.start_local_frame_pipeline(rtp_tx, event_tx.clone(), connected.clone())?;
+            self.start_local_frame_pipeline(rtp_tx.clone(), event_tx.clone(), connected.clone())?;
+
+        // Create internal splitter channels for video/audio demuxing
+        let (video_tx, video_rx) = mpsc::channel();
+        let (audio_tx, audio_rx) = mpsc::channel();
+
+        self.start_remote_pipeline(rtp_rx, connected.clone(), video_tx, audio_tx);
+
+        // Start video receive pipeline using video_rx
         let remote_frame_rx = self.start_remote_frame_pipeline(
-            rtp_rx,
+            video_rx,
             event_tx.clone(),
             connected.clone(),
-            receiver_metrics,
+            receiver_metrics.clone(),
         )?;
+
+        // Start audio pipeline if available (use audio_rx)
+        if let Some(audio) = &mut self.audio {
+            audio.start(rtp_tx, audio_rx, connected.clone(), receiver_metrics.clone())
+                .map_err(|e| Error::MapError(e.to_string()))?;
+        }
 
         Ok((local_frame_rx, remote_frame_rx))
     }
 
     /// Stops camera capture and related media components.
-    pub fn stop(&self) {
+    pub fn stop(&mut self) {
         self.logger.info("Stopping MediaPipeline...");
         self.camera.stop();
+        if let Some(ref mut ap) = self.audio {
+            ap.stop();
+        }
     }
 
+    fn start_remote_pipeline(
+        &mut self,
+        rtp_rx: Receiver<RtpPacket>,
+        connected: Arc<AtomicBool>,
+        video_tx: Sender<RtpPacket>,
+        audio_tx: Sender<RtpPacket>,
+    ) {
+        let config = Arc::clone(&self.config);
+        let logger = self.logger.clone();
+        thread::spawn(move || {
+            while let Ok(packet) = rtp_rx.recv() {
+                if !connected.load(Ordering::Relaxed) {
+                    break;
+                }
+                if packet.payload_type == config.media.video_payload_type {
+                    if let Err(_) = video_tx.send(packet) { break }
+                } else if packet.payload_type == config.media.audio_payload_type {
+                    if let Err(_) = audio_tx.send(packet) { break }
+                }
+            }
+            logger.info("Demuxer thread finished");
+        });
+    }
     // Builds the remote receive pipeline: jitter buffer + decoder.
     fn start_remote_frame_pipeline(
         &self,
@@ -89,7 +139,7 @@ impl MediaPipeline {
         let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(
             self.clock.clone(),
             receiver_metrics,
-            self.logger.clone(),
+            self.logger.clone()
         );
 
         thread::spawn({
@@ -221,7 +271,6 @@ impl MediaPipeline {
         };
 
         let logger = self.logger.clone();
-        let ssrc = self.ssrc;
         let config = self.config.clone();
         let connected = connected.clone();
         let mut seq_num: u64 = 0;
@@ -237,7 +286,7 @@ impl MediaPipeline {
                 };
 
                 if let Err(e) =
-                    send_encoded_frame(encoded, &rtp_tx, ssrc, &connected, &mut seq_num, &config)
+                    send_encoded_frame(encoded, &rtp_tx, &connected, &mut seq_num, &config)
                 {
                     logger.error(&Error::SendError(e.to_string()).to_string());
                     break;
@@ -246,13 +295,18 @@ impl MediaPipeline {
         });
         Ok(())
     }
+
+    pub fn toggle_audio(&self) {
+        if let Some(audio) = &self.audio {
+            audio.toggle_mute();
+        }
+    }
 }
 
 /// Sends an encoded frame as RTP packets over the provided channel.
 fn send_encoded_frame(
     encoded_frame: EncodedFrame,
     rtp_tx: &Sender<RtpPacket>,
-    ssrc: u32,
     connected: &Arc<AtomicBool>,
     sequence_number: &mut u64,
     config: &Arc<Config>,
@@ -270,9 +324,9 @@ fn send_encoded_frame(
             total_chunks: total_chunks as u8,
             is_i_frame: encoded_frame.is_i_frame,
             sequence_number: *sequence_number,
-            payload_type: config.media.rtp_payload_type,
+            payload_type: config.media.video_payload_type,
             timestamp: encoded_frame.frame_time,
-            ssrc,
+            ssrc: config.media.frame_ssrc,
             payload: payload.clone(),
         };
         *sequence_number = sequence_number.saturating_add(1);
@@ -370,7 +424,7 @@ mod tests {
                 marker: 0,
                 total_chunks,
                 is_i_frame: encoded.is_i_frame,
-                payload_type: config.media.rtp_payload_type,
+                payload_type: config.media.video_payload_type,
                 sequence_number: i as u64,
                 timestamp: raw_frame.frame_time,
                 ssrc: 55,

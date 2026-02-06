@@ -149,6 +149,7 @@ impl Microphone {
             drop(stream); 
             self.logger.info("Microphone stream stopped.");
         }
+        self.muted.store(false, Ordering::Relaxed);
         Ok(())
     }
 

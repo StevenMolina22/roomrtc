@@ -12,7 +12,8 @@ use eframe::epaint::{Color32, FontId};
 use egui::{ColorImage, Context, RichText, TextureHandle, TextureOptions, Ui};
 use std::net::SocketAddr;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, mpsc, Mutex};
+use std::thread;
 
 /// Application state and UI controller for the `RoomRTC` GUI.
 ///
@@ -39,8 +40,8 @@ pub struct RoomRTCApp {
     password_buff: String,
 
     // Textures
-    local_texture: Option<TextureHandle>,
-    remote_texture: Option<TextureHandle>,
+    local_texture: Arc<Mutex<Option<TextureHandle>>>,
+    remote_texture: Arc<Mutex<Option<TextureHandle>>>,
 
     // Error handling
     error_msg: Option<String>,
@@ -90,8 +91,8 @@ impl RoomRTCApp {
             remote_frame_rx: None,
             username_buff: String::new(),
             password_buff: String::new(),
-            local_texture: None,
-            remote_texture: None,
+            local_texture: Arc::new(Mutex::new(None)),
+            remote_texture: Arc::new(Mutex::new(None)),
             error_msg: None,
             warning_msg: None,
             last_stats: None,
@@ -106,7 +107,7 @@ impl eframe::App for RoomRTCApp {
             ui.add_space(40.0);
             loop {
                 match self.event_rx.try_recv() {
-                    Ok(event) => self.handle_event(event),
+                    Ok(event) => self.handle_event(event, ctx),
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
                         self.view = View::FatalError;
@@ -123,11 +124,11 @@ impl eframe::App for RoomRTCApp {
                 View::LogIn => self.show_log_in(ui),
                 View::Calling(peer_username) => self.show_calling(peer_username.clone(), ui),
                 View::CallIncoming(peer_username, sdp_offer) => {
-                    self.show_call_incoming(peer_username.clone(), sdp_offer.clone(), ui);
+                    self.show_call_incoming(peer_username.clone(), sdp_offer.clone(), ctx, ui);
                 }
                 View::CallHub => self.show_call_hub(ui),
                 View::Call(username, peer_username) => {
-                    self.show_call(username.clone(), peer_username.clone(), ctx, ui);
+                    self.show_call(username.clone(), peer_username.clone(), ui);
                 }
                 View::CallEnded => self.show_call_ended(ui),
                 View::Error => self.show_error(ui),
@@ -504,6 +505,7 @@ impl RoomRTCApp {
         &mut self,
         peer_username: String,
         sdp_offer: SessionDescriptionProtocol,
+        ctx: &Context,
         ui: &mut Ui,
     ) {
         ui.vertical_centered(|ui| {
@@ -544,6 +546,16 @@ impl RoomRTCApp {
                                 self.local_frame_rx = Some(local_frame_rx);
                                 self.remote_frame_rx = Some(remote_frame_rx);
                                 self.view = View::Call(username, peer_username.clone());
+                                if let Err(e) = self.update_video_textures(ctx) {
+                                    self.warning_msg = Some(e.to_string());
+                                    if self.controller.hang_up().is_err() {
+                                        self.view = View::FatalError;
+                                    } else {
+                                        self.reset_after_call();
+                                        self.view = View::CallHub;
+                                    }
+                                    return;
+                                }
                             }
                         }
                         Err(e) => {
@@ -573,18 +585,7 @@ impl RoomRTCApp {
         });
     }
 
-    fn show_call(&mut self, username: String, peer_username: String, ctx: &Context, ui: &mut Ui) {
-        if let Err(e) = self.update_video_textures(ctx) {
-            self.warning_msg = Some(e.to_string());
-            if self.controller.hang_up().is_err() {
-                self.view = View::FatalError;
-            } else {
-                self.reset_after_call();
-                self.view = View::CallHub;
-            }
-            return;
-        }
-
+    fn show_call(&mut self, username: String, peer_username: String, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(10.0);
 
@@ -693,8 +694,6 @@ impl RoomRTCApp {
                 ui.spinner();
                 ui.label(RichText::new("Waiting for RTCP reports...").italics().color(Color32::GRAY));
             }
-
-            ctx.request_repaint();
         });
     }
 
@@ -799,22 +798,31 @@ impl RoomRTCApp {
     }
 
     fn update_video_textures(&mut self, ctx: &Context) -> Result<(), Error> {
-        let local_frame_rx = self.local_frame_rx.as_ref().ok_or(Error::EmptyReceiver)?;
-        let remote_frame_rx = self.remote_frame_rx.as_ref().ok_or(Error::EmptyReceiver)?;
+        if let Some(local_rx) = self.local_frame_rx.take() {
+            spawn_texture_thread(
+                local_rx,
+                ctx.clone(),
+                self.local_texture.clone(),
+                "local_camera".to_string()
+            );
+        }
 
-        update_camera_view(ctx, local_frame_rx, &mut self.local_texture, "local_camera");
-        update_camera_view(
-            ctx,
-            remote_frame_rx,
-            &mut self.remote_texture,
-            "remote_camera",
-        );
+        if let Some(remote_rx) = self.remote_frame_rx.take() {
+            spawn_texture_thread(
+                remote_rx,
+                ctx.clone(),
+                self.remote_texture.clone(),
+                "remote_camera".to_string()
+            );
+        }
 
         Ok(())
     }
 
-    fn show_local_camera(&self, ui: &mut Ui) {
-        if let Some(texture) = &self.local_texture {
+    fn show_local_camera(&self, ui: &mut Ui) -> Result<(), Error> {
+        let guard = self.local_texture.lock()
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        if let Some(texture) = guard.as_ref() {
             let size = texture.size_vec2();
             let aspect_ratio = size.x / size.y;
             let desired_height = 240.0;
@@ -826,10 +834,13 @@ impl RoomRTCApp {
         } else {
             ui.label("Waiting for local camera...");
         }
+        Ok(())
     }
 
-    fn show_remote_camera(&self, ui: &mut Ui) {
-        if let Some(texture) = &self.remote_texture {
+    fn show_remote_camera(&self, ui: &mut Ui) -> Result<(), Error> {
+        let guard = self.remote_texture.lock()
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        if let Some(texture) = guard.as_ref() {
             let size = texture.size_vec2();
             let aspect_ratio = size.x / size.y;
             let desired_height = 240.0;
@@ -841,6 +852,7 @@ impl RoomRTCApp {
         } else {
             ui.label("Waiting for remote camera...");
         }
+        Ok(())
     }
 
     fn show_warning_popup(&mut self, ctx: &Context) {
@@ -948,13 +960,17 @@ impl RoomRTCApp {
         self.local_frame_rx = None;
         self.remote_frame_rx = None;
 
-        self.local_texture = None;
-        self.remote_texture = None;
+        self.local_texture = Arc::new(Mutex::new(None));
+        self.remote_texture = Arc::new(Mutex::new(None));
 
         self.is_muted = false;
     }
 
-    fn handle_event(&mut self, event: AppEvent) {
+    fn handle_event(
+        &mut self,
+        event: AppEvent,
+        ctx: &Context,
+    ) {
         match event {
             AppEvent::FullServerError => self.view = View::FullServer,
             AppEvent::CallIncoming(peer, offer_sdp) => {
@@ -987,6 +1003,16 @@ impl RoomRTCApp {
                         self.local_frame_rx = Some(local_frame_rx);
                         self.remote_frame_rx = Some(remote_frame_rx);
                         self.view = View::Call(username, peer_username);
+                        if let Err(e) = self.update_video_textures(ctx) {
+                            self.warning_msg = Some(e.to_string());
+                            if self.controller.hang_up().is_err() {
+                                self.view = View::FatalError;
+                            } else {
+                                self.reset_after_call();
+                                self.view = View::CallHub;
+                            }
+                            return;
+                        }
                     }
                     Err(e) => {
                         self.warning_msg = Some(e.to_string());
@@ -1036,4 +1062,34 @@ fn update_camera_view(
             *texture = Some(ctx.load_texture(texture_name, color_img, TextureOptions::default()));
         }
     }
+}
+
+fn spawn_texture_thread(
+    rx: Receiver<Frame>,
+    ctx: Context,
+    texture_arc: Arc<Mutex<Option<TextureHandle>>>,
+    texture_name: String,
+) {
+    thread::spawn(move || {
+        while let Ok(frame) = rx.recv() {
+            let mut last_frame = frame;
+            while let Ok(more_recent) = rx.try_recv() {
+                last_frame = more_recent;
+            }
+            let color_img = ColorImage::from_rgb([last_frame.width, last_frame.height], &last_frame.data);
+
+            let mut guard = match texture_arc.lock() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+
+            if let Some(texture) = guard.as_mut() {
+                texture.set(color_img, TextureOptions::default());
+            } else {
+                *guard = Some(ctx.load_texture(&texture_name, color_img, TextureOptions::default()));
+            }
+
+            ctx.request_repaint();
+        }
+    });
 }

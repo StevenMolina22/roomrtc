@@ -62,6 +62,9 @@ pub struct RoomRTCApp {
     file_send_rx: Option<Receiver<Option<PathBuf>>>,
     file_save_rx: Option<Receiver<(u32, FileMetadata, Option<PathBuf>)>>,
 
+    // Mic
+    is_muted: bool,
+
     //Aux
     clock: Clock,
 }
@@ -114,6 +117,7 @@ impl RoomRTCApp {
             file_downloads: Arc::new(RwLock::new(HashMap::new())),
             file_send_rx: None,
             file_save_rx: None,
+            is_muted: false,
             clock: Clock::new(),
         }
     }
@@ -172,7 +176,7 @@ impl eframe::App for RoomRTCApp {
                 }
                 View::CallHub => self.show_call_hub(ui),
                 View::Call(username, peer_username) => {
-                    self.show_call(username.clone(), peer_username.clone(), ui);
+                    self.show_call(username.clone(), peer_username.clone(), ctx, ui);
                 }
                 View::CallEnded => self.show_call_ended(ui),
                 View::Error => self.show_error(ui),
@@ -774,26 +778,47 @@ impl RoomRTCApp {
 
             ui.add_space(25.0);
 
-            let exit_btn =
-                egui::Button::new(RichText::new("End Call").strong().color(Color32::WHITE))
-                    .fill(Color32::from_rgb(200, 40, 40))
-                    .corner_radius(20.0);
-            if ui.add_sized([180.0, 45.0], exit_btn).clicked() {
-                if self.controller.hang_up().is_err() {
-                    self.view = View::FatalError;
+            ui.horizontal(|ui| {
+                let (mute_text, mute_color) = if self.is_muted {
+                    ("🔇 Unmute", Color32::from_rgb(200, 100, 0)) // Orange when muted
                 } else {
-                    self.reset_after_call();
-                    self.view = View::CallHub;
-                }
-            }
+                    ("🎤 Mute", Color32::from_rgb(60, 60, 60))    // Dark gray when normal
+                };
 
-            let file_btn =
-                egui::Button::new(RichText::new("Send file").strong().color(Color32::WHITE))
-                    .fill(Color32::ORANGE)
+                let mute_btn = egui::Button::new(RichText::new(mute_text).strong().color(Color32::WHITE))
+                    .fill(mute_color)
                     .corner_radius(20.0);
-            if ui.add_sized([180.0, 45.0], file_btn).clicked() {
-                self.file_send_rx = Some(pick_file_to_send());
-            }
+
+                if ui.add_sized([150.0, 45.0], mute_btn).clicked() {
+                    self.controller.toggle_audio();
+                    self.is_muted = !self.is_muted;
+                }
+
+                ui.add_space(20.0);
+
+                let exit_btn =
+                    egui::Button::new(RichText::new("End Call").strong().color(Color32::WHITE))
+                        .fill(Color32::from_rgb(200, 40, 40))
+                        .corner_radius(20.0);
+                if ui.add_sized([180.0, 45.0], exit_btn).clicked() {
+                    if self.controller.hang_up().is_err() {
+                        self.view = View::FatalError;
+                    } else {
+                        self.reset_after_call();
+                        self.view = View::CallHub;
+                    }
+                }
+
+                ui.add_space(20.0);
+
+                let file_btn =
+                    egui::Button::new(RichText::new("Send file").strong().color(Color32::WHITE))
+                        .fill(Color32::ORANGE)
+                        .corner_radius(20.0);
+                if ui.add_sized([180.0, 45.0], file_btn).clicked() {
+                    self.file_send_rx = Some(pick_file_to_send());
+                }
+            });
 
             ui.add_space(20.0);
             ui.separator();
@@ -1379,4 +1404,34 @@ fn pick_file_to_send() -> Receiver<Option<PathBuf>> {
     });
 
     rx
+}
+
+fn spawn_texture_thread(
+    rx: Receiver<Frame>,
+    ctx: Context,
+    texture_arc: Arc<Mutex<Option<TextureHandle>>>,
+    texture_name: String,
+) {
+    thread::spawn(move || {
+        while let Ok(frame) = rx.recv() {
+            let mut last_frame = frame;
+            while let Ok(more_recent) = rx.try_recv() {
+                last_frame = more_recent;
+            }
+            let color_img = ColorImage::from_rgb([last_frame.width, last_frame.height], &last_frame.data);
+
+            let mut guard = match texture_arc.lock() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+
+            if let Some(texture) = guard.as_mut() {
+                texture.set(color_img, TextureOptions::default());
+            } else {
+                *guard = Some(ctx.load_texture(&texture_name, color_img, TextureOptions::default()));
+            }
+
+            ctx.request_repaint();
+        }
+    });
 }

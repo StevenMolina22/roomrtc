@@ -1,0 +1,12 @@
+use std::fmt::Display;
+
+#[derive(Debug)]
+pub enum FileMetadataError {}
+
+impl Display for FileMetadataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        match self {
+            _ => todo!(),
+        }
+    }
+}

@@ -14,10 +14,12 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
+use crate::file::file_transferer::FileTransferer;
 
 /// Main controller for managing RTC calls and server communication.
 ///
@@ -37,6 +39,7 @@ pub struct Controller {
     username: Option<String>,
     logged_in: Arc<AtomicBool>,
 
+    file_transferer: Option<FileTransferer>,
     transport: MediaTransport,
     call_session: CallSession,
     media_pipeline: MediaPipeline,
@@ -92,6 +95,7 @@ impl Controller {
             token: None,
             username: None,
             logged_in: Arc::new(AtomicBool::new(false)),
+            file_transferer: None,
             transport,
             call_session,
             media_pipeline,
@@ -99,6 +103,35 @@ impl Controller {
             client_server_stream,
             logger,
         })
+    }
+
+
+    // ---------------------------------------------------------------------------------------------------------------------------
+    // FILES
+
+    pub fn send_file(&mut self, file_path: &Path) -> Result<(), Error> {
+        self.file_transferer
+            .as_mut()
+            .unwrap()
+            .send_file(file_path)
+            .unwrap();
+        Ok(())
+    }
+
+    pub fn accept_file(&mut self, id: u32, path: &Path) {
+        self.file_transferer
+            .as_mut()
+            .unwrap()
+            .accept_file_offer(id, path)
+            .unwrap();
+    }
+
+    pub fn reject_file(&mut self, id: u32) {
+        self.file_transferer
+            .as_mut()
+            .unwrap()
+            .reject_file_offer(id)
+            .unwrap();
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------
@@ -183,6 +216,7 @@ impl Controller {
 
         self.stop_media_components()?;
 
+        self.file_transferer = None;
         self.transport = MediaTransport::new(&self.config, self.logger.context("MediaTransport"))
             .map_err(|e| Error::MapError(e.to_string()))?;
         let socket_for_stun = self
@@ -307,6 +341,10 @@ impl Controller {
             format!("{}:{}", pair.remote.address, pair.remote.port + 1)
                 .parse()
                 .map_err(Error::ParsingSocketAddressError)?;
+        let remote_sctp_address: SocketAddr =
+            format!("{}:{}", pair.remote.address, pair.remote.port + 2)
+                .parse()
+                .map_err(Error::ParsingSocketAddressError)?;
 
         let remote_fingerprint = self
             .call_session
@@ -321,10 +359,22 @@ impl Controller {
                 remote_rtcp_address,
                 self.event_tx.clone(),
                 self.call_session.local_setup_role,
-                remote_fingerprint,
+                remote_fingerprint.clone(),
                 &self.call_session.local_cert,
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
+
+
+        let local_sctp_address = SocketAddr::new(self.transport.rtp_address.ip(), self.transport.rtp_address.port() + 2);
+        self.file_transferer = Some(FileTransferer::new(
+            local_sctp_address,
+            remote_sctp_address,
+            self.call_session.local_setup_role,
+            remote_fingerprint,
+            &self.call_session.local_cert,
+            self.event_tx.clone(),
+            self.config.clone(),
+        ).map_err(|e| Error::MapError(e.to_string()))?);
 
         self.media_pipeline
             .start(

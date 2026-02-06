@@ -1,3 +1,4 @@
+use crate::file::file_metadata::FileMetadata;
 use crate::session::sdp::SessionDescriptionProtocol;
 use crate::transport::rtcp::metrics::CallStats;
 
@@ -39,4 +40,6 @@ pub enum AppEvent {
     FatalError,
     LocalStatsUpdate(CallStats),
     RemoteStatsUpdate(CallStats),
+    RemoteFileOffer(u32, FileMetadata),
+    FileDownloadCompleted(u32),
 }

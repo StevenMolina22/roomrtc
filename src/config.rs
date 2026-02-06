@@ -25,7 +25,11 @@ pub struct Config {
     /// ICE candidate configuration.
     pub ice: IceConfig,
 
+    /// Server configuration
     pub server: ServerConfig,
+
+    /// DCEP configuration
+    pub dcep: DCEPConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -208,6 +212,19 @@ pub struct ServerConfig {
     pub max_amount_of_users_connected: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct DCEPConfig {
+    /// Acknowledgement wait timeout in milliseconds.
+    ///
+    /// Use value 0 for no timeout limit
+    pub ack_wait_timeout_millis: u16,
+
+    /// Open wait timeout in milliseconds.
+    ///
+    /// Use value 0 for no timeout limit
+    pub open_wait_timeout_millis: u16,
+}
+
 impl Config {
     /// Load configuration from the given INI file path.
     ///
@@ -236,6 +253,7 @@ impl Config {
         let server_section = conf
             .section(Some("server"))
             .ok_or("Missing [server] section")?;
+        let dcep_section = conf.section(Some("dcep")).ok_or("Missing [dcep] section")?;
 
         Ok(Self {
             network: NetworkConfig {
@@ -442,6 +460,16 @@ impl Config {
                 max_amount_of_users_connected: server_section
                     .get("max_amount_of_users_connected")
                     .ok_or("Missing max amount of users connected")?
+                    .parse()?,
+            },
+            dcep: DCEPConfig {
+                ack_wait_timeout_millis: dcep_section
+                    .get("ack_wait_timeout_millis")
+                    .ok_or("Missing ack_wait_timeout_millis")?
+                    .parse()?,
+                open_wait_timeout_millis: dcep_section
+                    .get("open_wait_timeout_millis")
+                    .ok_or("Missing open_wait_timeout_millis")?
                     .parse()?,
             },
         })

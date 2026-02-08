@@ -1,4 +1,4 @@
-use super::DtlsError as Error;
+use super::{DtlsError as Error};
 use crate::dtls::key_manager::{LocalCert, PKCS12_PASSWORD};
 use crate::session::sdp::{DtlsSetupRole, Fingerprint};
 use crate::tools::Socket;
@@ -52,66 +52,15 @@ impl DtlsSocket {
         expected_fingerprint: Fingerprint,
         local_cert: &LocalCert,
     ) -> Result<Self, Error> {
-        let mut role = local_setup_role;
-        if matches!(role, DtlsSetupRole::ActPass) {
-            role = DtlsSetupRole::Active;
-        } else if matches!(role, DtlsSetupRole::HoldConn) {
-            role = DtlsSetupRole::Passive;
-        }
-
         let channel = UdpChannel {
             socket,
             remote_addr,
         };
+        let role = normalize_role(local_setup_role);
 
         let stream = match role {
-            DtlsSetupRole::Active => {
-                let identity = local_cert
-                    .duplicate_identity()
-                    .map_err(|e| Error::MapError(e.to_string()))?;
-
-                let connector = DtlsConnector::builder()
-                    .identity(identity)
-                    .danger_accept_invalid_certs(true)
-                    .danger_accept_invalid_hostnames(true)
-                    .build()
-                    .map_err(|e| Error::InitializationSocketError)?;
-
-                connector
-                    .connect("roomrtc.local", channel)
-                    .map_err(|e| Error::InitializationSocketError)?
-            }
-            DtlsSetupRole::Passive => {
-                let pkcs12 = Pkcs12::from_der(&local_cert.pkcs12_der)
-                    .map_err(|e| Error::MapError(e.to_string()))?
-                    .parse(PKCS12_PASSWORD)
-                    .map_err(|e| Error::MapError(e.to_string()))?;
-
-                let mut acceptor_builder = SslAcceptor::mozilla_intermediate(SslMethod::dtls())
-                    .map_err(|e| Error::MapError(e.to_string()))?;
-
-                acceptor_builder
-                    .set_private_key(&pkcs12.pkey)
-                    .map_err(|e| Error::MapError(e.to_string()))?;
-                acceptor_builder
-                    .set_certificate(&pkcs12.cert)
-                    .map_err(|e| Error::MapError(e.to_string()))?;
-                acceptor_builder
-                    .check_private_key()
-                    .map_err(|e| Error::MapError(e.to_string()))?;
-
-                acceptor_builder.set_verify_callback(
-                    SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT,
-                    |_, _| true,
-                );
-
-                let ssl_acceptor = acceptor_builder.build();
-                let acceptor = DtlsAcceptor(ssl_acceptor);
-
-                acceptor
-                    .accept(channel)
-                    .map_err(|e| Error::InitializationSocketError)?
-            }
+            DtlsSetupRole::Active => establish_active_dtls(local_cert, channel)?,
+            DtlsSetupRole::Passive => establish_passive_dtls(local_cert, channel)?,
             _ => unreachable!("DTLS role should be normalized before handshake"),
         };
 
@@ -231,4 +180,67 @@ fn verify_peer_fingerprint(
         ));
     }
     Ok(())
+}
+
+fn normalize_role(role: DtlsSetupRole) -> DtlsSetupRole {
+    match role {
+        DtlsSetupRole::ActPass => DtlsSetupRole::Active,
+        DtlsSetupRole::HoldConn => DtlsSetupRole::Passive,
+        _ => role
+    }
+}
+
+fn establish_active_dtls(
+    local_cert: &LocalCert,
+    channel: UdpChannel
+) -> Result<DtlsStream<UdpChannel>, Error> {
+    let identity = local_cert
+        .duplicate_identity()
+        .map_err(|e| Error::MapError(e.to_string()))?;
+
+    let connector = DtlsConnector::builder()
+        .identity(identity)
+        .danger_accept_invalid_certs(true)
+        .danger_accept_invalid_hostnames(true)
+        .build()
+        .map_err(|_| Error::InitializationSocketError)?;
+
+    connector
+        .connect("roomrtc.local", channel)
+        .map_err(|_| Error::InitializationSocketError)
+}
+
+fn establish_passive_dtls(
+    local_cert: &LocalCert,
+    channel: UdpChannel
+) -> Result<DtlsStream<UdpChannel>, Error> {
+    let pkcs12 = Pkcs12::from_der(&local_cert.pkcs12_der)
+        .map_err(|e| Error::MapError(e.to_string()))?
+        .parse(PKCS12_PASSWORD)
+        .map_err(|e| Error::MapError(e.to_string()))?;
+
+    let mut acceptor_builder = SslAcceptor::mozilla_intermediate(SslMethod::dtls())
+        .map_err(|e| Error::MapError(e.to_string()))?;
+
+    acceptor_builder
+        .set_private_key(&pkcs12.pkey)
+        .map_err(|e| Error::MapError(e.to_string()))?;
+    acceptor_builder
+        .set_certificate(&pkcs12.cert)
+        .map_err(|e| Error::MapError(e.to_string()))?;
+    acceptor_builder
+        .check_private_key()
+        .map_err(|e| Error::MapError(e.to_string()))?;
+
+    acceptor_builder.set_verify_callback(
+        SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT,
+        |_, _| true,
+    );
+
+    let ssl_acceptor = acceptor_builder.build();
+    let acceptor = DtlsAcceptor(ssl_acceptor);
+
+    acceptor
+        .accept(channel)
+        .map_err(|_| Error::InitializationSocketError)
 }

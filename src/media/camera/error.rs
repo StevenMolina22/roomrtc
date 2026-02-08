@@ -27,6 +27,14 @@ pub enum CameraError {
 
     /// Failed to set camera configuration (resolution, FPS, etc.).
     CameraConfigFailed,
+
+    MapError(String),
+
+    CameraIndexError,
+
+    PropSettingError(String),
+
+    ReadFrameError
 }
 
 /// Formats a readable representation of the camera error.
@@ -38,6 +46,10 @@ impl Display for CameraError {
             Self::OpenError(e) => write!(f, "Error: \"Failed to open camera\": {e}"),
             Self::ClosedCamera => write!(f, "Error: \"Camera is closed\""),
             Self::CameraConfigFailed => write!(f, "Error: \"Failed to set camera configuration\""),
+            Self::MapError(e) => write!(f, "Error: \"{e}\""),
+            Self::CameraIndexError => write!(f, "Error: \"camera index is too large\""),
+            Self::PropSettingError(e) => write!(f, "Error: \"failed to set prop: {e}\""),
+            Self::ReadFrameError => write!(f, "Error: \"Failed to read camera frame\""),
         }
     }
 }

@@ -175,37 +175,19 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         let event_tx = event_tx.clone();
 
         thread::spawn(move || {
-            loop {
-                if !connected.load(Ordering::SeqCst) {
-                    break;
-                }
+            while connected.load(Ordering::SeqCst) {
+                let Some((s_stats, r_stats)) =
+                    gather_local_stats(local_sender_stats.clone(), local_receiver_stats.clone()) else { break };
 
-                let s_stats = match local_sender_stats.lock() {
-                    Ok(s) => *s,
-                    Err(_) => break,
-                };
-                let r_stats = match local_receiver_stats.lock() {
-                    Ok(r) => *r,
-                    Err(_) => break,
-                };
-
-                let packet_sr = RtcpPacket::SenderReport(s_stats);
-                if report_socket.send(&packet_sr.to_bytes()).is_err() {
+                if send_rtcp_reports(s_stats.clone(), r_stats.clone(), report_socket.clone()).is_err() {
                     connected.store(false, Ordering::SeqCst);
                     break;
                 }
-
-                let packet_rr = RtcpPacket::ReceiverReport(r_stats);
-                if report_socket.send(&packet_rr.to_bytes()).is_err() {
-                    break;
-                }
-
                 let local_update = CallStats {
                     local_sender: s_stats,
                     local_receiver: r_stats,
                     ..Default::default()
                 };
-
                 let _ = event_tx.send(AppEvent::LocalStatsUpdate(local_update));
                 thread::sleep(Duration::from_millis(report_period_millis));
             }
@@ -249,32 +231,13 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
         let max_silence_duration = Duration::from_millis(self.config.receive_limit_millis);
 
         thread::spawn(move || {
-            let mut last_valid_packet_time = Local::now();
-            let mut timeouts_triggered = 0;
-
-            while timeouts_triggered < retry_limit {
-                if !connected.load(Ordering::SeqCst) {
-                    break;
-                }
-
-                match try_receive_report(
-                    &*report_socket,
-                    &mut last_valid_packet_time,
-                    max_silence_duration,
-                    &event_tx,
-                ) {
-                    Ok(()) => timeouts_triggered = 0,
-                    Err(Error::GoodbyeReceived) => {
-                        break;
-                    }
-                    Err(_) => timeouts_triggered += 1,
-                }
-            }
-
-            if connected.load(Ordering::SeqCst) {
-                connected.store(false, Ordering::SeqCst);
-                let _ = event_tx.send(AppEvent::CallEnded);
-            }
+            run_report_receiver_loop(
+                report_socket,
+                connected,
+                event_tx,
+                retry_limit,
+                max_silence_duration
+            )
         });
         Ok(())
     }
@@ -319,7 +282,7 @@ impl<S: Socket + Send + Sync + 'static> RtcpReportHandler<S> {
 /// - `Err(Error::GoodbyeReceived)` if a goodbye packet is received.
 /// - `Err(Error::TimedOut)` if no valid packet arrives within the receive limit.
 /// - `Err(Error::UnexpectedMessage)` if an unknown packet type is received.
-fn try_receive_report<S: Socket + Send + Sync + 'static>(
+fn try_receive_report<S: Socket + Send + Sync + 'static> (
     report_socket: &S,
     last_report_time: &mut DateTime<Local>,
     receive_limit: Duration,
@@ -328,39 +291,13 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
     let mut buf = [0u8; 1024];
 
     match report_socket.recv_from(&mut buf) {
-        Ok((size, _src_addr)) => match RtcpPacket::from_bytes(&buf[..size]) {
-            Some(RtcpPacket::SenderReport(s_stats)) => {
-                *last_report_time = Local::now();
-                let call_stats = CallStats {
-                    remote_sender: s_stats,
-                    ..Default::default()
-                };
-                let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
-                Ok(())
-            }
-            Some(RtcpPacket::ReceiverReport(r_stats)) => {
-                *last_report_time = Local::now();
-                let call_stats = CallStats {
-                    remote_receiver: r_stats,
-                    ..Default::default()
-                };
-                let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
-                Ok(())
-            }
-            Some(RtcpPacket::Goodbye) => Err(Error::GoodbyeReceived),
-            Some(_) => Err(Error::UnexpectedMessage),
-            None => {
-                let duration = match chrono::Duration::from_std(receive_limit) {
-                    Ok(d) => d,
-                    Err(_) => chrono::Duration::seconds(30),
-                };
-                if Local::now() - *last_report_time > duration {
-                    Err(Error::TimedOut)
-                } else {
-                    Ok(())
-                }
-            }
-        },
+        Ok((size, _src_addr)) => handle_rtcp_report_reception(
+            &buf,
+            last_report_time,
+            event_tx,
+            size,
+            receive_limit
+        ),
         Err(_) => {
             if Local::now() - *last_report_time
                 > chrono::Duration::from_std(receive_limit)
@@ -371,5 +308,99 @@ fn try_receive_report<S: Socket + Send + Sync + 'static>(
                 Ok(())
             }
         }
+    }
+}
+
+fn handle_rtcp_report_reception(
+    buf: &[u8],
+    last_report_time: &mut DateTime<Local>,
+    event_tx: &Sender<AppEvent>,
+    size: usize,
+    receive_limit: Duration,
+) -> Result<(), Error> {
+    match RtcpPacket::from_bytes(&buf[..size]) {
+        Some(RtcpPacket::SenderReport(s_stats)) => {
+            *last_report_time = Local::now();
+            let call_stats = CallStats {
+                remote_sender: s_stats,
+                ..Default::default()
+            };
+            let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
+            Ok(())
+        }
+        Some(RtcpPacket::ReceiverReport(r_stats)) => {
+            *last_report_time = Local::now();
+            let call_stats = CallStats {
+                remote_receiver: r_stats,
+                ..Default::default()
+            };
+            let _ = event_tx.send(AppEvent::RemoteStatsUpdate(call_stats));
+            Ok(())
+        }
+        Some(RtcpPacket::Goodbye) => Err(Error::GoodbyeReceived),
+        Some(_) => Err(Error::UnexpectedMessage),
+        None => {
+            let duration = chrono::Duration::from_std(receive_limit)
+                .unwrap_or_else(|_| chrono::Duration::seconds(30));
+            if Local::now() - *last_report_time > duration {
+                Err(Error::TimedOut)
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+fn gather_local_stats(
+    local_sender_stats: Arc<Mutex<SenderStats>>,
+    local_receiver_stats: Arc<Mutex<ReceiverStats>>,
+) -> Option<(SenderStats, ReceiverStats)> {
+    let s_stats = *local_sender_stats.lock().ok()?;
+    let r_stats = *local_receiver_stats.lock().ok()?;
+    Some((s_stats, r_stats))
+}
+
+fn send_rtcp_reports<S: Socket + Send + Sync + 'static>(
+    s_stats: SenderStats,
+    r_stats: ReceiverStats,
+    report_socket: Arc<S>,
+) -> Result<(), Error> {
+    let packet_sr = RtcpPacket::SenderReport(s_stats);
+    report_socket.send(&packet_sr.to_bytes())
+        .map_err(|e| Error::SendFailed(e.to_string()))?;
+
+    let packet_rr = RtcpPacket::ReceiverReport(r_stats);
+    report_socket.send(&packet_rr.to_bytes()).map_err(|e| Error::SendFailed(e.to_string()))?;
+
+    Ok(())
+}
+
+fn run_report_receiver_loop<S: Socket + Send + Sync + 'static>(
+    report_socket: Arc<S>,
+    connected: Arc<AtomicBool>,
+    event_tx: Sender<AppEvent>,
+    retry_limit: usize,
+    max_silence: Duration,
+) {
+    let mut last_valid_packet_time = Local::now();
+    let mut timeouts_triggered = 0;
+
+    while timeouts_triggered < retry_limit &&
+        connected.load(Ordering::SeqCst) {
+        match try_receive_report(
+            &*report_socket,
+            &mut last_valid_packet_time,
+            max_silence,
+            &event_tx,
+        ) {
+            Ok(()) => timeouts_triggered = 0,
+            Err(Error::GoodbyeReceived) => break,
+            Err(_) => timeouts_triggered += 1,
+        }
+    }
+
+    if connected.load(Ordering::SeqCst) {
+        connected.store(false, Ordering::SeqCst);
+        let _ = event_tx.send(AppEvent::CallEnded);
     }
 }

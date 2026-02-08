@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::dtls::key_manager::{LocalCert, generate_self_signed_cert};
 use crate::session::error::CallSessionError as Error;
-use crate::session::ice::{CandidatePair, IceAgent};
+use crate::session::ice::{Candidate, CandidatePair, IceAgent};
 use crate::session::sdp::{Attribute, MediaDescription, SessionDescriptionProtocol};
 use crate::session::sdp::{DtlsSetupRole, Fingerprint};
 use std::collections::HashSet;
@@ -51,86 +51,27 @@ impl CallSession {
         logger: Logger,
     ) -> Result<Self, Error> {
         let mut ice_agent = IceAgent::new(logger.context("IceAgent"));
-        ice_agent
-            .gather_candidates(&stun_socket, &config.ice)
-            .map_err(|e| {
-                Error::IceConnectionError(format!("Failed to gather ICE candidates: {e}"))
-            })?;
-
-        let local_port = stun_socket
-            .local_addr()
-            .map_err(|e| Error::IceConnectionError(e.to_string()))?
-            .port();
-
-        // --- 1. CONFIGURACIÓN DE VIDEO ---
-        let mut video_media_description = MediaDescription::new(
-            config.media.video_media_type.clone(),
-            local_port,
-            config.media.media_protocol.clone(),
-            HashSet::from([config.media.video_payload_type]),
-        );
-
-        video_media_description
-            .add_attribute(Attribute::RTPMap(
-                config.media.video_payload_type,
-                config.media.video_codec_name.clone(),
-                config.media.clock_rate,
-                None,
-            ))
-            .map_err(|e| Error::SdpCreationError(format!("Failed to add Video RTPMap: {e}")))?;
-
-        // --- 2. CONFIGURACIÓN DE AUDIO (NUEVO) ---
-        let mut audio_media_description = MediaDescription::new(
-            config.media.audio_media_type.clone(),
-            local_port,
-            config.media.media_protocol.clone(),
-            HashSet::from([config.media.audio_payload_type]),
-        );
-
-        audio_media_description
-            .add_attribute(Attribute::RTPMap(
-                config.media.audio_payload_type,
-                config.media.audio_codec_name.clone(),
-                config.media.audio_sample_rate,
-                Some(config.media.audio_channels.to_string()),
-            ))
-            .map_err(|e| Error::SdpCreationError(format!("Failed to add Audio RTPMap: {e}")))?;
-
-        let local_cert = generate_self_signed_cert().map_err(|e| {
-            Error::SecurityInitializationError(format!("Failed to generate local certificate: {e}"))
-        })?;
-
+        ice_agent.gather_candidates(&stun_socket, &config.ice)
+            .map_err(|e| { Error::IceConnectionError(format!("Failed to gather ICE candidates: {e}")) })?;
+        let local_port = stun_socket.local_addr()
+            .map_err(|e| Error::IceConnectionError(e.to_string()))?.port();
+        let mut video_media_description = generate_video_md(config.clone(), local_port)
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        let mut audio_media_description = generate_audio_md(config.clone(), local_port)
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        let local_cert = generate_self_signed_cert()
+            .map_err(|e| { Error::SecurityInitializationError(format!("Failed to generate local certificate: {e}")) })?;
         let fingerprint = Fingerprint::from_hash_string("sha-256", &local_cert.fingerprint)
-            .map_err(|e| {
-                Error::SdpCreationError(format!("Failed to encode local fingerprint: {e}"))
-            })?;
-
+            .map_err(|e| { Error::MapError(e.to_string()) })?;
         let local_setup_role = DtlsSetupRole::ActPass;
-
-        let media_list = vec![&mut video_media_description, &mut audio_media_description];
-
-        for md in media_list {
-            md.add_attribute(Attribute::Fingerprint(fingerprint.clone()))
-                .map_err(|e| Error::SdpCreationError(e.to_string()))?;
-
-            md.add_attribute(Attribute::Setup(local_setup_role))
-                .map_err(|e| Error::SdpCreationError(e.to_string()))?;
-
-            for candidate in ice_agent.get_local_candidates() {
-                md.add_attribute(Attribute::Candidate(candidate.clone()))
-                    .map_err(|e| Error::SdpCreationError(e.to_string()))?;
-            }
-        }
-
+        let candidates = ice_agent.get_local_candidates();
+        apply_common_attributes(&mut video_media_description, &fingerprint, local_setup_role, &candidates)?;
+        apply_common_attributes(&mut audio_media_description, &fingerprint, local_setup_role, &candidates)?;
         let mut sdp = SessionDescriptionProtocol::new(
-            vec![video_media_description, audio_media_description],
-            &config.sdp
-        );
-
+            vec![video_media_description, audio_media_description], &config.sdp);
         if let Some(local_candidate) = ice_agent.get_local_candidate() {
             sdp.set_connection_data("IN", "IP4", local_candidate.address.clone().as_str());
         }
-
         Ok(Self {
             sdp,
             ice_agent,
@@ -275,4 +216,65 @@ impl CallSession {
         self.local_setup_role = role;
         Ok(())
     }
+}
+
+fn generate_video_md(
+    config: Arc<Config>,
+    local_port: u16
+) -> Result<MediaDescription, Error> {
+    let mut video_media_description = MediaDescription::new(
+        config.media.video_media_type.clone(),
+        local_port,
+        config.media.media_protocol.clone(),
+        HashSet::from([config.media.video_payload_type]),
+    );
+
+    video_media_description
+        .add_attribute(Attribute::RTPMap(
+            config.media.video_payload_type,
+            config.media.video_codec_name.clone(),
+            config.media.clock_rate,
+            None,
+        ))
+        .map_err(|e| Error::SdpCreationError(format!("Failed to add Video RTPMap: {e}")))?;
+
+    Ok(video_media_description)
+}
+
+fn generate_audio_md(
+    config: Arc<Config>,
+    local_port: u16
+) -> Result<MediaDescription, Error> {
+    let mut audio_media_description = MediaDescription::new(
+        config.media.audio_media_type.clone(),
+        local_port,
+        config.media.media_protocol.clone(),
+        HashSet::from([config.media.audio_payload_type]),
+    );
+
+    audio_media_description
+        .add_attribute(Attribute::RTPMap(
+            config.media.audio_payload_type,
+            config.media.audio_codec_name.clone(),
+            config.media.audio_sample_rate,
+            Some(config.media.audio_channels.to_string()),
+        ))
+        .map_err(|e| Error::SdpCreationError(format!("Failed to add Audio RTPMap: {e}")))?;
+
+    Ok(audio_media_description)
+}
+
+fn apply_common_attributes(
+    md: &mut MediaDescription,
+    fingerprint: &Fingerprint,
+    role: DtlsSetupRole,
+    candidates: &[Candidate],
+) -> Result<(), Error> {
+    md.add_attribute(Attribute::Fingerprint(fingerprint.clone())).map_err(|e| Error::SdpCreationError(e.to_string()))?;
+    md.add_attribute(Attribute::Setup(role)).map_err(|e| Error::SdpCreationError(e.to_string()))?;
+
+    for candidate in candidates {
+        md.add_attribute(Attribute::Candidate(candidate.clone())).map_err(|e| Error::SdpCreationError(e.to_string()))?;
+    }
+    Ok(())
 }

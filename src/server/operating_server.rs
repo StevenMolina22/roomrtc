@@ -312,33 +312,6 @@ impl OperatingServer {
         send_message(&stream, &msg);
 
         ServerResponse::CallRequestOk
-
-        // let ans = match get_answer_from_peer(
-        //     from_usr.clone(),
-        //     to_usr.clone(),
-        //     offer_sdp,
-        //     &self.users,
-        //     &self.logger,
-        // ) {
-        //     Ok(answer) => answer,
-        //     Err(err_event) => {
-        //         self.logger.error(&format!(
-        //             "Failed to get answer from peer {to_usr}: {err_event}"
-        //         ));
-        //         return ServerResponse::Error(err_event.to_string());
-        //     }
-        // };
-        //
-        // match ans {
-        //     ClientResponse::CallAccept { sdp_answer } => {
-        //         self.call_accept(to_usr, from_usr, sdp_answer)
-        //     }
-        //     ClientResponse::CallReject => self.call_reject(to_usr, from_usr),
-        //     _ => {
-        //         self.logger.warn("Invalid answer received from peer");
-        //         ServerResponse::Error("Invalid answer".to_string())
-        //     }
-        // }
     }
 
     /// Handles a positive call answer.

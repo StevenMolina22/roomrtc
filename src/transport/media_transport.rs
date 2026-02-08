@@ -141,7 +141,6 @@ impl MediaTransport {
         self.logger.info(&format!(
             "Starting MediaTransport. Remote RTP: {remote_rtp_address}, Remote RTCP: {remote_rtcp_address}"
         ));
-
         let rtp_dtls = DtlsSocket::new(
             self.rtp_socket
                 .try_clone()
@@ -150,45 +149,18 @@ impl MediaTransport {
             local_setup_role,
             expected_fingerprint,
             local_cert,
-        )
-            .map_err(|e| Error::MapError(e.to_string()))?;
-
-        self.rtp_socket
-            .connect(remote_rtp_address)
-            .map_err(|e| Error::SocketConnectionError(e.to_string()))?;
-        self.rtcp_socket
-            .connect(remote_rtcp_address)
-            .map_err(|e| Error::SocketConnectionError(e.to_string()))?;
-
-        self.logger.info("Sockets connected to remote addresses.");
-
-        let key_material = rtp_dtls
-            .export_keying_material("EXTRACTOR-dtls_srtp", 60)
-            .map_err(|e| Error::MapError(format!("Key export failed: {e}")))?;
-
-        let srtp_context = SrtpContext::new(&key_material)
-            .map_err(|e| Error::MapError(format!("SRTP context creation failed: {e}")))?;
-
+        ).map_err(|e| Error::MapError(e.to_string()))?;
+        self.connect_sockets(remote_rtp_address, remote_rtcp_address)?;
+        let srtp_ctx = self.generate_srtp_ctx(rtp_dtls)?;
         let local_sender_stats = Arc::new(Mutex::new(SenderStats::default()));
         let local_receiver_stats = Arc::new(Mutex::new(ReceiverStats::default()));
-
-        let rtcp_handler = RtcpReportHandler::new(
-            self.rtcp_socket
-                .try_clone()
-                .map_err(|e| Error::CloningSocketError(e.to_string()))?,
-            Arc::clone(&self.connected),
-            self.config.rtcp.clone(),
+        self.initialize_report_handler(
             local_sender_stats.clone(),
             local_receiver_stats.clone(),
-        );
-        rtcp_handler
-            .start(event_tx.clone())
-            .map_err(|e| Error::MapError(e.to_string()))?;
-        self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
-
+            event_tx.clone(),
+        )?;
         let (local_to_remote_rtp_tx, remote_to_local_rtp_rx) =
-            self.spawn_rtp_threads(event_tx, srtp_context, local_setup_role, local_sender_stats)?;
-
+            self.spawn_rtp_threads(event_tx, srtp_ctx, local_setup_role, local_sender_stats)?;
         Ok(TransportHandles {
             rtp_tx: local_to_remote_rtp_tx,
             rtp_rx: remote_to_local_rtp_rx,
@@ -298,36 +270,20 @@ impl MediaTransport {
 
         thread::spawn(move || {
             for protected_data in protected_rx {
-                if protected_data.is_empty() {
+                if protected_data.is_empty() || !is_rtp_packet(protected_data[0]){
                     continue;
                 }
-                let first_byte = protected_data[0];
 
-                if (20..=63).contains(&first_byte) {
-                    continue;
-                } else if (128..=191).contains(&first_byte) {
-                    match srtp_ctx.lock() {
-                        Ok(mut srtp_ctx) => match srtp_ctx.unprotect(&protected_data, is_client) {
-                            Ok(unprotected_packet) => {
-                                if let Err(e) = unprotected_tx.send(unprotected_packet) {
-                                    logger.error(&format!(
-                                        "Failed to send unprotected RTP packet: {e}"
-                                    ));
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                logger.error(&format!("SRTP unprotect failed: {e}"));
-                                break;
-                            }
-                        },
-                        Err(e) => {
-                            logger.error(&format!("SRTP context lock failed: {e}"));
-                            break;
+                match unprotect_packet(&protected_data, &srtp_ctx, is_client) {
+                    Ok(packet) => {
+                        if let Err(_) = send_unprotected_packet(packet, &unprotected_tx, &logger) {
+                            break
                         }
+                    },
+                    Err(e) => {
+                        logger.error(&format!("SRTP unprotect failed: {e}"));
+                        break;
                     }
-                } else {
-                    continue;
                 }
             }
             logger.info("Unprotection layer thread terminated");
@@ -461,4 +417,80 @@ impl MediaTransport {
             .start(event_tx)
             .map_err(|e| Error::MapError(e.to_string()))
     }
+
+    fn connect_sockets(
+        &mut self,
+        remote_rtp_addr: SocketAddr,
+        remote_rtcp_addr: SocketAddr,
+    ) -> Result<(), Error> {
+        self.rtp_socket
+            .connect(remote_rtp_addr)
+            .map_err(|e| Error::SocketConnectionError(e.to_string()))?;
+        self.rtcp_socket
+            .connect(remote_rtcp_addr)
+            .map_err(|e| Error::SocketConnectionError(e.to_string()))?;
+
+        self.logger.info("Sockets connected to remote addresses.");
+        Ok(())
+    }
+
+    fn generate_srtp_ctx(
+        &mut self,
+        rtp_dtls: DtlsSocket
+    ) -> Result<SrtpContext, Error> {
+        let key_material = rtp_dtls
+            .export_keying_material("EXTRACTOR-dtls_srtp", 60)
+            .map_err(|e| Error::MapError(format!("Key export failed: {e}")))?;
+
+        Ok(SrtpContext::new(&key_material)
+            .map_err(|e| Error::MapError(format!("SRTP context creation failed: {e}")))?)
+    }
+
+    fn initialize_report_handler(
+        &mut self,
+        local_sender_stats: Arc<Mutex<SenderStats>>,
+        local_receiver_stats: Arc<Mutex<ReceiverStats>>,
+        event_tx: Sender<AppEvent>,
+    ) -> Result<(), Error> {
+        let rtcp_handler = RtcpReportHandler::new(
+            self.rtcp_socket
+                .try_clone()
+                .map_err(|e| Error::CloningSocketError(e.to_string()))?,
+            Arc::clone(&self.connected),
+            self.config.rtcp.clone(),
+            local_sender_stats.clone(),
+            local_receiver_stats.clone(),
+        );
+        rtcp_handler
+            .start(event_tx.clone())
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        self.rtcp_handler = Some(Arc::new(Mutex::new(rtcp_handler)));
+        Ok(())
+    }
+}
+
+//Aux functions -----------------------------------------------------------------------------------
+
+fn is_rtp_packet(first_byte: u8) -> bool {
+    (128..=191).contains(&first_byte)
+}
+
+fn unprotect_packet(
+    data: &[u8],
+    ctx: &Arc<Mutex<SrtpContext>>,
+    is_client: bool,
+) -> Result<RtpPacket, String> {
+    let mut srtp_ctx = ctx.lock().map_err(|e| format!("Lock failed: {e}"))?;
+    srtp_ctx.unprotect(data, is_client).map_err(|e| e.to_string())
+}
+
+fn send_unprotected_packet(
+    packet: RtpPacket,
+    tx: &Sender<RtpPacket>,
+    logger: &Logger,
+) -> Result<(), Error> {
+    tx.send(packet).map_err({
+        logger.error(&"Failed to send unprotected RTP packet".to_string());
+        |e| Error::MapError(e.to_string())
+    })
 }

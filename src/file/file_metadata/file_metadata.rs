@@ -15,7 +15,7 @@ impl FileMetadata {
             .and_then(|s| s.to_str())
             .unwrap()
             .to_string();
-        let size = file.metadata().unwrap().len();
+        let size = file.metadata().map_err(|e| Error::MetadataError)?.len();
 
         Ok(Self { name, size })
     }

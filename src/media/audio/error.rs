@@ -8,6 +8,7 @@ pub enum AudioError {
     EncodingError(String),
     DecoderInitializationError,
     DecodingError(String),
+    MissingOutputDeviceError,
 }
 
 impl Display for AudioError {
@@ -19,6 +20,7 @@ impl Display for AudioError {
             AudioError::EncodingError(e) => write!(f, "Error: failed to encode microphone file ({e})"),
             AudioError::DecoderInitializationError => write!(f, "Error: failed to initialize microphone decoder"),
             AudioError::DecodingError(e) => write!(f, "Error: failed to decode microphone file ({e})"),
+            AudioError::MissingOutputDeviceError => write!(f, "Error: no output device available"),
         }
     }
 }

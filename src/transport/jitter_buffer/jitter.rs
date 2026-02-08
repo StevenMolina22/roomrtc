@@ -108,24 +108,11 @@ impl<const N: usize> JitterBuffer<N> {
     /// # Parameters
     /// - `packet`: the RTP packet to add to the buffer.
     pub(crate) fn add(&mut self, packet: RtpPacket) {
-        self.update_stats(&packet);
+        if self.should_discard_packet(&packet) {
+            return;
+        }
 
         let seq = packet.sequence_number;
-        if self.i_frame_needed && !packet.is_i_frame {
-            return;
-        }
-        if packet.timestamp < self.last_frame_completed_timestamp {
-            self.logger.warn(&format!(
-                "Discarding old packet: timestamp {} < last completed {}",
-                packet.timestamp, self.last_frame_completed_timestamp
-            ));
-            return;
-        }
-
-        if !self.valid_packet_seq_num(seq) {
-            return;
-        }
-
         let pos = (seq % N as u64) as usize;
 
         match (self.read_seq, self.write_seq) {
@@ -133,33 +120,12 @@ impl<const N: usize> JitterBuffer<N> {
                 if seq < read {
                     self.read_idx = pos;
                     self.read_seq = Some(seq);
-                    self.packets[pos] = Some(packet);
                 } else if seq > write {
-                    let old_write_idx = self.write_idx;
-                    self.write_idx = pos;
-                    self.write_seq = Some(seq);
-                    self.packets[pos] = Some(packet);
-
-                    if (self.read_idx <= old_write_idx
-                        && pos >= self.read_idx
-                        && pos <= old_write_idx)
-                        || (self.read_idx > old_write_idx
-                            && (pos >= self.read_idx || pos <= old_write_idx))
-                    {
-                        self.resync_or_clear();
-                    }
-                } else if seq > read && seq < write {
-                    self.packets[pos] = Some(packet);
+                    self.handle_new_write_head(seq, pos);
                 }
-            }
-            _ => {
-                self.read_seq = Some(seq);
-                self.write_seq = Some(seq);
-                self.read_idx = pos;
-                self.write_idx = pos;
                 self.packets[pos] = Some(packet);
-                self.i_frame_needed = false;
             }
+            _ => self.initialize_buffer(packet, pos),
         }
     }
 
@@ -180,23 +146,7 @@ impl<const N: usize> JitterBuffer<N> {
     /// resilience. If frames arrive late (beyond the tolerance), the buffer resyncs and
     /// requires a new I-frame.
     pub(crate) fn pop(&mut self) -> Option<Vec<u8>> {
-        let mut ts;
-        loop {
-            ts = match &self.packets[self.read_idx] {
-                Some(p) => p.timestamp,
-                None => return None,
-            };
-
-            if self.valid_playout_time(ts) {
-                break;
-            }
-
-            self.resync_or_clear();
-            if self.write_seq.is_none() || self.read_seq.is_none() {
-                return None;
-            }
-        }
-
+        let ts = self.prepare_next_frame_ts()?;
         let mut idx = self.read_idx;
         let mut frame_data = Vec::new();
         let mut chunks_processed = 0;
@@ -207,56 +157,19 @@ impl<const N: usize> JitterBuffer<N> {
             if packet.timestamp != ts {
                 return None;
             }
-
             frame_data.extend_from_slice(&packet.payload);
             chunks_processed += 1;
-
             idx = (idx + 1) % N;
 
             if packet.marker == 1 {
                 if chunks_processed == packet.total_chunks as usize {
-                    while self.read_idx != idx {
-                        self.packets[self.read_idx] = None;
-                        self.read_idx = (self.read_idx + 1) % N;
-                    }
-
-                    let mut found_next = false;
-                    for _ in 0..N {
-                        if let Some(next_p) = &self.packets[self.read_idx] {
-                            self.read_seq = Some(next_p.sequence_number);
-                            found_next = true;
-                            break;
-                        }
-                        self.read_idx = (self.read_idx + 1) % N;
-                    }
-
-                    if !found_next {
-                        self.read_seq = None;
-                        self.write_seq = None;
-                    }
-
-                    if self.last_deliver_timestamp != 0 {
-                        let delta_rtp = packet
-                            .timestamp
-                            .saturating_sub(self.last_frame_completed_timestamp);
-                        let expected_playout_time_local = self.last_deliver_timestamp + delta_rtp;
-                        let now = self.clock.now();
-                        let sleep_time = expected_playout_time_local.saturating_sub(now);
-
-                        if sleep_time > 0 {
-                            sleep(Duration::from_millis(sleep_time as u64));
-                        }
-
-                        self.last_deliver_timestamp = expected_playout_time_local;
-                    } else {
-                        self.last_deliver_timestamp = self.clock.now();
-                    }
-
+                    self.advance_read_pointers(idx);
+                    self.synchronize_playout(&packet);
                     self.last_frame_completed_timestamp = packet.timestamp;
+
                     if packet.is_i_frame {
                         self.i_frame_needed = false
                     }
-
                     return Some(frame_data);
                 }
                 return None;
@@ -400,6 +313,106 @@ impl<const N: usize> JitterBuffer<N> {
         }
         self.last_transit = Some(transit);
         self.last_arrival = Some(now);
+    }
+
+    fn should_discard_packet(&mut self, packet: &RtpPacket) -> bool {
+        self.update_stats(packet);
+
+        if self.i_frame_needed && !packet.is_i_frame {
+            return true;
+        }
+
+        if packet.timestamp < self.last_frame_completed_timestamp {
+            self.logger.warn(&format!(
+                "Discarding old packet: {} < {}",
+                packet.timestamp, self.last_frame_completed_timestamp
+            ));
+            return true;
+        }
+
+        !self.valid_packet_seq_num(packet.sequence_number)
+    }
+
+    fn handle_new_write_head(&mut self, seq: u64, pos: usize) {
+        let old_write_idx = self.write_idx;
+        self.write_idx = pos;
+        self.write_seq = Some(seq);
+
+        let collided = if self.read_idx <= old_write_idx {
+            pos >= self.read_idx && pos <= old_write_idx
+        } else {
+            pos >= self.read_idx || pos <= old_write_idx
+        };
+
+        if collided {
+            self.resync_or_clear();
+        }
+    }
+
+    fn initialize_buffer(&mut self, packet: RtpPacket, pos: usize) {
+        let seq = packet.sequence_number;
+        self.read_seq = Some(seq);
+        self.write_seq = Some(seq);
+        self.read_idx = pos;
+        self.write_idx = pos;
+        self.packets[pos] = Some(packet);
+        self.i_frame_needed = false;
+    }
+
+    fn prepare_next_frame_ts(&mut self) -> Option<u128>{
+        loop {
+            let ts = self.packets[self.read_idx].as_ref()?.timestamp;
+
+            if self.valid_playout_time(ts) {
+                return Some(ts);
+            }
+
+            self.resync_or_clear();
+            if self.write_seq.is_none() || self.read_seq.is_none() {
+                return None;
+            }
+        }
+    }
+
+    fn advance_read_pointers(&mut self, target_idx: usize) {
+        while self.read_idx != target_idx {
+            self.packets[self.read_idx] = None;
+            self.read_idx = (self.read_idx + 1) % N;
+        }
+
+        let mut found_next = false;
+        for _ in 0..N {
+            if let Some(next_p) = &self.packets[self.read_idx] {
+                self.read_seq = Some(next_p.sequence_number);
+                found_next = true;
+                break;
+            }
+            self.read_idx = (self.read_idx + 1) % N;
+        }
+
+        if !found_next {
+            self.read_seq = None;
+            self.write_seq = None;
+        }
+    }
+
+    fn synchronize_playout(&mut self, packet: &RtpPacket) {
+        if self.last_deliver_timestamp != 0 {
+            let delta_rtp = packet
+                .timestamp
+                .saturating_sub(self.last_frame_completed_timestamp);
+            let expected_playout_time_local = self.last_deliver_timestamp + delta_rtp;
+            let now = self.clock.now();
+            let sleep_time = expected_playout_time_local.saturating_sub(now);
+
+            if sleep_time > 0 {
+                sleep(Duration::from_millis(sleep_time as u64));
+            }
+
+            self.last_deliver_timestamp = expected_playout_time_local;
+        } else {
+            self.last_deliver_timestamp = self.clock.now();
+        }
     }
 }
 

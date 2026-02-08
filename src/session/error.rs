@@ -18,6 +18,8 @@ pub enum CallSessionError {
     /// Error produced while initializing the security context (certificates,
     /// DTLS identity, etc.).
     SecurityInitializationError(String),
+
+    MapError(String),
 }
 
 /// Provide a compact representation for `CallSessionError`.
@@ -28,12 +30,12 @@ impl Display for CallSessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match self {
             Self::BadAddress => write!(f, "Error: \"Bad address\""),
-
             Self::SdpCreationError(e)
             | Self::IceConnectionError(e)
             | Self::SecurityInitializationError(e) => {
-                write!(f, "{e}")
+                write!(f, "Error: \"{e}\"")
             }
+            Self::MapError(e) => write!(f, "{e}"),
         }
     }
 }

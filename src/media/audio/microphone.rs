@@ -1,6 +1,6 @@
 use std::sync::{mpsc, Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Sender, Receiver};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crate::logger::Logger;
 use crate::config::Config;
@@ -86,49 +86,19 @@ impl Microphone {
     /// - `Error::MapError` - Stream configuration or initialization failed
     pub fn start(&mut self) -> Result<Receiver<AudioFrame>, Error> {
         let (tx, rx) = mpsc::channel();
-        let clock = self.clock.clone();
-        let logger = self.logger.clone();
-        let muted_flag = self.muted.clone();
 
-        let host = cpal::default_host();
-        let device = host.default_input_device().ok_or(Error::InputDeviceError)?;
-        let default_config = device.default_input_config().map_err(|e| Error::MapError(e.to_string()))?;
+        let (device, config, input_channels, input_rate) = self.setup_audio_device()?;
         
-        let input_channels = default_config.channels() as usize;
-        let input_rate = default_config.sample_rate();
+        self.logger.info(&format!("Native microphone: {}Hz, {} channels. Resampling to {}Hz.",
+            input_rate, input_channels, self.config.media.audio_sample_rate));
 
-        let sample_rate = self.config.media.audio_sample_rate;
-        let opus_frame_size = self.config.media.audio_frame_size;
-        
-        logger.info(&format!("Micrófono nativo: {}Hz, {} canales. Resampleando a {}Hz.", 
-            input_rate, input_channels, sample_rate));
-
-        let config: cpal::StreamConfig = default_config.into();
-
-        let mut ring_buffer = AudioRingBuffer::new(opus_frame_size * 10);
-        let mut phase = 0.0;
-        let step = input_rate as f32 / sample_rate as f32;
-
-        let stream = device.build_input_stream(
-            &config,
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                if muted_flag.load(Ordering::Relaxed) { return; }
-
-                let mono_data = Self::convert_to_mono(data, input_channels);
-                let resampled_data = Self::resample_linear(&mono_data, &mut phase, step);
-                ring_buffer.push(&resampled_data);
-
-                while let Some(chunk) = ring_buffer.pop_chunk(opus_frame_size) {
-                    let timestamp = clock.now();
-                    let frame = AudioFrame::new(chunk, timestamp);
-                    if tx.send(frame).is_err() { return; }
-                }
-            },
-            move |err| {
-                logger.error(&format!("Error crítico Micrófono: {}", err));
-            },
-            None
-        ).map_err(|e| Error::MapError(e.to_string()))?;
+        let stream = self.generate_input_stream(
+            device,
+            config,
+            input_channels,
+            input_rate,
+            tx
+        )?;
 
         stream.play().map_err(|e| Error::MapError(e.to_string()))?;
         *self.stream.lock().map_err(|e| Error::MapError(e.to_string()))? = Some(stream);
@@ -217,5 +187,56 @@ impl Microphone {
         if *phase < 0.0 { *phase = 0.0; }
 
         resampled
+    }
+
+    fn setup_audio_device(&self) -> Result<(cpal::Device, cpal::StreamConfig, usize, u32), Error> {
+        let host = cpal::default_host();
+        let device = host.default_input_device().ok_or(Error::InputDeviceError)?;
+        let default_config = device.default_input_config().map_err(|e| Error::MapError(e.to_string()))?;
+
+        let channels = default_config.channels() as usize;
+        let rate = default_config.sample_rate();
+        let config = default_config.into();
+
+        Ok((device, config, channels, rate))
+    }
+
+    fn generate_input_stream(
+        &self,
+        device: cpal::Device,
+        config: cpal::StreamConfig,
+        input_channels: usize,
+        input_rate: u32,
+        tx: Sender<AudioFrame>,
+    ) -> Result<cpal::Stream, Error> {
+        let sample_rate = self.config.media.audio_sample_rate;
+        let opus_frame_size = self.config.media.audio_frame_size;
+        let mut ring_buffer =
+            AudioRingBuffer::new(opus_frame_size * 10);
+        let mut phase = 0.0;
+        let step = input_rate as f32 / sample_rate as f32;
+        let clock = self.clock.clone();
+        let logger = self.logger.clone();
+        let muted_flag = self.muted.clone();
+        device.build_input_stream(
+            &config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                if muted_flag.load(Ordering::Relaxed) { return; }
+
+                let mono_data = Self::convert_to_mono(data, input_channels);
+                let resampled_data = Self::resample_linear(&mono_data, &mut phase, step);
+                ring_buffer.push(&resampled_data);
+
+                while let Some(chunk) = ring_buffer.pop_chunk(opus_frame_size) {
+                    let timestamp = clock.now();
+                    let frame = AudioFrame::new(chunk, timestamp);
+                    if tx.send(frame).is_err() { return; }
+                }
+            },
+            move |err| {
+                logger.error(&format!("Microphone critical error: {}", err));
+            },
+            None
+        ).map_err(|e| Error::MapError(e.to_string()))
     }
 }

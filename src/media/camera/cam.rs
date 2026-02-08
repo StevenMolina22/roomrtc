@@ -6,14 +6,14 @@ use crate::media::frame_handler::Frame;
 use opencv::videoio::VideoWriter;
 use opencv::{imgproc, prelude::*, videoio};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 pub trait FrameSource: Send {
     /// Start the capture thread.
     /// Returns a Receiver to get frames from.
-    fn start(&mut self) -> Result<Receiver<Frame>, Error>;
+    fn start(&mut self) -> Receiver<Frame>;
 
     /// Signal the capture thread to stop.
     fn stop(&self);
@@ -63,114 +63,39 @@ impl Camera {
     /// spawns a background thread that captures frames from `OpenCV`'s
     /// `VideoCapture` and converts them to RGB `Frame`s at the
     /// configured frame rate.
-    fn start_internal(&mut self) -> Result<Receiver<Frame>, Error> {
+    fn start_internal(&mut self) -> Receiver<Frame> {
         let (tx, rx) = mpsc::channel();
         let running = self.running.clone();
         let config = self.config.clone();
         let clock = self.clock.clone();
         let logger = self.logger.clone();
 
-        running.store(true, std::sync::atomic::Ordering::SeqCst);
+        running.store(true, Ordering::SeqCst);
 
+        let cam = match setup_camera(&config) {
+            Ok(cam) => cam,
+            Err(e) => {
+                logger.error(&e.to_string());
+                return rx;
+            },
+        };
         thread::spawn(move || {
-            let camera_index = if let Ok(index) = i32::try_from(config.media.camera_index) {
-                index
-            } else {
-                logger.error("Camera index is too large for i32. Stopping camera thread.");
-                return;
-            };
-
-            let mut cam = match videoio::VideoCapture::new(camera_index, videoio::CAP_V4L2) {
-                Ok(cam) => cam,
-                Err(_) => {
-                    logger.error("Failed to open camera. Stopping camera thread.");
-                    return;
-                }
-            };
-
-            if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
-                logger.error("Camera is not open. Stopping camera thread.");
-                return;
-            }
-
-            if cam
-                .set(
-                    videoio::CAP_PROP_FOURCC,
-                    f64::from(VideoWriter::fourcc('M', 'J', 'P', 'G').unwrap()),
-                )
-                .is_err()
-            {
-                logger.error("Stopping camera thread.");
-                return;
-            }
-            if cam
-                .set(videoio::CAP_PROP_FPS, config.media.frame_rate as f64)
-                .is_err()
-            {
-                logger.error("Failed to set camera height. Stopping camera thread.");
-                return;
-            }
-            if cam
-                .set(videoio::CAP_PROP_FRAME_WIDTH, config.media.frame_width)
-                .is_err()
-            {
-                logger.error("Failed to set camera width. Stopping camera thread.");
-                return;
-            }
-            if cam
-                .set(videoio::CAP_PROP_FRAME_HEIGHT, config.media.frame_height)
-                .is_err()
-            {
-                logger.error("Failed to set camera height. Stopping camera thread.");
-                return;
-            }
-
-            let mut mat = Mat::default();
-            let mut rgb = Mat::default();
-
-            while running.load(std::sync::atomic::Ordering::SeqCst) {
-                if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
-                    logger.error("Failed to read camera frame.");
-                    continue;
-                }
-
-                if imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).is_err() {
-                    logger.error("Failed to convert frame color.");
-                    continue;
-                }
-                let data = if let Ok(bytes) = rgb.data_bytes() {
-                    bytes.to_vec()
-                } else {
-                    logger.error("Failed to extract frame data.");
-                    continue;
-                };
-
-                #[allow(clippy::cast_sign_loss)]
-                let frame = Frame {
-                    data,
-                    width: rgb.cols() as usize,
-                    height: rgb.rows() as usize,
-                    frame_time: clock.now(),
-                };
-
-                if tx.send(frame).is_err() {
-                    continue;
-                }
-            }
+            run_camera_loop(cam, running, tx, clock, logger);
         });
-        Ok(rx)
+
+        rx
     }
 
     /// Stop the capture thread by clearing the running flag. The
     /// capture thread will observe this and exit shortly.
     fn stop_internal(&self) {
         self.running
-            .store(false, std::sync::atomic::Ordering::SeqCst);
+            .store(false, Ordering::SeqCst);
     }
 }
 
 impl FrameSource for Camera {
-    fn start(&mut self) -> Result<Receiver<Frame>, Error> {
+    fn start(&mut self) -> Receiver<Frame> {
         self.start_internal()
     }
 
@@ -178,3 +103,64 @@ impl FrameSource for Camera {
         self.stop_internal()
     }
 }
+
+// Aux functions ----------------------------------------------------------------------------------
+
+fn setup_camera(config: &Arc<Config>) -> Result<videoio::VideoCapture, Error> {
+    let camera_index = i32::try_from(config.media.camera_index)
+        .map_err(|_| Error::CameraIndexError)?;
+
+    let mut cam = videoio::VideoCapture::new(camera_index, videoio::CAP_V4L2)
+        .map_err(|e| Error::OpenError(e.to_string()))?;
+
+    if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
+        return Err(Error::OpenError("Camera not opened".to_string()));
+    }
+
+    let settings = [
+        (videoio::CAP_PROP_FOURCC, f64::from(VideoWriter::fourcc('M', 'J', 'P', 'G').unwrap())),
+        (videoio::CAP_PROP_FPS, config.media.frame_rate as f64),
+        (videoio::CAP_PROP_FRAME_WIDTH, config.media.frame_width),
+        (videoio::CAP_PROP_FRAME_HEIGHT, config.media.frame_height),
+    ];
+
+    for (prop, val) in settings {
+        cam.set(prop, val).map_err(|_| Error::PropSettingError(prop.to_string()))?;
+    }
+
+    Ok(cam)
+}
+
+fn run_camera_loop(
+    mut cam: videoio::VideoCapture,
+    running: Arc<AtomicBool>,
+    tx: Sender<Frame>,
+    clock: Arc<Clock>,
+    logger: Logger,
+) {
+    let mut mat = Mat::default();
+    let mut rgb = Mat::default();
+
+    while running.load(Ordering::SeqCst) {
+        if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
+            logger.error(&Error::ReadFrameError.to_string());
+            continue;
+        }
+
+        if imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).is_err() {
+            continue;
+        }
+
+        if let Ok(data) = rgb.data_bytes() {
+            let frame = Frame {
+                data: data.to_vec(),
+                width: rgb.cols() as usize,
+                height: rgb.rows() as usize,
+                frame_time: clock.now(),
+            };
+            if tx.send(frame).is_err() { break; }
+        }
+    }
+}
+
+

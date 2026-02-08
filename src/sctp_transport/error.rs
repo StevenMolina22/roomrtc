@@ -6,6 +6,9 @@ pub enum SCTPTransportError {
     OpenStreamError(String),
     OpenDataChannelError(String),
     IOError(String),
+    PoisonedLock(String),
+    SocketConfigError(String),
+    MapError(String),
 }
 
 impl Display for SCTPTransportError {
@@ -15,6 +18,9 @@ impl Display for SCTPTransportError {
             Self::OpenStreamError(e) => write!(f, "Error: \"Failed to open stream\". Details: {e}"),
             Self::OpenDataChannelError(e) => write!(f, "{e}"),
             Self::IOError(e) => write!(f, "Error: \"I/O operation failed\". Details: {e}"),
+            Self::PoisonedLock(e) => write!(f, "Error: \"Poisoned lock\" . Details: {e}"),
+            Self::SocketConfigError(e) => write!(f, "Error: \"Failed to config socket\" . Details: {e}"),
+            Self::MapError(e) => write!(f, "{e}"),
         }
     }
 }

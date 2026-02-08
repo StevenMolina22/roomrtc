@@ -10,6 +10,8 @@ use openssl::{
     x509::X509NameBuilder,
 };
 use std::fmt;
+use openssl::pkey::Private;
+use openssl::x509::X509;
 use udp_dtls::Identity;
 
 /// Default password used to protect the PKCS#12 archive.
@@ -131,46 +133,18 @@ impl From<ErrorStack> for CertError {
 /// println!("Fingerprint: {}", local_cert.fingerprint);
 /// ```
 pub fn generate_self_signed_cert() -> Result<LocalCert, CertError> {
-    // Generate EC Key using NIST P-256 (standard for WebRTC)
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
-    let ec_key = EcKey::generate(&group)?;
-    let pkey = PKey::from_ec_key(ec_key)?;
+    let pkey = generate_ec_key()?;
+    let cert = build_x509_cert(&pkey)?;
 
-    // Build the X.509 Certificate
-    let mut builder = openssl::x509::X509::builder()?;
-    builder.set_version(2)?;
-
-    let serial_bn = BigNum::from_u32(SERIAL_NUMBER)?;
-    let serial = serial_bn.to_asn1_integer()?;
-    builder.set_serial_number(&serial)?;
-
-    let mut name_builder = X509NameBuilder::new()?;
-    name_builder.append_entry_by_text("CN", SUBJECT_CN)?;
-    let name = name_builder.build();
-
-    builder.set_subject_name(&name)?;
-    builder.set_issuer_name(&name)?;
-
-    let not_before = Asn1Time::days_from_now(0)?;
-    builder.set_not_before(&not_before)?;
-    let not_after = Asn1Time::days_from_now(VALIDITY_DAYS)?;
-    builder.set_not_after(&not_after)?;
-
-    builder.set_pubkey(&pkey)?;
-    // OpenSSL automatically detects the key type (EC) and uses ECDSA-SHA256
-    builder.sign(&pkey, MessageDigest::sha256())?;
-
-    let cert = builder.build();
     let digest = cert.digest(MessageDigest::sha256())?;
     let fingerprint = fingerprint_from_digest(digest.as_ref());
 
-    // Package into PKCS#12
-    let pkcs12 = Pkcs12::builder()
+    let pkcs12_der = Pkcs12::builder()
         .name(FRIENDLY_NAME)
         .pkey(&pkey)
         .cert(&cert)
-        .build2(PKCS12_PASSWORD)?;
-    let pkcs12_der = pkcs12.to_der()?;
+        .build2(PKCS12_PASSWORD)?
+        .to_der()?;
 
     let identity = Identity::from_pkcs12(&pkcs12_der, PKCS12_PASSWORD)
         .map_err(|e| CertError::Identity(format!("DTLS identity creation failed: {e}")))?;
@@ -189,6 +163,35 @@ fn fingerprint_from_digest(digest: &[u8]) -> String {
         .map(|byte| format!("{byte:02X}"))
         .collect::<Vec<String>>()
         .join(":")
+}
+
+fn generate_ec_key() -> Result<PKey<Private>, CertError> {
+    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+    let ec_key = EcKey::generate(&group)?;
+    Ok(PKey::from_ec_key(ec_key)?)
+}
+
+fn build_x509_cert(pkey: &PKey<Private>) -> Result<X509, CertError> {
+    let mut builder = X509::builder()?;
+    builder.set_version(2)?;
+
+    let serial = BigNum::from_u32(SERIAL_NUMBER)?.to_asn1_integer()?;
+    builder.set_serial_number(&serial)?;
+
+    let mut name_builder = X509NameBuilder::new()?;
+    name_builder.append_entry_by_text("CN", SUBJECT_CN)?;
+    let name = name_builder.build();
+
+    builder.set_subject_name(&name)?;
+    builder.set_issuer_name(&name)?;
+    let not_before = Asn1Time::days_from_now(0)?;
+    builder.set_not_before(&not_before)?;
+    let not_after = Asn1Time::days_from_now(VALIDITY_DAYS)?;
+    builder.set_not_after(&not_after)?;
+    builder.set_pubkey(pkey)?;
+    builder.sign(pkey, MessageDigest::sha256())?;
+
+    Ok(builder.build())
 }
 
 #[cfg(test)]

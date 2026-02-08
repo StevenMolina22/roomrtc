@@ -116,56 +116,16 @@ impl CentralServer {
                 return;
             };
 
-            for stream in cs_listener.incoming() {
-                if !on.load(Ordering::SeqCst) {
-                    break;
-                }
-                let stream = match stream {
-                    Ok(s) => s,
-                    Err(_) => {
-                        continue;
-                    }
-                };
-                let tls_config = tls_config.clone();
-                let users_connected = users_connected.clone();
-                let config = config.clone();
-                let users = users.clone();
-                let on = on.clone();
-                let server_client_socket_addr = server_client_socket_addr;
-
-                let thread_logger = logger.context("UserHandler");
-
-                thread::spawn(move || {
-                    let tls_conn = match ServerConnection::new(tls_config) {
-                        Ok(conn) => conn,
-                        Err(_) => return,
-                    };
-                    let mut tls_stream = StreamOwned::new(tls_conn, stream);
-
-                    let mut user_handler = UserHandler::new(
-                        users,
-                        config.clone(),
-                        server_client_socket_addr,
-                        thread_logger,
-                    );
-
-                    if user_handler
-                        .client_server_handshake(&mut tls_stream, &users_connected, &config)
-                        .is_err()
-                    {
-                        return;
-                    }
-
-                    match user_handler.handle_client(&mut tls_stream, on) {
-                        Ok(()) | Err(ServerError::ConnectionError) => users_connected
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
-                                if v == 0 { Some(0) } else { Some(v - 1) }
-                            })
-                            .ok(),
-                        _ => Some(0),
-                    };
-                });
-            }
+            run_connections_loop(
+                cs_listener,
+                on,
+                tls_config,
+                users_connected,
+                config,
+                users,
+                server_client_socket_addr,
+                logger,
+            );
         });
         Ok(())
     }
@@ -214,6 +174,85 @@ impl CentralServer {
         });
         Ok(())
     }
+}
+
+fn run_connections_loop(
+    cs_listener: TcpListener,
+    on: Arc<AtomicBool>,
+    tls_config: Arc<ServerConfig>,
+    users_connected: Arc<AtomicUsize>,
+    config: Arc<Config>,
+    users: Arc<RwLock<HashMap<String, UserData>>>,
+    server_client_socket_addr: SocketAddr,
+    logger: Logger,
+) {
+    for stream in cs_listener.incoming() {
+        if !on.load(Ordering::SeqCst) {
+            break;
+        }
+        let stream = match stream {
+            Ok(s) => s,
+            Err(_) => {
+                continue;
+            }
+        };
+        let tls_config = tls_config.clone();
+        let users_connected = users_connected.clone();
+        let config = config.clone();
+        let users = users.clone();
+        let on = on.clone();
+        let server_client_socket_addr = server_client_socket_addr;
+
+        handle_client_conn(
+            on.clone(),
+            tls_config.clone(),
+            users_connected.clone(),
+            config.clone(),
+            users.clone(),
+            server_client_socket_addr,
+            logger.context("UserHandler"),
+            stream
+        )
+    }
+}
+
+fn handle_client_conn(
+    on: Arc<AtomicBool>,
+    tls_config: Arc<ServerConfig>,
+    users_connected: Arc<AtomicUsize>,
+    config: Arc<Config>,
+    users: Arc<RwLock<HashMap<String, UserData>>>,
+    server_client_socket_addr: SocketAddr,
+    logger: Logger,
+    stream: TcpStream,
+) {
+    thread::spawn(move || {
+        let tls_conn = match ServerConnection::new(tls_config) {
+            Ok(conn) => conn,
+            Err(_) => return,
+        };
+        let mut tls_stream = StreamOwned::new(tls_conn, stream);
+
+        let mut user_handler = UserHandler::new(
+            users,
+            config.clone(),
+            server_client_socket_addr,
+            logger,
+        );
+
+        if user_handler.client_server_handshake(&mut tls_stream, &users_connected, &config).is_err() {
+            return;
+        }
+
+        match user_handler.handle_client(&mut tls_stream, on) {
+            Ok(()) | Err(ServerError::ConnectionError) => users_connected
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+                    Some(v.saturating_sub(1))
+                })
+                .ok(),
+            _ => Some(0),
+        };
+    });
 }
 
 // Loads user credentials from disk; creates an empty file if it is missing.

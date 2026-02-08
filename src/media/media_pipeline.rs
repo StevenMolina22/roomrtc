@@ -136,48 +136,22 @@ impl MediaPipeline {
         let (remote_frame_tx, remote_frame_rx) = mpsc::channel();
         let logger = self.logger.clone();
 
-        let mut jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(
+        let jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(
             self.clock.clone(),
             receiver_metrics,
             self.logger.clone()
         );
 
+        let decoder = Decoder::new().map_err(|e| {
+            send_message_to_ui(
+                event_tx.clone(),
+                AppEvent::Error("Failed to create decoder".into()),
+            );
+            Error::MapError(e.to_string())
+        })?;
         thread::spawn({
             move || {
-                let mut decoder = match Decoder::new().map_err(|e| Error::MapError(e.to_string())) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        logger.error(&format!("Failed to create decoder: {e}"));
-                        send_message_to_ui(
-                            event_tx,
-                            AppEvent::Error("Failed to create decoder".into()),
-                        );
-                        return;
-                    }
-                };
-
-                loop {
-                    if !connected.load(Ordering::SeqCst) {
-                        break;
-                    }
-
-                    match rtp_rx.recv() {
-                        Ok(packet) => jitter_buffer.add(packet),
-                        Err(_) => break,
-                    }
-
-                    if let Some(chunks) = jitter_buffer.pop()
-                        && let Some(frame_data) = generate_frame_from_chunks(&chunks, &mut decoder)
-                        && remote_frame_tx.send(frame_data.clone()).is_err()
-                    {
-                        break;
-                    }
-                }
-                if connected.load(Ordering::SeqCst) {
-                    connected.store(false, Ordering::SeqCst);
-                    send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
-                }
-                logger.info("Remote frames pipeline terminated");
+                run_frame_pipeline_loop(rtp_rx, remote_frame_tx, jitter_buffer, decoder, logger, event_tx, connected);
             }
         });
         Ok(remote_frame_rx)
@@ -196,8 +170,7 @@ impl MediaPipeline {
         self.start_frame_sender_thread(rgb_rx, event_tx.clone(), rtp_tx, &connected)?;
         let camera_frame_rx = self
             .camera
-            .start()
-            .map_err(|e| Error::MapError(e.to_string()))?;
+            .start();
 
         thread::spawn(move || {
             for frame in camera_frame_rx {
@@ -301,6 +274,36 @@ impl MediaPipeline {
             audio.toggle_mute();
         }
     }
+}
+
+fn run_frame_pipeline_loop(
+    rtp_rx: Receiver<RtpPacket>,
+    remote_frame_tx: Sender<Frame>,
+    mut jitter_buffer: JitterBuffer<JITTER_BUFF_SIZE>,
+    mut decoder: Decoder,
+    logger: Logger,
+    event_tx: Sender<AppEvent>,
+    connected: Arc<AtomicBool>,
+) {
+    while connected.load(Ordering::SeqCst) {
+        match rtp_rx.recv() {
+            Ok(packet) => jitter_buffer.add(packet),
+            Err(_) => break,
+        }
+
+        if let Some(chunks) = jitter_buffer.pop()
+            && let Some(frame_data) = generate_frame_from_chunks(&chunks, &mut decoder)
+            && remote_frame_tx.send(frame_data.clone()).is_err()
+        {
+            break;
+        }
+    }
+
+    if connected.load(Ordering::SeqCst) {
+        connected.store(false, Ordering::SeqCst);
+        send_message_to_ui(event_tx.clone(), AppEvent::CallEnded);
+    }
+    logger.info("Remote frames pipeline terminated");
 }
 
 /// Sends an encoded frame as RTP packets over the provided channel.

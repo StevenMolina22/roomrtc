@@ -5,10 +5,12 @@ use sctp_proto::{Association, Chunks, PayloadProtocolIdentifier, StreamId};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use crate::logger::Logger;
 
 pub struct DataChannel {
     pub(crate) stream_id: StreamId,
     pub(crate) association: Arc<Mutex<Association>>,
+    logger: Arc<Logger>,
     config: Arc<Config>,
 }
 
@@ -16,11 +18,13 @@ impl DataChannel {
     pub fn from_accepted_stream(
         stream_id: StreamId,
         association: Arc<Mutex<Association>>,
+        logger: Arc<Logger>,
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let mut dc = Self {
             stream_id,
             association,
+            logger,
             config,
         };
 
@@ -39,11 +43,13 @@ impl DataChannel {
         dc_type: DataChannelType,
         reliability_param: u32,
         protocol: String,
+        logger: Arc<Logger>,
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let mut dc = Self {
             stream_id,
             association,
+            logger,
             config,
         };
         dc.configure_stream(&label, dc_type, reliability_param, &protocol)?;
@@ -70,10 +76,10 @@ impl DataChannel {
         let mut assoc = self
             .association
             .lock()
-            .map_err(|e| Error::OpenError(e.to_string()))?;
+            .map_err(|e| Error::LockError(e.to_string()))?;
         let mut stream = assoc
             .stream(self.stream_id)
-            .map_err(|e| Error::OpenError(e.to_string()))?;
+            .map_err(|e| Error::GetStreamError(e.to_string()))?;
 
         stream
             .set_default_payload_type(PayloadProtocolIdentifier::Binary)
@@ -91,10 +97,10 @@ impl DataChannel {
         let mut association = self
             .association
             .lock()
-            .map_err(|e| Error::SendError(e.to_string()))?;
+            .map_err(|e| Error::LockError(e.to_string()))?;
         let mut stream = association
             .stream(self.stream_id)
-            .map_err(|e| Error::OpenError(e.to_string()))?;
+            .map_err(|e| Error::GetStreamError(e.to_string()))?;
 
         stream
             .write(message)
@@ -107,7 +113,7 @@ impl DataChannel {
             if let Some(chunks) = self.read_chunks()? {
                 return chunks
                     .read(buff)
-                    .map_err(|e| Error::ReadStreamError(e.to_string()));
+                    .map_err(|e| Error::ReadChunksError(e.to_string()));
             }
             thread::sleep(Duration::from_millis(0));
         }
@@ -117,10 +123,10 @@ impl DataChannel {
         let mut assoc = self
             .association
             .lock()
-            .map_err(|e| Error::OpenError(e.to_string()))?;
+            .map_err(|e| Error::LockError(e.to_string()))?;
         let mut stream = assoc
             .stream(self.stream_id)
-            .map_err(|e| Error::OpenError(e.to_string()))?;
+            .map_err(|e| Error::GetStreamError(e.to_string()))?;
 
         stream
             .read()
@@ -131,20 +137,20 @@ impl DataChannel {
         let mut assoc = self
             .association
             .lock()
-            .map_err(|e| Error::OpenError(e.to_string()))?;
+            .map_err(|e| Error::LockError(e.to_string()))?;
         let mut stream = assoc
             .stream(self.stream_id)
-            .map_err(|e| Error::OpenError(e.to_string()))?;
+            .map_err(|e| Error::GetStreamError(e.to_string()))?;
 
         stream
             .write_with_ppi(bytes, ppi)
-            .map_err(|e| Error::OpenError(e.to_string()))?;
+            .map_err(|e| Error::SendError(e.to_string()))?;
         Ok(())
     }
 
     fn write_dcep(&mut self, message: DCEPMessage) -> Result<(), Error> {
         self.write_with_ppi(&message.to_bytes(), PayloadProtocolIdentifier::Dcep)
-            .map_err(|e| Error::OpenError(e.to_string()))
+            .map_err(|e| Error::SendError(e.to_string()))
     }
 
     // DCEP
@@ -158,7 +164,7 @@ impl DataChannel {
                 let mut bytes = vec![0u8; 1024];
                 chunks
                     .read(&mut bytes)
-                    .map_err(|e| Error::ReadStreamError(e.to_string()))?;
+                    .map_err(|e| Error::ReadChunksError(e.to_string()))?;
 
                 match DCEPMessage::from_bytes(&bytes) {
                     Some(DCEPMessage::DataChannelAck) => {
@@ -182,15 +188,15 @@ impl DataChannel {
                 let mut bytes = vec![0u8; 1024];
                 chunks
                     .read(&mut bytes)
-                    .map_err(|e| Error::ReadStreamError(e.to_string()))?;
+                    .map_err(|e| Error::ReadChunksError(e.to_string()))?;
 
                 match DCEPMessage::from_bytes(&bytes) {
                     Some(DCEPMessage::DataChannelOpen {
                         channel_type,
-                        priority,
                         reliability_parameter,
                         label,
                         protocol,
+                        ..
                     }) => {
                         self.configure_stream(
                             &label,

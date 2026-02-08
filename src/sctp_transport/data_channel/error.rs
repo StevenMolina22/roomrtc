@@ -6,6 +6,9 @@ pub enum DataChannelError {
     ReadStreamError(String),
     OpenTimeout,
     SendError(String),
+    LockError(String),
+    GetStreamError(String),
+    ReadChunksError(String),
 }
 
 impl Display for DataChannelError {
@@ -27,6 +30,9 @@ impl Display for DataChannelError {
             Self::SendError(e) => {
                 write!(f, "Error: \"Failed to send to data channel\". Details: {e}")
             }
+            Self::LockError(e) => { write!(f, "Error: \"Lock error\". Details: {e}") }
+            Self::GetStreamError(e) => { write!(f, "Error: \"Failed to get stream\". Details: {e}") }
+            Self::ReadChunksError(e) => { write!(f, "Error: \"Failed to read from chunks\". Details: {e}") }
         }
     }
 }

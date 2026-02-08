@@ -1,12 +1,14 @@
 use std::fmt::Display;
 
 #[derive(Debug)]
-pub enum FileMetadataError {}
+pub enum FileMetadataError {
+    MetadataError,
+}
 
 impl Display for FileMetadataError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            _ => todo!(),
+            Self::MetadataError => write!(f, "Error: \"Failed to obtain metadata from file\""),
         }
     }
 }

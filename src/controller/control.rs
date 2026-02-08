@@ -5,7 +5,7 @@ use crate::logger::Logger;
 use crate::media::MediaPipeline;
 use crate::media::frame_handler::Frame;
 use crate::session::CallSession;
-use crate::session::sdp::SessionDescriptionProtocol;
+use crate::session::sdp::{Fingerprint, SessionDescriptionProtocol};
 use crate::transport::MediaTransport;
 use crate::user::UserStatus;
 use rustls::pki_types::ServerName;
@@ -110,28 +110,24 @@ impl Controller {
     // FILES
 
     pub fn send_file(&mut self, file_path: &Path) -> Result<(), Error> {
-        self.file_transferer
-            .as_mut()
-            .unwrap()
-            .send_file(file_path)
-            .unwrap();
+        if let Some(transferer) = self.file_transferer.as_mut() {
+            transferer.send_file(file_path).map_err(|e| Error::MapError(e.to_string()))?;
+        }
         Ok(())
     }
 
-    pub fn accept_file(&mut self, id: u32, path: &Path) {
-        self.file_transferer
-            .as_mut()
-            .unwrap()
-            .accept_file_offer(id, path)
-            .unwrap();
+    pub fn accept_file(&mut self, id: u32, path: &Path) -> Result<(), Error> {
+        if let Some(transferer) = self.file_transferer.as_mut() {
+            transferer.accept_file_offer(id, path).map_err(|e| Error::MapError(e.to_string()))?;
+        }
+        Ok(())
     }
 
-    pub fn reject_file(&mut self, id: u32) {
-        self.file_transferer
-            .as_mut()
-            .unwrap()
-            .reject_file_offer(id)
-            .unwrap();
+    pub fn reject_file(&mut self, id: u32) -> Result<(), Error> {
+        if let Some(transferer) = self.file_transferer.as_mut() {
+            transferer.reject_file_offer(id).map_err(|e| Error::MapError(e.to_string()))?;
+        }
+        Ok(())
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------
@@ -328,53 +324,25 @@ impl Controller {
 
     // Helper function to join an active call by setting up media transport and pipeline
     pub(crate) fn join_call(&mut self) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
-        let pair = self
-            .call_session
-            .get_selected_pair()
+        let (remote_rtp_addr, remote_rtcp_addr, remote_sctp_addr) = self.get_remote_addresses()
             .map_err(|e| Error::MapError(e.to_string()))?;
-
-        let remote_rtp_address: SocketAddr =
-            format!("{}:{}", pair.remote.address, pair.remote.port)
-                .parse()
-                .map_err(Error::ParsingSocketAddressError)?;
-        let remote_rtcp_address: SocketAddr =
-            format!("{}:{}", pair.remote.address, pair.remote.port + 1)
-                .parse()
-                .map_err(Error::ParsingSocketAddressError)?;
-        let remote_sctp_address: SocketAddr =
-            format!("{}:{}", pair.remote.address, pair.remote.port + 2)
-                .parse()
-                .map_err(Error::ParsingSocketAddressError)?;
-
         let remote_fingerprint = self
             .call_session
             .remote_fingerprint
             .clone()
             .ok_or(Error::NotLoggedInError)?;
-
         let handles = self
             .transport
             .start(
-                remote_rtp_address,
-                remote_rtcp_address,
+                remote_rtp_addr,
+                remote_rtcp_addr,
                 self.event_tx.clone(),
                 self.call_session.local_setup_role,
                 remote_fingerprint.clone(),
                 &self.call_session.local_cert,
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
-
-
-        let local_sctp_address = SocketAddr::new(self.transport.rtp_address.ip(), self.transport.rtp_address.port() + 2);
-        self.file_transferer = Some(FileTransferer::new(
-            local_sctp_address,
-            remote_sctp_address,
-            self.call_session.local_setup_role,
-            remote_fingerprint,
-            &self.call_session.local_cert,
-            self.event_tx.clone(),
-            self.config.clone(),
-        ).map_err(|e| Error::MapError(e.to_string()))?);
+        self.setup_file_transferer(remote_sctp_addr.clone(), remote_fingerprint.clone(), handles.is_connected.clone())?;
 
         self.media_pipeline
             .start(
@@ -486,68 +454,15 @@ impl Controller {
         let username = username.to_owned();
         let user_status = self.users_status.clone();
 
-        let mut stream = connect_tls(
+        let stream = connect_tls(
             server_client_addr,
             config.server.server_certification_file.clone(),
             config.server.server_name.clone(),
         )?;
 
         thread::spawn(move || {
-            let mut buff = [0u8; 65535];
-            loop {
-                if !logged_in.load(Ordering::SeqCst) {
-                    break;
-                }
-
-                let server_msg = match stream.read(&mut buff) {
-                    Ok(0) => {
-                        break;
-                    }
-                    Ok(size) => match ServerMessage::from_bytes(&buff[..size]) {
-                        Some(server_msg) => server_msg,
-                        None => continue,
-                    },
-                    Err(e) => {
-                        if logged_in.load(Ordering::SeqCst) {
-                            send_event_or_log_out(
-                                &event_tx,
-                                AppEvent::Error(e.to_string()),
-                                &logged_in,
-                            );
-                        }
-                        break;
-                    }
-                };
-
-                match get_response_for_server_message(
-                    server_msg,
-                    &event_tx,
-                    username.clone(),
-                    user_status.clone(),
-                ) {
-                    Ok(Some(client_response)) => {
-                        if let Err(e) = send_response(client_response, &mut stream) {
-                            send_event_or_log_out(
-                                &event_tx,
-                                AppEvent::Error(e.to_string()),
-                                &logged_in,
-                            );
-                            break;
-                        }
-                    }
-                    Ok(None) => continue,
-                    Err(e) => {
-                        send_event_or_log_out(
-                            &event_tx,
-                            AppEvent::Error(e.to_string()),
-                            &logged_in,
-                        );
-                        break;
-                    }
-                }
-            }
+            run_receiver_loop(logged_in, stream, event_tx, &username, user_status)
         });
-
         Ok(())
     }
 
@@ -604,10 +519,82 @@ impl Controller {
     pub fn toggle_audio(&self) {
         self.media_pipeline.toggle_audio();
     }
+
+    fn get_remote_addresses(
+        &mut self
+    ) -> Result<(SocketAddr, SocketAddr, SocketAddr), Error> {
+        let pair = self
+            .call_session
+            .get_selected_pair()
+            .map_err(|e| Error::MapError(e.to_string()))?;
+
+        let remote_rtp_address: SocketAddr =
+            format!("{}:{}", pair.remote.address, pair.remote.port)
+                .parse()
+                .map_err(Error::ParsingSocketAddressError)?;
+        let remote_rtcp_address: SocketAddr =
+            format!("{}:{}", pair.remote.address, pair.remote.port + 1)
+                .parse()
+                .map_err(Error::ParsingSocketAddressError)?;
+        let remote_sctp_address: SocketAddr =
+            format!("{}:{}", pair.remote.address, pair.remote.port + 2)
+                .parse()
+                .map_err(Error::ParsingSocketAddressError)?;
+
+        Ok((remote_rtp_address, remote_rtcp_address, remote_sctp_address))
+    }
+
+    fn setup_file_transferer(
+        &mut self,
+        remote_sctp_addr: SocketAddr,
+        remote_fingerprint: Fingerprint,
+        connected: Arc<AtomicBool>,
+    ) -> Result<(), Error> {
+        let local_sctp_address = SocketAddr::new(self.transport.rtp_address.ip(), self.transport.rtp_address.port() + 2);
+        self.file_transferer = Some(FileTransferer::new(
+            local_sctp_address,
+            remote_sctp_addr,
+            self.call_session.local_setup_role,
+            remote_fingerprint,
+            &self.call_session.local_cert,
+            self.event_tx.clone(),
+            connected,
+            Arc::new(self.logger.clone()),
+            self.config.clone(),
+        ).map_err(|e| Error::MapError(e.to_string()))?);
+        Ok(())
+    }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------
 // PRIVATE HELPER FUNCTIONS
+
+fn run_receiver_loop(
+    logged_in: Arc<AtomicBool>,
+    mut stream: StreamOwned<ClientConnection, TcpStream>,
+    event_tx: Sender<AppEvent>,
+    username: &str,
+    user_status: Arc<RwLock<HashMap<String, UserStatus>>>,
+) -> Result<(), Error> {
+    let mut buff = [0u8; 65535];
+    while logged_in.load(Ordering::SeqCst) {
+        match stream.read(&mut buff) {
+            Ok(0) => break,
+            Ok(size) => {
+                if let Err(e) = handle_server_bytes(size, &buff, &mut stream, username, event_tx.clone(), user_status.clone()) {
+                    send_event_or_log_out(&event_tx, AppEvent::Error(e.to_string()), &logged_in);
+                    break;
+                }
+            }
+            Err(e) if logged_in.load(Ordering::SeqCst) => {
+                send_event_or_log_out(&event_tx, AppEvent::Error(e.to_string()), &logged_in);
+                break;
+            }
+            Err(_) => break
+        }
+    }
+    Ok(())
+}
 
 // Sends an event to the UI and logs out if the channel is disconnected
 fn send_event_or_log_out(
@@ -769,4 +756,26 @@ pub fn connect_tls(
     let tls_stream = StreamOwned::new(tls_conn, tcp_stream);
 
     Ok(tls_stream)
+}
+
+fn handle_server_bytes(
+    size: usize,
+    buff: &[u8],
+    stream: &mut StreamOwned<ClientConnection, TcpStream>,
+    username: &str,
+    event_tx: Sender<AppEvent>,
+    users_status: Arc<RwLock<HashMap<String, UserStatus>>>,
+) -> Result<(), Error> {
+    let server_msg = ServerMessage::from_bytes(&buff[..size])
+        .ok_or_else(|| Error::MapError("Failed to parse message".to_string()))?;
+
+    if let Some(response) = get_response_for_server_message(
+        server_msg,
+        &event_tx,
+        username.to_string(),
+        users_status.clone(),
+    ).map_err(|e| Error::MapError(e.to_string()))? {
+        send_response(response, stream).map_err(|e| Error::MapError(e.to_string()))?;
+    }
+    Ok(())
 }

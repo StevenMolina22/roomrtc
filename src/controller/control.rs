@@ -1,6 +1,7 @@
 use crate::client_server_protocol::{ClientMessage, ClientResponse, ServerMessage, ServerResponse};
 use crate::config::Config;
 use crate::controller::{AppEvent, ControllerError as Error};
+use crate::file::file_transferer::FileTransferer;
 use crate::logger::Logger;
 use crate::media::MediaPipeline;
 use crate::media::frame_handler::Frame;
@@ -19,7 +20,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use crate::file::file_transferer::FileTransferer;
 
 /// Main controller for managing RTC calls and server communication.
 ///
@@ -105,27 +105,32 @@ impl Controller {
         })
     }
 
-
     // ---------------------------------------------------------------------------------------------------------------------------
     // FILES
 
     pub fn send_file(&mut self, file_path: &Path) -> Result<(), Error> {
         if let Some(transferer) = self.file_transferer.as_mut() {
-            transferer.send_file(file_path).map_err(|e| Error::MapError(e.to_string()))?;
+            transferer
+                .send_file(file_path)
+                .map_err(|e| Error::MapError(e.to_string()))?;
         }
         Ok(())
     }
 
     pub fn accept_file(&mut self, id: u32, path: &Path) -> Result<(), Error> {
         if let Some(transferer) = self.file_transferer.as_mut() {
-            transferer.accept_file_offer(id, path).map_err(|e| Error::MapError(e.to_string()))?;
+            transferer
+                .accept_file_offer(id, path)
+                .map_err(|e| Error::MapError(e.to_string()))?;
         }
         Ok(())
     }
 
     pub fn reject_file(&mut self, id: u32) -> Result<(), Error> {
         if let Some(transferer) = self.file_transferer.as_mut() {
-            transferer.reject_file_offer(id).map_err(|e| Error::MapError(e.to_string()))?;
+            transferer
+                .reject_file_offer(id)
+                .map_err(|e| Error::MapError(e.to_string()))?;
         }
         Ok(())
     }
@@ -324,7 +329,8 @@ impl Controller {
 
     // Helper function to join an active call by setting up media transport and pipeline
     pub(crate) fn join_call(&mut self) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
-        let (remote_rtp_addr, remote_rtcp_addr, remote_sctp_addr) = self.get_remote_addresses()
+        let (remote_rtp_addr, remote_rtcp_addr, remote_sctp_addr) = self
+            .get_remote_addresses()
             .map_err(|e| Error::MapError(e.to_string()))?;
         let remote_fingerprint = self
             .call_session
@@ -342,7 +348,11 @@ impl Controller {
                 &self.call_session.local_cert,
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
-        self.setup_file_transferer(remote_sctp_addr.clone(), remote_fingerprint.clone(), handles.is_connected.clone())?;
+        self.setup_file_transferer(
+            remote_sctp_addr,
+            remote_fingerprint.clone(),
+            handles.is_connected.clone(),
+        )?;
 
         self.media_pipeline
             .start(
@@ -520,9 +530,7 @@ impl Controller {
         self.media_pipeline.toggle_audio();
     }
 
-    fn get_remote_addresses(
-        &mut self
-    ) -> Result<(SocketAddr, SocketAddr, SocketAddr), Error> {
+    fn get_remote_addresses(&mut self) -> Result<(SocketAddr, SocketAddr, SocketAddr), Error> {
         let pair = self
             .call_session
             .get_selected_pair()
@@ -550,18 +558,24 @@ impl Controller {
         remote_fingerprint: Fingerprint,
         connected: Arc<AtomicBool>,
     ) -> Result<(), Error> {
-        let local_sctp_address = SocketAddr::new(self.transport.rtp_address.ip(), self.transport.rtp_address.port() + 2);
-        self.file_transferer = Some(FileTransferer::new(
-            local_sctp_address,
-            remote_sctp_addr,
-            self.call_session.local_setup_role,
-            remote_fingerprint,
-            &self.call_session.local_cert,
-            self.event_tx.clone(),
-            connected,
-            Arc::new(self.logger.clone()),
-            self.config.clone(),
-        ).map_err(|e| Error::MapError(e.to_string()))?);
+        let local_sctp_address = SocketAddr::new(
+            self.transport.rtp_address.ip(),
+            self.transport.rtp_address.port() + 2,
+        );
+        self.file_transferer = Some(
+            FileTransferer::new(
+                local_sctp_address,
+                remote_sctp_addr,
+                self.call_session.local_setup_role,
+                remote_fingerprint,
+                &self.call_session.local_cert,
+                self.event_tx.clone(),
+                connected,
+                Arc::new(self.logger.clone()),
+                self.config.clone(),
+            )
+            .map_err(|e| Error::MapError(e.to_string()))?,
+        );
         Ok(())
     }
 }
@@ -581,7 +595,14 @@ fn run_receiver_loop(
         match stream.read(&mut buff) {
             Ok(0) => break,
             Ok(size) => {
-                if let Err(e) = handle_server_bytes(size, &buff, &mut stream, username, event_tx.clone(), user_status.clone()) {
+                if let Err(e) = handle_server_bytes(
+                    size,
+                    &buff,
+                    &mut stream,
+                    username,
+                    event_tx.clone(),
+                    user_status.clone(),
+                ) {
                     send_event_or_log_out(&event_tx, AppEvent::Error(e.to_string()), &logged_in);
                     break;
                 }
@@ -590,7 +611,7 @@ fn run_receiver_loop(
                 send_event_or_log_out(&event_tx, AppEvent::Error(e.to_string()), &logged_in);
                 break;
             }
-            Err(_) => break
+            Err(_) => break,
         }
     }
     Ok(())
@@ -774,7 +795,9 @@ fn handle_server_bytes(
         &event_tx,
         username.to_string(),
         users_status.clone(),
-    ).map_err(|e| Error::MapError(e.to_string()))? {
+    )
+    .map_err(|e| Error::MapError(e.to_string()))?
+    {
         send_response(response, stream).map_err(|e| Error::MapError(e.to_string()))?;
     }
     Ok(())

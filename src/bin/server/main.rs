@@ -6,7 +6,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 fn main() {
-    if rustls::crypto::ring::default_provider().install_default().is_err() {
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
         println!("error initializing client");
         std::process::exit(1);
     }

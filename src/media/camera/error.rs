@@ -34,7 +34,7 @@ pub enum CameraError {
 
     PropSettingError(String),
 
-    ReadFrameError
+    ReadFrameError,
 }
 
 /// Formats a readable representation of the camera error.

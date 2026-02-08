@@ -7,7 +7,10 @@ use std::path::Path;
 use std::str::FromStr;
 
 fn main() -> Result<(), eframe::Error> {
-    if rustls::crypto::ring::default_provider().install_default().is_err() {
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
         println!("error initializing client");
         std::process::exit(1);
     }

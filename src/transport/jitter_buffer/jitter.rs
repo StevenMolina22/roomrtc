@@ -359,7 +359,7 @@ impl<const N: usize> JitterBuffer<N> {
         self.i_frame_needed = false;
     }
 
-    fn prepare_next_frame_ts(&mut self) -> Option<u128>{
+    fn prepare_next_frame_ts(&mut self) -> Option<u128> {
         loop {
             let ts = self.packets[self.read_idx].as_ref()?.timestamp;
 

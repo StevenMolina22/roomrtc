@@ -77,7 +77,7 @@ impl Camera {
             Err(e) => {
                 logger.error(&e.to_string());
                 return rx;
-            },
+            }
         };
         thread::spawn(move || {
             run_camera_loop(cam, running, tx, clock, logger);
@@ -89,8 +89,7 @@ impl Camera {
     /// Stop the capture thread by clearing the running flag. The
     /// capture thread will observe this and exit shortly.
     fn stop_internal(&self) {
-        self.running
-            .store(false, Ordering::SeqCst);
+        self.running.store(false, Ordering::SeqCst);
     }
 }
 
@@ -107,8 +106,8 @@ impl FrameSource for Camera {
 // Aux functions ----------------------------------------------------------------------------------
 
 fn setup_camera(config: &Arc<Config>) -> Result<videoio::VideoCapture, Error> {
-    let camera_index = i32::try_from(config.media.camera_index)
-        .map_err(|_| Error::CameraIndexError)?;
+    let camera_index =
+        i32::try_from(config.media.camera_index).map_err(|_| Error::CameraIndexError)?;
 
     let mut cam = videoio::VideoCapture::new(camera_index, videoio::CAP_V4L2)
         .map_err(|e| Error::OpenError(e.to_string()))?;
@@ -118,14 +117,18 @@ fn setup_camera(config: &Arc<Config>) -> Result<videoio::VideoCapture, Error> {
     }
 
     let settings = [
-        (videoio::CAP_PROP_FOURCC, f64::from(VideoWriter::fourcc('M', 'J', 'P', 'G').unwrap())),
+        (
+            videoio::CAP_PROP_FOURCC,
+            f64::from(VideoWriter::fourcc('M', 'J', 'P', 'G').unwrap()),
+        ),
         (videoio::CAP_PROP_FPS, config.media.frame_rate as f64),
         (videoio::CAP_PROP_FRAME_WIDTH, config.media.frame_width),
         (videoio::CAP_PROP_FRAME_HEIGHT, config.media.frame_height),
     ];
 
     for (prop, val) in settings {
-        cam.set(prop, val).map_err(|_| Error::PropSettingError(prop.to_string()))?;
+        cam.set(prop, val)
+            .map_err(|_| Error::PropSettingError(prop.to_string()))?;
     }
 
     Ok(cam)
@@ -158,9 +161,9 @@ fn run_camera_loop(
                 height: rgb.rows() as usize,
                 frame_time: clock.now(),
             };
-            if tx.send(frame).is_err() { break; }
+            if tx.send(frame).is_err() {
+                break;
+            }
         }
     }
 }
-
-

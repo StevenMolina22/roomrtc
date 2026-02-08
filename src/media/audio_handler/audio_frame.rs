@@ -1,6 +1,6 @@
 pub struct AudioFrame {
     pub data: Vec<f32>,
-    pub timestamp: u128
+    pub timestamp: u128,
 }
 
 impl AudioFrame {

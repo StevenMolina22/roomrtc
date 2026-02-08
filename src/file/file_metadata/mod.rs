@@ -1,5 +1,5 @@
 mod error;
-mod file_metadata;
+mod metadata;
 
 pub use error::FileMetadataError;
-pub use file_metadata::FileMetadata;
+pub use metadata::FileMetadata;

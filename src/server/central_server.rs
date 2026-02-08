@@ -201,7 +201,6 @@ fn run_connections_loop(
         let config = config.clone();
         let users = users.clone();
         let on = on.clone();
-        let server_client_socket_addr = server_client_socket_addr;
 
         handle_client_conn(
             on.clone(),
@@ -211,7 +210,7 @@ fn run_connections_loop(
             users.clone(),
             server_client_socket_addr,
             logger.context("UserHandler"),
-            stream
+            stream,
         )
     }
 }
@@ -233,14 +232,13 @@ fn handle_client_conn(
         };
         let mut tls_stream = StreamOwned::new(tls_conn, stream);
 
-        let mut user_handler = UserHandler::new(
-            users,
-            config.clone(),
-            server_client_socket_addr,
-            logger,
-        );
+        let mut user_handler =
+            UserHandler::new(users, config.clone(), server_client_socket_addr, logger);
 
-        if user_handler.client_server_handshake(&mut tls_stream, &users_connected, &config).is_err() {
+        if user_handler
+            .client_server_handshake(&mut tls_stream, &users_connected, &config)
+            .is_err()
+        {
             return;
         }
 

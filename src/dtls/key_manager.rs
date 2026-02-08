@@ -1,3 +1,5 @@
+use openssl::pkey::Private;
+use openssl::x509::X509;
 use openssl::{
     asn1::Asn1Time,
     bn::BigNum,
@@ -10,8 +12,6 @@ use openssl::{
     x509::X509NameBuilder,
 };
 use std::fmt;
-use openssl::pkey::Private;
-use openssl::x509::X509;
 use udp_dtls::Identity;
 
 /// Default password used to protect the PKCS#12 archive.

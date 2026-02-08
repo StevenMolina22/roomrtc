@@ -1,9 +1,12 @@
 use crate::config::Config;
 use crate::controller::AppEvent;
+use crate::dtls::dtls_socket::DtlsSocket;
+use crate::dtls::key_manager::LocalCert;
 use crate::file::{
     file_metadata::FileMetadata,
     file_transferer::{FileTransfererError as Error, ftp_message::FTPMessage},
 };
+use crate::logger::Logger;
 use crate::sctp_transport::SCTPTransport;
 use crate::sctp_transport::data_channel::{DataChannel, DataChannelType};
 use crate::session::sdp::{DtlsSetupRole, Fingerprint};
@@ -12,14 +15,11 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, UdpSocket};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
-use crate::dtls::dtls_socket::DtlsSocket;
-use crate::dtls::key_manager::LocalCert;
-use crate::logger::Logger;
 
 const FILE_CHUNK_SIZE: usize = 512;
 
@@ -54,10 +54,13 @@ impl FileTransferer {
             local_setup_role,
             expected_fingerprint,
             local_cert,
-        ).map_err(|e| Error::MapError(e.to_string()))?;
+        )
+        .map_err(|e| Error::MapError(e.to_string()))?;
 
         let mut transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
-        transport.connect(peer_address, socket, is_client).map_err(|e| Error::MapError(e.to_string()))?;
+        transport
+            .connect(peer_address, socket, is_client)
+            .map_err(|e| Error::MapError(e.to_string()))?;
 
         let instance = Self {
             transport,
@@ -65,7 +68,7 @@ impl FileTransferer {
             next_offer_id: 0,
             connected,
             event_tx,
-            logger
+            logger,
         };
 
         instance.wait_for_incoming();
@@ -74,7 +77,7 @@ impl FileTransferer {
 
     pub fn send_file(&mut self, file_path: &Path) -> Result<(), Error> {
         let mut file = File::open(file_path).unwrap();
-        let file_metadata = FileMetadata::from(&file_path, &file).unwrap();
+        let file_metadata = FileMetadata::from(file_path, &file).unwrap();
 
         let mut data_channel = self
             .transport
@@ -85,7 +88,7 @@ impl FileTransferer {
                 "".to_string(), // QUE PONGO ACA EN PROTOCOL??? FTP??
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
-        
+
         let offer_id = self.next_offer_id;
         let logger = self.logger.clone();
         let connected = self.connected.clone();
@@ -96,15 +99,18 @@ impl FileTransferer {
                 let mut message: Vec<u8>;
                 let mut buff = [0u8; FILE_CHUNK_SIZE];
                 while connected.load(Ordering::SeqCst) {
-                    let n = match file.read(&mut buff).map_err(|e| Error::FileReadError(e.to_string())) {
+                    let n = match file
+                        .read(&mut buff)
+                        .map_err(|e| Error::FileReadError(e.to_string()))
+                    {
                         Ok(n) => n,
                         Err(e) => {
                             logger.error(e.to_string().as_str());
-                            break
+                            break;
                         }
                     };
                     if n == 0 {
-                        break
+                        break;
                     }
 
                     message = FTPMessage::FileChunk {
@@ -114,7 +120,7 @@ impl FileTransferer {
 
                     if let Err(e) = data_channel.send(&message) {
                         logger.error(e.to_string().as_str());
-                        break
+                        break;
                     }
                     thread::sleep(Duration::from_millis(50));
                 }
@@ -148,38 +154,57 @@ impl FileTransferer {
             .unwrap()
             .remove(&offer_id)
             .unwrap();
-        dc.send(&FTPMessage::AcceptFile.to_bytes()).map_err(|e| Error::MapError(e.to_string()))?;
-        let file = File::create(download_path).map_err(|e| Error::FileCreateError(e.to_string()))?;
-        Self::recv_file(offer_id, dc, file, self.connected.clone(), self.event_tx.clone(), self.logger.clone());
+        dc.send(&FTPMessage::AcceptFile.to_bytes())
+            .map_err(|e| Error::MapError(e.to_string()))?;
+        let file =
+            File::create(download_path).map_err(|e| Error::FileCreateError(e.to_string()))?;
+        Self::recv_file(
+            offer_id,
+            dc,
+            file,
+            self.connected.clone(),
+            self.event_tx.clone(),
+            self.logger.clone(),
+        );
         Ok(())
     }
 
-    fn recv_file(offer_id: u32, mut dc: DataChannel, mut file: File, connected: Arc<AtomicBool>, event_tx: Sender<AppEvent>, logger: Arc<Logger>) {
+    fn recv_file(
+        offer_id: u32,
+        mut dc: DataChannel,
+        mut file: File,
+        connected: Arc<AtomicBool>,
+        event_tx: Sender<AppEvent>,
+        logger: Arc<Logger>,
+    ) {
         thread::spawn(move || {
             let mut buff = [0u8; FILE_CHUNK_SIZE + 5];
             while connected.load(Ordering::SeqCst) {
-                let n = match dc.recv(&mut buff){
+                let n = match dc.recv(&mut buff) {
                     Ok(n) => n,
                     Err(e) => {
                         logger.error(e.to_string().as_str());
-                        break
-                    },
+                        break;
+                    }
                 };
 
                 if n == 0 {
                     break;
                 }
                 match FTPMessage::from_bytes(&buff[..n]) {
-                    Some(FTPMessage::FileChunk { payload }) => if let Err(e) = file.write_all(&payload) {
+                    Some(FTPMessage::FileChunk { payload }) => {
+                        if let Err(e) = file.write_all(&payload) {
                             logger.error(Error::FileWriteError(e.to_string()).to_string().as_str());
-                            break
-                        },
+                            break;
+                        }
+                    }
                     Some(FTPMessage::EndOfFile) => {
                         if let Err(e) = event_tx.send(AppEvent::FileDownloadCompleted(offer_id)) {
-                            logger.error(Error::ChannelSendError(e.to_string()).to_string().as_str());
+                            logger
+                                .error(Error::ChannelSendError(e.to_string()).to_string().as_str());
                         }
-                        break
-                    },
+                        break;
+                    }
                     Some(_) => logger.warn(Error::UnexpectedIncomingMessage.to_string().as_str()),
                     None => logger.warn(Error::UnknownIncomingMessage.to_string().as_str()),
                 }
@@ -189,29 +214,37 @@ impl FileTransferer {
 
     fn wait_for_incoming(&self) {
         let mut instance = self.clone();
-        
+
         thread::spawn(move || {
             while instance.connected.load(Ordering::SeqCst) {
                 let dc = match instance.transport.accept_data_channel() {
                     Ok(dc) => dc,
                     Err(e) => {
-                        instance.logger.warn(Error::MapError(e.to_string()).to_string().as_str());
-                        continue
+                        instance
+                            .logger
+                            .warn(Error::MapError(e.to_string()).to_string().as_str());
+                        continue;
                     }
                 };
                 if let Err(e) = instance.handle_incoming(dc, instance.event_tx.clone()) {
                     instance.logger.error(e.to_string().as_str());
-                    break
+                    break;
                 }
                 thread::sleep(Duration::from_millis(20));
             }
         });
     }
 
-    fn handle_incoming(&mut self, mut data_channel: DataChannel, event_tx: Sender<AppEvent>) -> Result<(), Error> {
+    fn handle_incoming(
+        &mut self,
+        mut data_channel: DataChannel,
+        event_tx: Sender<AppEvent>,
+    ) -> Result<(), Error> {
         let mut buff = vec![0u8; FILE_CHUNK_SIZE + 5];
         loop {
-            let n = data_channel.recv(&mut buff).map_err(|e| Error::FileReadError(e.to_string()))?;
+            let n = data_channel
+                .recv(&mut buff)
+                .map_err(|e| Error::FileReadError(e.to_string()))?;
             if let Some(FTPMessage::FileOffer {
                 offer_id,
                 file_metadata,
@@ -242,19 +275,19 @@ fn file_offer_accepted(
     }
     .to_bytes();
 
-    data_channel.send(&message).map_err(|e| Error::ChannelSendError(e.to_string()))?;
+    data_channel
+        .send(&message)
+        .map_err(|e| Error::ChannelSendError(e.to_string()))?;
 
     let mut buff = vec![0u8; 1024];
     loop {
-        let n = data_channel.recv(&mut buff).map_err(|e| Error::MapError(e.to_string()))?;
+        let n = data_channel
+            .recv(&mut buff)
+            .map_err(|e| Error::MapError(e.to_string()))?;
         match FTPMessage::from_bytes(&buff[..n]) {
-            Some(FTPMessage::RejectFile) => {
-                return Ok(false)
-            },
-            Some(FTPMessage::AcceptFile) => {
-                return Ok(true)
-            },
-            _ => {},
+            Some(FTPMessage::RejectFile) => return Ok(false),
+            Some(FTPMessage::AcceptFile) => return Ok(true),
+            _ => {}
         }
     }
 }

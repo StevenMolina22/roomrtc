@@ -113,7 +113,6 @@ pub struct MediaConfig {
     pub audio_codec_name: String,
 }
 
-
 #[derive(Debug, Clone)]
 /// Configuration for RTCP-style reporting used by the report handler.
 pub struct RtcpConfig {

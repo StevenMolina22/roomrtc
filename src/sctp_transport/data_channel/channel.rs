@@ -1,11 +1,11 @@
 use crate::config::Config;
+use crate::logger::Logger;
 use crate::sctp_transport::data_channel::dcep::DCEPMessage;
 use crate::sctp_transport::data_channel::{DataChannelError as Error, DataChannelType};
 use sctp_proto::{Association, Chunks, PayloadProtocolIdentifier, StreamId};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use crate::logger::Logger;
 
 pub struct DataChannel {
     pub(crate) stream_id: StreamId,
@@ -68,10 +68,10 @@ impl DataChannel {
 
     pub fn configure_stream(
         &mut self,
-        label: &String,
+        _label: &String,
         dc_type: DataChannelType,
         reliability_param: u32,
-        protocol: &String,
+        _protocol: &String,
     ) -> Result<(), Error> {
         let mut assoc = self
             .association
@@ -166,11 +166,8 @@ impl DataChannel {
                     .read(&mut bytes)
                     .map_err(|e| Error::ReadChunksError(e.to_string()))?;
 
-                match DCEPMessage::from_bytes(&bytes) {
-                    Some(DCEPMessage::DataChannelAck) => {
-                        return Ok(())
-                    },
-                    _ => {}
+                if let Some(DCEPMessage::DataChannelAck) = DCEPMessage::from_bytes(&bytes) {
+                    return Ok(());
                 }
             }
         }
@@ -206,9 +203,7 @@ impl DataChannel {
                         )?;
                         return Ok(());
                     }
-                    _ => {
-                        continue
-                    },
+                    _ => continue,
                 }
             }
         }

@@ -38,7 +38,7 @@ impl FTPMessage {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        match bytes.get(0)? {
+        match bytes.first()? {
             0x01 if bytes.len() >= 14 => Some(Self::FileOffer {
                 offer_id: u32::from_be_bytes(bytes[1..5].try_into().ok()?),
                 file_metadata: FileMetadata::from_bytes(&bytes[5..])?,

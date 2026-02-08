@@ -42,7 +42,7 @@ impl DCEPMessage {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        match bytes.get(0)? {
+        match bytes.first()? {
             0x03 => {
                 if bytes.len() < 12 {
                     return None;

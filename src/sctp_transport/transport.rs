@@ -1,18 +1,21 @@
-use std::io::ErrorKind;
 use crate::config::Config;
+use crate::dtls::DtlsSocket;
+use crate::logger::Logger;
 use crate::sctp_transport::SCTPTransportError as Error;
 use crate::sctp_transport::data_channel::DataChannel;
 use crate::sctp_transport::data_channel::DataChannelType;
 use crate::tools::Socket;
 use bytes::Bytes;
-use sctp_proto::{Association, AssociationHandle, ClientConfig, DatagramEvent, Endpoint, EndpointConfig, Event, Payload, PayloadProtocolIdentifier, ServerConfig, StreamEvent, StreamId, Transmit};
-use std::net::{SocketAddr};
-use std::sync::{Arc, Mutex, RwLock};
+use sctp_proto::{
+    Association, AssociationHandle, ClientConfig, DatagramEvent, Endpoint, EndpointConfig, Event,
+    Payload, PayloadProtocolIdentifier, ServerConfig, StreamEvent, StreamId, Transmit,
+};
+use std::io::ErrorKind;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use crate::dtls::DtlsSocket;
-use crate::logger::Logger;
 
 #[derive(Clone)]
 pub struct SCTPTransport {
@@ -71,7 +74,12 @@ impl SCTPTransport {
             .map_err(|e| Error::SocketConfigError(e.to_string()))?;
         self.start_event_loop(peer_address, socket);
 
-        while self.association.lock().map_err(|e| Error::PoisonedLock(e.to_string()))?.is_handshaking() {
+        while self
+            .association
+            .lock()
+            .map_err(|e| Error::PoisonedLock(e.to_string()))?
+            .is_handshaking()
+        {
             thread::sleep(Duration::from_millis(0));
         }
         Ok(())
@@ -112,16 +120,17 @@ impl SCTPTransport {
                     .lock()
                     .map_err(|e| Error::PoisonedLock(e.to_string()))?
                     .accept_stream()
-                    .and_then(|s| Some(s.stream_identifier()))
+                    .map(|s| s.stream_identifier())
             };
 
             if let Some(id) = stream_id {
-                return Ok(DataChannel::from_accepted_stream(
+                return DataChannel::from_accepted_stream(
                     id,
                     self.association.clone(),
                     Arc::new(self.logger.context("DataChannel")),
                     self.config.clone(),
-                ).map_err(|e| Error::MapError(e.to_string()))?)
+                )
+                .map_err(|e| Error::MapError(e.to_string()));
             }
 
             thread::sleep(Duration::from_millis(500));
@@ -139,22 +148,23 @@ impl SCTPTransport {
                 let now = Instant::now();
 
                 match socket.recv_from(&mut buf) {
-                    Ok((len, _addr)) => if let Err(e) = instance.handle_incoming(peer_address, &buf, len) {},
-                    Err(e) if e.kind() == ErrorKind::WouldBlock
-                        || e.kind() == ErrorKind::TimedOut => {},
-                    Err(e) => break, //loggear
+                    Ok((len, _addr)) => {
+                        if instance.handle_incoming(peer_address, &buf, len).is_err() {}
+                    }
+                    Err(e)
+                        if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
+                    }
+                    Err(_) => break, //loggear
                 }
 
-                if {
-                    match instance.association_handle.read() {
-                        Ok(assoc_handle) => assoc_handle.is_some(),
-                        Err(e) => break //loggear
-                    }
+                if match instance.association_handle.read() {
+                    Ok(assoc_handle) => assoc_handle.is_some(),
+                    Err(_) => break, //loggear
                 } {
                     {
                         let mut assoc = match instance.association.lock() {
                             Ok(assoc) => assoc,
-                            Err(e) => break //loggear
+                            Err(_) => break, //loggear
                         };
 
                         if let Some(time) = assoc.poll_timeout()
@@ -166,48 +176,52 @@ impl SCTPTransport {
                         while let Some(endpoint_event) = assoc.poll_endpoint_event() {
                             let assoc_handle = match instance.association_handle.read() {
                                 Ok(assoc_handle) => assoc_handle,
-                                Err(e) => return //loggear
+                                Err(_) => return, //loggear
                             };
                             let a = match *assoc_handle {
                                 Some(a) => a,
-                                None => return //loggear
+                                None => return, //loggear
                             };
                             match instance.endpoint.lock() {
                                 Ok(mut endpoint) => endpoint.handle_event(a, endpoint_event),
-                                Err(e) => return //loggear
+                                Err(_) => return, //loggear
                             };
                         }
                     }
 
-                    if let Err(e) = instance.handle_association_events() {
+                    if instance.handle_association_events().is_err() {
                         //loggear
-                        return
+                        return;
                     }
 
                     loop {
                         let mut assoc = match instance.association.lock() {
                             Ok(assoc) => assoc,
-                            Err(e) => return //logger
+                            Err(_) => return, //logger
                         };
                         match assoc.poll_transmit(Instant::now()) {
-                            Some(transmit) => if let Err(e) = send_transmit(transmit, &socket) {
-                                return //loggear
-                            },
-                            None => break
+                            Some(transmit) => {
+                                if send_transmit(transmit, &socket).is_err() {
+                                    return; //loggear
+                                }
+                            }
+                            None => break,
                         }
                     }
 
                     loop {
                         let mut endpoint = match instance.endpoint.lock() {
                             Ok(endpoint) => endpoint,
-                            Err(e) => return //loggear
+                            Err(_) => return, //loggear
                         };
 
                         match endpoint.poll_transmit() {
-                            Some(transmit) => if let Err(e) = send_transmit(transmit, &socket) {
-                                return //loggear
+                            Some(transmit) => {
+                                if send_transmit(transmit, &socket).is_err() {
+                                    return; //loggear
+                                }
                             }
-                            None => break
+                            None => break,
                         }
                     }
                 }
@@ -216,26 +230,49 @@ impl SCTPTransport {
         });
     }
 
-    fn handle_incoming(&mut self, remote: SocketAddr, data: &[u8], len: usize) -> Result<(), Error> {
-        if let Some((assoc_handle, datagram_event)) = self.endpoint.lock().map_err(|e| Error::PoisonedLock(e.to_string()))?.handle(
-            Instant::now(),
-            remote,
-            None,
-            None,
-            Bytes::copy_from_slice(&data[..len]),
-        ) {
+    fn handle_incoming(
+        &mut self,
+        remote: SocketAddr,
+        data: &[u8],
+        len: usize,
+    ) -> Result<(), Error> {
+        if let Some((assoc_handle, datagram_event)) = self
+            .endpoint
+            .lock()
+            .map_err(|e| Error::PoisonedLock(e.to_string()))?
+            .handle(
+                Instant::now(),
+                remote,
+                None,
+                None,
+                Bytes::copy_from_slice(&data[..len]),
+            )
+        {
             match datagram_event {
-                DatagramEvent::AssociationEvent(e) => {
-                    self.association.lock().map_err(|e| Error::PoisonedLock(e.to_string()))?.handle_event(e)
-                }
+                DatagramEvent::AssociationEvent(e) => self
+                    .association
+                    .lock()
+                    .map_err(|e| Error::PoisonedLock(e.to_string()))?
+                    .handle_event(e),
                 DatagramEvent::NewAssociation(a) => {
-                    if self.association_handle.read().map_err(|e| Error::PoisonedLock(e.to_string()))?.is_none() {
+                    if self
+                        .association_handle
+                        .read()
+                        .map_err(|e| Error::PoisonedLock(e.to_string()))?
+                        .is_none()
+                    {
                         {
-                            let mut shared_association = self.association.lock().map_err(|e| Error::PoisonedLock(e.to_string()))?;
+                            let mut shared_association = self
+                                .association
+                                .lock()
+                                .map_err(|e| Error::PoisonedLock(e.to_string()))?;
                             *shared_association = a;
                         }
                         {
-                            let mut shared_association_handle = self.association_handle.write().map_err(|e| Error::PoisonedLock(e.to_string()))?;
+                            let mut shared_association_handle = self
+                                .association_handle
+                                .write()
+                                .map_err(|e| Error::PoisonedLock(e.to_string()))?;
                             *shared_association_handle = Some(assoc_handle);
                         }
                     }
@@ -247,7 +284,12 @@ impl SCTPTransport {
 
     fn handle_association_events(&mut self) -> Result<(), Error> {
         loop {
-            let event = match self.association.lock().map_err(|e| Error::PoisonedLock(e.to_string()))?.poll() {
+            let event = match self
+                .association
+                .lock()
+                .map_err(|e| Error::PoisonedLock(e.to_string()))?
+                .poll()
+            {
                 Some(event) => event,
                 None => return Ok(()),
             };
@@ -259,17 +301,15 @@ impl SCTPTransport {
     //loggear individualmente cada caso
     fn handle_event(&mut self, event: Event) {
         match event {
-            Event::Stream(stream_event) => {
-                match stream_event {
-                    StreamEvent::Opened => {}
-                    StreamEvent::BufferedAmountLow { id: _ } => {}
-                    StreamEvent::Readable { id: _ } => {}
-                    StreamEvent::Finished { id: _ } => {}
-                    StreamEvent::Writable { .. } => {}
-                    StreamEvent::Stopped { .. } => {}
-                    StreamEvent::Available => {}
-                }
-            }
+            Event::Stream(stream_event) => match stream_event {
+                StreamEvent::Opened => {}
+                StreamEvent::BufferedAmountLow { id: _ } => {}
+                StreamEvent::Readable { id: _ } => {}
+                StreamEvent::Finished { id: _ } => {}
+                StreamEvent::Writable { .. } => {}
+                StreamEvent::Stopped { .. } => {}
+                StreamEvent::Available => {}
+            },
             Event::Connected => {}
             Event::AssociationLost { reason: _ } => {}
             Event::DatagramReceived => {}

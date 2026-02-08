@@ -220,3 +220,81 @@ fn setup_output_device() -> Result<(cpal::Device, cpal::StreamConfig, usize, u32
 
     Ok((device, config, channels, rate))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prune_buffer() {
+        let mut buffer = vec![0.0; 10];
+        let mut phase = 4.5;
+
+        Speaker::prune_buffer(&mut buffer, &mut phase);
+
+        assert_eq!(buffer.len(), 6);
+        assert!((phase - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_prune_buffer_all_consumed() {
+        let mut buffer = vec![1.0, 2.0, 3.0];
+        let mut phase = 4.0;
+
+        Speaker::prune_buffer(&mut buffer, &mut phase);
+
+        assert!(buffer.is_empty());
+        assert_eq!(phase, 0.0);
+    }
+
+    #[test]
+    fn test_process_audio_frame_mono_to_stereo() {
+        let channels = 2;
+        let mut output = vec![0.0; 4];
+
+        let input = vec![1.0, 2.0];
+        let mut phase = 0.0;
+        let step = 1.0;
+
+        Speaker::process_audio_frame(&mut output, &input, &mut phase, step, channels);
+
+        assert_eq!(output[0], 1.0);
+        assert_eq!(output[1], 1.0);
+
+        assert_eq!(output[2], 0.0);
+    }
+
+    #[test]
+    fn test_process_audio_frame_interpolation() {
+        let channels = 1;
+        let mut output = vec![0.0; 1];
+
+        let input = vec![0.0, 10.0];
+        let mut phase = 0.5;
+        let step = 0.1;
+
+        Speaker::process_audio_frame(&mut output, &input, &mut phase, step, channels);
+
+        assert_eq!(output[0], 5.0);
+
+        assert!((phase - 0.6).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_fetch_new_samples() {
+        let (tx, rx) = mpsc::channel::<Vec<f32>>();
+        let rx = Arc::new(Mutex::new(rx));
+        let mut buffer = Vec::new();
+
+        tx.send(vec![1.0, 2.0]).unwrap();
+        tx.send(vec![3.0]).unwrap();
+
+        Speaker::fetch_new_samples(&rx, &mut buffer);
+
+        assert_eq!(buffer, vec![1.0, 2.0, 3.0]);
+
+        let mut buffer2 = Vec::new();
+        Speaker::fetch_new_samples(&rx, &mut buffer2);
+        assert!(buffer2.is_empty());
+    }
+}

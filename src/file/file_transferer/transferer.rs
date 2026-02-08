@@ -46,7 +46,8 @@ impl FileTransferer {
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let is_client = matches!(local_setup_role, DtlsSetupRole::Active);
-        let sctp_socket = UdpSocket::bind(local_addres).map_err(|e| Error::MapError(e.to_string()))?;
+        let sctp_socket =
+            UdpSocket::bind(local_addres).map_err(|e| Error::MapError(e.to_string()))?;
 
         let socket = DtlsSocket::new(
             sctp_socket,
@@ -77,7 +78,8 @@ impl FileTransferer {
 
     pub fn send_file(&mut self, file_path: &Path) -> Result<(), Error> {
         let mut file = File::open(file_path).map_err(|e| Error::MapError(e.to_string()))?;
-        let file_metadata = FileMetadata::from(file_path, &file).map_err(|e| Error::MapError(e.to_string()))?;
+        let file_metadata =
+            FileMetadata::from(file_path, &file).map_err(|e| Error::MapError(e.to_string()))?;
 
         let mut data_channel = self
             .transport
@@ -266,7 +268,7 @@ impl FileTransferer {
 
 fn file_offer_accepted(
     offer_id: u32,
-    data_channel: &mut DataChannel,
+    data_channel: &mut impl DataChannelLike,
     file_metadata: FileMetadata,
 ) -> Result<bool, Error> {
     let message = FTPMessage::FileOffer {
@@ -289,5 +291,100 @@ fn file_offer_accepted(
             Some(FTPMessage::AcceptFile) => return Ok(true),
             _ => {}
         }
+    }
+}
+
+// Abstraction to allow testing with a fake data channel.
+pub trait DataChannelLike {
+    fn send(&mut self, message: &[u8]) -> Result<(), Error>;
+    fn recv(&mut self, buff: &mut [u8]) -> Result<usize, Error>;
+}
+
+impl DataChannelLike for DataChannel {
+    fn send(&mut self, message: &[u8]) -> Result<(), Error> {
+        self.send(message)
+            .map_err(|e| Error::ChannelSendError(e.to_string()))
+    }
+
+    fn recv(&mut self, buff: &mut [u8]) -> Result<usize, Error> {
+        self.recv(buff).map_err(|e| Error::MapError(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::file::file_metadata::FileMetadata;
+
+    struct FakeDataChannel {
+        pub sent: Vec<Vec<u8>>,
+        pub responses: std::sync::Mutex<Vec<Vec<u8>>>,
+    }
+
+    impl FakeDataChannel {
+        fn new(responses: Vec<Vec<u8>>) -> Self {
+            Self {
+                sent: vec![],
+                responses: std::sync::Mutex::new(responses),
+            }
+        }
+    }
+
+    impl DataChannelLike for FakeDataChannel {
+        fn send(&mut self, message: &[u8]) -> Result<(), Error> {
+            self.sent.push(message.to_vec());
+            Ok(())
+        }
+
+        fn recv(&mut self, buff: &mut [u8]) -> Result<usize, Error> {
+            let mut guard = self.responses.lock().unwrap();
+            if guard.is_empty() {
+                return Ok(0);
+            }
+            let data = guard.remove(0);
+            let n = data.len().min(buff.len());
+            buff[..n].copy_from_slice(&data[..n]);
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn file_offer_accepted_returns_true_on_accept() {
+        let meta = FileMetadata {
+            size: 42,
+            name: "file.bin".to_string(),
+        };
+
+        let mut fake = FakeDataChannel::new(vec![FTPMessage::AcceptFile.to_bytes()]);
+
+        let res = file_offer_accepted(7, &mut fake, meta.clone()).expect("call should succeed");
+        assert!(res);
+        // verify that a FileOffer was sent
+        assert_eq!(fake.sent.len(), 1);
+        let sent = &fake.sent[0];
+        if let Some(FTPMessage::FileOffer {
+            offer_id,
+            file_metadata,
+        }) = FTPMessage::from_bytes(sent)
+        {
+            assert_eq!(offer_id, 7);
+            assert_eq!(file_metadata.name, meta.name);
+            assert_eq!(file_metadata.size, meta.size);
+        } else {
+            panic!("sent message was not FileOffer");
+        }
+    }
+
+    #[test]
+    fn file_offer_accepted_returns_false_on_reject() {
+        let meta = FileMetadata {
+            size: 10,
+            name: "a.txt".to_string(),
+        };
+
+        let mut fake = FakeDataChannel::new(vec![FTPMessage::RejectFile.to_bytes()]);
+
+        let res = file_offer_accepted(99, &mut fake, meta).expect("call should succeed");
+        assert!(!res);
     }
 }

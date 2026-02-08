@@ -8,3 +8,17 @@ impl AudioFrame {
         Self { data, timestamp }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_frame_creation() {
+        let data = vec![0.0, 0.5, -0.5];
+        let timestamp = 123456789;
+        let frame = AudioFrame::new(data.clone(), timestamp);
+        assert_eq!(frame.data, data);
+        assert_eq!(frame.timestamp, timestamp);
+    }
+}

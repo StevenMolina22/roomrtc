@@ -58,3 +58,84 @@ impl FTPMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::FTPMessage;
+    use crate::file::file_metadata::FileMetadata;
+
+    #[test]
+    fn file_offer_roundtrip() {
+        let meta = FileMetadata {
+            size: 12345,
+            name: "example.txt".to_string(),
+        };
+
+        let msg = FTPMessage::FileOffer {
+            offer_id: 0xDEADBEEF_u32,
+            file_metadata: meta.clone(),
+        };
+
+        let bytes = msg.to_bytes();
+        let parsed = FTPMessage::from_bytes(&bytes).expect("should parse FileOffer");
+
+        match parsed {
+            FTPMessage::FileOffer {
+                offer_id,
+                file_metadata,
+            } => {
+                assert_eq!(offer_id, 0xDEADBEEF_u32);
+                assert_eq!(file_metadata.size, meta.size);
+                assert_eq!(file_metadata.name, meta.name);
+            }
+            _ => panic!("expected FileOffer variant"),
+        }
+    }
+
+    #[test]
+    fn accept_reject_eof_variants() {
+        let accept = FTPMessage::AcceptFile;
+        let reject = FTPMessage::RejectFile;
+        let eof = FTPMessage::EndOfFile;
+
+        assert!(matches!(
+            FTPMessage::from_bytes(&accept.to_bytes()),
+            Some(FTPMessage::AcceptFile)
+        ));
+        assert!(matches!(
+            FTPMessage::from_bytes(&reject.to_bytes()),
+            Some(FTPMessage::RejectFile)
+        ));
+        assert!(matches!(
+            FTPMessage::from_bytes(&eof.to_bytes()),
+            Some(FTPMessage::EndOfFile)
+        ));
+    }
+
+    #[test]
+    fn file_chunk_roundtrip_and_malformed() {
+        let payload = vec![1u8, 2, 3, 4, 5];
+        let chunk = FTPMessage::FileChunk {
+            payload: payload.clone(),
+        };
+
+        let bytes = chunk.to_bytes();
+        let parsed = FTPMessage::from_bytes(&bytes).expect("should parse FileChunk");
+
+        match parsed {
+            FTPMessage::FileChunk { payload } => assert_eq!(payload, payload),
+            _ => panic!("expected FileChunk variant"),
+        }
+
+        let mut bad = vec![0x04];
+        bad.extend_from_slice(&(10u32.to_be_bytes()));
+        bad.extend_from_slice(&[1u8, 2, 3]);
+        assert!(FTPMessage::from_bytes(&bad).is_none());
+    }
+
+    #[test]
+    fn malformed_file_offer() {
+        let bytes = vec![0x01, 0x00, 0x00, 0x00];
+        assert!(FTPMessage::from_bytes(&bytes).is_none());
+    }
+}

@@ -72,3 +72,79 @@ impl DCEPMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sctp_transport::data_channel::DataChannelType;
+
+    #[test]
+    fn test_ack_message_serialization() {
+        let msg = DCEPMessage::DataChannelAck;
+        let bytes = msg.to_bytes();
+        assert_eq!(bytes, vec![0x02]);
+    }
+
+    #[test]
+    fn test_ack_message_deserialization() {
+        let bytes = vec![0x02];
+        let msg = DCEPMessage::from_bytes(&bytes).expect("Should deserialize Ack");
+
+        match msg {
+            DCEPMessage::DataChannelAck => {}
+            _ => unreachable!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_open_message_serialization() {
+        let msg = DCEPMessage::DataChannelOpen {
+            channel_type: DataChannelType::Reliable,
+            priority: 0,
+            reliability_parameter: 0,
+            label: "test".to_string(),
+            protocol: "chat".to_string(),
+        };
+
+        let bytes = msg.to_bytes();
+
+        assert_eq!(bytes[0], 0x03);
+        assert_eq!(bytes[1], 0x00);
+        assert_eq!(bytes[2..4], [0, 0]);
+        assert_eq!(bytes[4..8], [0, 0, 0, 0]);
+        assert_eq!(bytes[8..10], [0, 4]);
+        assert_eq!(bytes[10..12], [0, 4]);
+    }
+
+    #[test]
+    fn test_open_message_deserialization() {
+        let mut bytes = vec![
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00,
+        ];
+        bytes.extend_from_slice(b"Label");
+
+        let msg = DCEPMessage::from_bytes(&bytes).expect("Should deserialize Open");
+
+        match msg {
+            DCEPMessage::DataChannelOpen {
+                label, protocol, ..
+            } => {
+                assert_eq!(label, "Label");
+                assert_eq!(protocol, "");
+            }
+            _ => unreachable!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_deserialization_invalid_length() {
+        let bytes = vec![0x03, 0x00];
+        assert!(DCEPMessage::from_bytes(&bytes).is_none());
+    }
+
+    #[test]
+    fn test_deserialization_wrong_type() {
+        let bytes = vec![0xFF];
+        assert!(DCEPMessage::from_bytes(&bytes).is_none());
+    }
+}

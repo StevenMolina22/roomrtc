@@ -74,3 +74,92 @@ impl Clock {
         now - self.start_time
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn test_new_clock_starts_near_zero() {
+        let clock = Clock::new();
+        let elapsed = clock.now();
+
+        assert!(
+            elapsed < 5,
+            "El reloj recién creado debería tener un tiempo cercano a 0, se obtuvo: {}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_default_implementation() {
+        let clock = Clock::default();
+        let elapsed = clock.now();
+        assert!(elapsed < 5);
+    }
+
+    #[test]
+    fn test_time_progression() {
+        let clock = Clock::new();
+        let sleep_time_ms = 50;
+
+        thread::sleep(Duration::from_millis(sleep_time_ms));
+
+        let elapsed = clock.now();
+
+        assert!(
+            elapsed >= sleep_time_ms as u128,
+            "Se esperaban al menos {}ms, pero el reloj marcó {}ms",
+            sleep_time_ms,
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_monotonicity() {
+        let clock = Clock::new();
+
+        let t1 = clock.now();
+        thread::sleep(Duration::from_millis(10));
+        let t2 = clock.now();
+
+        assert!(
+            t2 > t1,
+            "El tiempo posterior (t2) debe ser mayor al anterior (t1)"
+        );
+    }
+
+    #[test]
+    fn test_clone_preserves_start_time() {
+        let clock = Clock::new();
+
+        thread::sleep(Duration::from_millis(50));
+
+        let clock_clone = clock.clone();
+
+        let elapsed_original = clock.now();
+        let elapsed_clone = clock_clone.now();
+
+        let diff = elapsed_original.abs_diff(elapsed_clone);
+
+        assert!(
+            diff <= 1,
+            "El reloj clonado debería estar sincronizado con el original"
+        );
+        assert!(
+            elapsed_clone >= 50,
+            "El clon reinició el contador, lo cual es incorrecto"
+        );
+    }
+
+    #[test]
+    fn test_debug_format() {
+        let clock = Clock::new();
+        let debug_str = format!("{:?}", clock);
+        assert!(debug_str.contains("Clock"));
+        assert!(debug_str.contains("instant"));
+        assert!(debug_str.contains("start_time"));
+    }
+}

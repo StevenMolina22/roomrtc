@@ -73,3 +73,31 @@ impl Decoder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Decoder, Error};
+
+    #[test]
+    fn test_decoder_new() {
+        let d = Decoder::new();
+        assert!(d.is_ok(), "Decoder::new() should succeed");
+    }
+
+    #[test]
+    fn test_decode_invalid_data_returns_error() {
+        let mut d = match Decoder::new() {
+            Ok(dec) => dec,
+            Err(e) => panic!("failed to create decoder: {e:?}"),
+        };
+
+        let res = d.decode_frame(&[0u8, 1, 2, 3, 4]);
+        assert!(res.is_err(), "decoding invalid data should return an error");
+
+        match res {
+            Err(Error::DecodingError(_)) | Err(Error::EmptyFrameError) => {}
+            Err(e) => panic!("unexpected error variant: {e:?}"),
+            Ok(_) => panic!("expected error decoding invalid data, got Ok"),
+        }
+    }
+}

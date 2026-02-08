@@ -327,3 +327,120 @@ fn send_transmit(transmit: Transmit, socket: &impl Socket) -> Result<(), Error> 
     };
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        DCEPConfig, IceConfig, MediaConfig, NetworkConfig, RtcpConfig, RtpConfig, SdpConfig,
+        ServerConfig,
+    };
+    use crate::logger::Logger;
+    use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
+
+    fn make_config() -> Arc<Config> {
+        Arc::new(Config {
+            network: NetworkConfig {
+                bind_address: "0.0.0.0:0".to_string(),
+                max_udp_packet_size: 1200,
+            },
+            media: MediaConfig {
+                camera_index: 0,
+                frame_width: 640.0,
+                frame_height: 480.0,
+                frame_rate: 30.0,
+                h264_idr_interval: 30,
+                rtp_max_chunk_size: 1200,
+                frame_ssrc: 1,
+                audio_ssrc: 2,
+                video_payload_type: 96,
+                video_codec_name: "H264".to_string(),
+                clock_rate: 90000,
+                rtp_version: 2,
+                video_media_type: "video".to_string(),
+                audio_media_type: "audio".to_string(),
+                media_protocol: "RTP/AVP".to_string(),
+                jitter_buffer_size: 5,
+                audio_channels: 2,
+                audio_sample_rate: 48000,
+                audio_frame_size: 960,
+                audio_payload_type: 111,
+                audio_codec_name: "OPUS".to_string(),
+            },
+            rtcp: RtcpConfig {
+                report_period_millis: 1000,
+                receive_limit_millis: 5000,
+                retry_limit: 3,
+            },
+            rtp: RtpConfig {
+                max_packet_size: 1200,
+                read_timeout_millis: 100,
+            },
+            sdp: SdpConfig::default(),
+            ice: IceConfig {
+                foundation: "f".to_string(),
+                transport: "UDP".to_string(),
+                component_id: 1,
+                host_priority_preference: 0,
+                srflx_priority_preference: 0,
+                host_local_preference: 0,
+            },
+            server: ServerConfig {
+                users_file: "".to_string(),
+                client_server_addr: "".to_string(),
+                server_client_addr: "".to_string(),
+                server_private_key_file: "".to_string(),
+                server_certification_file: "".to_string(),
+                server_name: "".to_string(),
+                max_amount_of_users_connected: 0,
+            },
+            dcep: DCEPConfig {
+                ack_wait_timeout_millis: 0,
+                open_wait_timeout_millis: 0,
+            },
+        })
+    }
+
+    #[test]
+    fn test_new_initializes_fields() {
+        let connected = Arc::new(AtomicBool::new(false));
+        let logger = Arc::new(Logger::new("/tmp/test_transport_log").unwrap());
+        let config = make_config();
+
+        let transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
+
+        assert_eq!(transport.next_stream_id, 0);
+        assert!(transport.association_handle.read().unwrap().is_none());
+        assert!(!transport.connected.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_accept_data_channel_returns_err_when_disconnected() {
+        let connected = Arc::new(AtomicBool::new(false));
+        let logger = Arc::new(Logger::new("/tmp/test_transport_log2").unwrap());
+        let config = make_config();
+
+        let transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
+
+        let res = transport.accept_data_channel();
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_open_data_channel_fails_without_association() {
+        let connected = Arc::new(AtomicBool::new(false));
+        let logger = Arc::new(Logger::new("/tmp/test_transport_log3").unwrap());
+        let config = make_config();
+
+        let mut transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
+
+        // There is no real association yet, so opening a data channel should fail
+        let res = transport.open_data_channel(
+            "label".to_string(),
+            DataChannelType::Reliable,
+            0,
+            "".to_string(),
+        );
+        assert!(res.is_err());
+    }
+}

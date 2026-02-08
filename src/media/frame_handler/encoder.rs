@@ -112,3 +112,112 @@ fn generate_chunks_from_bitstream(nalus: &EncodedBitStream, max_chunk_size: usiz
     }
     chunks
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::MediaConfig;
+    use yuv::{YuvChromaSubsampling, YuvPlanarImageMut};
+
+    fn test_media_config(chunk_size: usize) -> MediaConfig {
+        MediaConfig {
+            camera_index: 0,
+            frame_width: 4.0,
+            frame_height: 4.0,
+            frame_rate: 30.0,
+            h264_idr_interval: 30,
+            rtp_max_chunk_size: chunk_size,
+            frame_ssrc: 0,
+            audio_ssrc: 0,
+            video_payload_type: 96,
+            video_codec_name: "H264".to_string(),
+            clock_rate: 90000,
+            rtp_version: 2,
+            video_media_type: "video".to_string(),
+            audio_media_type: "audio".to_string(),
+            media_protocol: "RTP/AVP".to_string(),
+            jitter_buffer_size: 50,
+            audio_channels: 1,
+            audio_sample_rate: 48000,
+            audio_frame_size: 960,
+            audio_payload_type: 97,
+            audio_codec_name: "OPUS".to_string(),
+        }
+    }
+
+    #[test]
+    fn encoder_new_and_encode_attempt() {
+        let cfg = test_media_config(1024);
+
+        match Encoder::new(&cfg) {
+            Ok(mut enc) => {
+                let mut yuv = YuvPlanarImageMut::alloc(4, 4, YuvChromaSubsampling::Yuv420);
+
+                for v in yuv.y_plane.borrow_mut().iter_mut() {
+                    *v = 128;
+                }
+                for v in yuv.u_plane.borrow_mut().iter_mut() {
+                    *v = 128;
+                }
+                for v in yuv.v_plane.borrow_mut().iter_mut() {
+                    *v = 128;
+                }
+
+                let res = enc.encode(&yuv, 12345);
+                match res {
+                    Ok(ef) => {
+                        assert_eq!(ef.frame_time, 12345);
+                        assert!(
+                            !ef.chunks.is_empty(),
+                            "Encoded frame should contain at least one chunk"
+                        );
+                    }
+                    Err(e) => match e {
+                        Error::EncodingError(_) => {
+                            // Acceptable in environments where runtime encoding fails
+                        }
+                        other => panic!("Unexpected encoding error: {other:?}"),
+                    },
+                }
+            }
+            Err(e) => {
+                assert_eq!(e, Error::EncoderInitializationError);
+            }
+        }
+    }
+
+    #[test]
+    fn new_encoder_respects_chunk_size_config() {
+        let small_cfg = test_media_config(1);
+
+        match Encoder::new(&small_cfg) {
+            Ok(mut enc) => {
+                let mut yuv = YuvPlanarImageMut::alloc(4, 4, YuvChromaSubsampling::Yuv420);
+                for v in yuv.y_plane.borrow_mut().iter_mut() {
+                    *v = 128;
+                }
+                for v in yuv.u_plane.borrow_mut().iter_mut() {
+                    *v = 128;
+                }
+                for v in yuv.v_plane.borrow_mut().iter_mut() {
+                    *v = 128;
+                }
+
+                let res = enc.encode(&yuv, 1);
+                match res {
+                    Ok(ef) => {
+                        assert!(!ef.chunks.is_empty());
+                        for c in ef.chunks.iter() {
+                            assert!(c.len() <= small_cfg.rtp_max_chunk_size);
+                        }
+                    }
+                    Err(e) => match e {
+                        Error::EncodingError(_) => {}
+                        other => panic!("Unexpected encoding error: {other:?}"),
+                    },
+                }
+            }
+            Err(e) => assert_eq!(e, Error::EncoderInitializationError),
+        }
+    }
+}

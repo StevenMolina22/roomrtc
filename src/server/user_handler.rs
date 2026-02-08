@@ -301,6 +301,6 @@ mod tests {
 
         let response = handler.handle_client_message(msg);
 
-        assert!(matches!(response, ServerResponse::Error(_)));
+        assert!(matches!(response, ServerResponse::CallRequestError(_)));
     }
 }

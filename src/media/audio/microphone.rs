@@ -250,3 +250,77 @@ impl Microphone {
             .map_err(|e| Error::MapError(e.to_string()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_to_mono_stereo() {
+        let input = vec![1.0, 0.0, 0.5, 0.5, 1.0, 1.0];
+        let expected = vec![0.5, 0.5, 1.0];
+
+        let result = Microphone::convert_to_mono(&input, 2);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_convert_to_mono_pass_through() {
+        let input = vec![0.1, 0.2, 0.3];
+        let result = Microphone::convert_to_mono(&input, 1);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_convert_to_mono_multichannel() {
+        let input = vec![1.0, 0.5, 0.2, 0.8, 0.1, 0.1];
+        let expected = vec![1.0, 0.8];
+
+        let result = Microphone::convert_to_mono(&input, 3);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_resample_linear_upsample() {
+        let input = vec![0.0, 1.0];
+        let mut phase = 0.0;
+        let step = 0.5;
+
+        let resampled = Microphone::resample_linear(&input, &mut phase, step);
+
+        assert_eq!(resampled.len(), 2);
+        assert!((resampled[0] - 0.0).abs() < f32::EPSILON);
+        assert!((resampled[1] - 0.5).abs() < f32::EPSILON);
+
+        assert_eq!(phase, 0.0);
+    }
+
+    #[test]
+    fn test_resample_phase_continuity() {
+        let input1 = vec![0.0, 1.0];
+        let input2 = vec![1.0, 2.0];
+
+        let mut phase = 0.0;
+        let step = 0.5;
+
+        let res1 = Microphone::resample_linear(&input1, &mut phase, step);
+
+        let res2 = Microphone::resample_linear(&input2, &mut phase, step);
+
+        assert_eq!(res1.last().unwrap(), &0.5);
+        assert_eq!(res2.first().unwrap(), &1.0);
+    }
+
+    #[test]
+    fn test_mute_toggling() {
+        let muted = Arc::new(AtomicBool::new(false));
+
+        let current = muted.load(Ordering::Relaxed);
+        muted.store(!current, Ordering::Relaxed);
+        assert!(muted.load(Ordering::Relaxed));
+
+        let current = muted.load(Ordering::Relaxed);
+        muted.store(!current, Ordering::Relaxed);
+        assert!(!muted.load(Ordering::Relaxed));
+    }
+}

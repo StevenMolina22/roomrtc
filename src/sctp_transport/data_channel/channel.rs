@@ -219,3 +219,45 @@ fn ack_timed_out(clock: &Instant, wait_timeout_millis: u16) -> bool {
 fn open_timed_out(clock: &Instant, wait_timeout_millis: u16) -> bool {
     clock.elapsed().as_millis() > wait_timeout_millis as u128 && wait_timeout_millis > 0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn ack_timed_out_returns_false_when_timeout_zero() {
+        let clock = Instant::now() - Duration::from_millis(1000);
+        assert!(!ack_timed_out(&clock, 0));
+    }
+
+    #[test]
+    fn ack_timed_out_true_when_elapsed_greater_than_timeout() {
+        let clock = Instant::now() - Duration::from_millis(200);
+        assert!(ack_timed_out(&clock, 100));
+    }
+
+    #[test]
+    fn ack_timed_out_false_when_elapsed_less_than_timeout() {
+        let clock = Instant::now() - Duration::from_millis(50);
+        assert!(!ack_timed_out(&clock, 100));
+    }
+
+    #[test]
+    fn open_timed_out_returns_false_when_timeout_zero() {
+        let clock = Instant::now() - Duration::from_millis(1000);
+        assert!(!open_timed_out(&clock, 0));
+    }
+
+    #[test]
+    fn open_timed_out_true_when_elapsed_greater_than_timeout() {
+        let clock = Instant::now() - Duration::from_millis(200);
+        assert!(open_timed_out(&clock, 100));
+    }
+
+    #[test]
+    fn open_timed_out_false_when_elapsed_less_than_timeout() {
+        let clock = Instant::now() - Duration::from_millis(50);
+        assert!(!open_timed_out(&clock, 100));
+    }
+}

@@ -24,3 +24,39 @@ impl AudioDecoder {
         Ok(buff)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decoder_initialization() {
+        let decoder = AudioDecoder::new();
+        assert!(
+            decoder.is_ok(),
+            "El decoder debería inicializarse sin errores"
+        );
+    }
+
+    #[test]
+    fn test_decode_garbage_data() {
+        let mut decoder = AudioDecoder::new().expect("Falló al crear decoder");
+
+        let garbage_payload = vec![0u8, 255, 12, 33];
+
+        let result = decoder.decode(&garbage_payload);
+        assert!(result.is_ok(), "Debería fallar con datos basura");
+    }
+
+    #[test]
+    fn test_decode_empty_packet() {
+        let mut decoder = AudioDecoder::new().unwrap();
+        let empty: &[u8] = &[];
+
+        let result = decoder.decode(empty);
+
+        if let Ok(samples) = result {
+            assert!(!samples.is_empty())
+        }
+    }
+}

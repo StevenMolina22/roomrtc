@@ -192,7 +192,6 @@ impl<const N: usize> JitterBuffer<N> {
     fn resync_or_clear(&mut self) {
         self.logger
             .warn("JitterBuffer resync triggered: playout deadline exceeded or buffer overflow.");
-        // NO ESTOY CONSIDERANDO EL CASO DE QUE WRITE ESCRIBA DESPUES DEL READ, CONSIDERAR DESPUES
         let read_timestamp = self.packets[self.read_idx].as_ref().unwrap().timestamp;
 
         for _ in 0..N {

@@ -46,7 +46,7 @@ impl FileTransferer {
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let is_client = matches!(local_setup_role, DtlsSetupRole::Active);
-        let sctp_socket = UdpSocket::bind(local_addres).unwrap();
+        let sctp_socket = UdpSocket::bind(local_addres).map_err(|e| Error::MapError(e.to_string()))?;
 
         let socket = DtlsSocket::new(
             sctp_socket,
@@ -76,8 +76,8 @@ impl FileTransferer {
     }
 
     pub fn send_file(&mut self, file_path: &Path) -> Result<(), Error> {
-        let mut file = File::open(file_path).unwrap();
-        let file_metadata = FileMetadata::from(file_path, &file).unwrap();
+        let mut file = File::open(file_path).map_err(|e| Error::MapError(e.to_string()))?;
+        let file_metadata = FileMetadata::from(file_path, &file).map_err(|e| Error::MapError(e.to_string()))?;
 
         let mut data_channel = self
             .transport
@@ -85,7 +85,7 @@ impl FileTransferer {
                 file_metadata.name.clone(),
                 DataChannelType::Reliable,
                 0,
-                "".to_string(), // QUE PONGO ACA EN PROTOCOL??? FTP??
+                "".to_string(),
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
 
@@ -138,9 +138,9 @@ impl FileTransferer {
         let mut dc = self
             .pending_data_channels
             .lock()
-            .unwrap()
+            .map_err(|e| Error::LockError(e.to_string()))?
             .remove(&offer_id)
-            .unwrap();
+            .ok_or(Error::UnknownOfferId(offer_id))?;
         dc.send(&FTPMessage::RejectFile.to_bytes()).map_err(|e| {
             self.logger.error(e.to_string().as_str());
             Error::MapError(e.to_string())
@@ -151,9 +151,9 @@ impl FileTransferer {
         let mut dc = self
             .pending_data_channels
             .lock()
-            .unwrap()
+            .map_err(|e| Error::LockError(e.to_string()))?
             .remove(&offer_id)
-            .unwrap();
+            .ok_or(Error::UnknownOfferId(offer_id))?;
         dc.send(&FTPMessage::AcceptFile.to_bytes())
             .map_err(|e| Error::MapError(e.to_string()))?;
         let file =

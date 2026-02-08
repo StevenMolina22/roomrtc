@@ -13,7 +13,7 @@ impl FileMetadata {
         let name = file_path
             .file_name()
             .and_then(|s| s.to_str())
-            .unwrap()
+            .ok_or(Error::NameError)?
             .to_string();
         let size = file.metadata().map_err(|_| Error::MetadataError)?.len();
 

@@ -10,6 +10,7 @@ pub enum FileTransfererError {
     ChannelSendError(String),
     UnknownIncomingMessage,
     LockError(String),
+    UnknownOfferId(u32),
 }
 
 impl Display for FileTransfererError {
@@ -31,6 +32,7 @@ impl Display for FileTransfererError {
             Self::UnexpectedIncomingMessage => write!(f, "Error: \"Unexpected Incoming Message\""),
             Self::UnknownIncomingMessage => write!(f, "Error: \"Unknown Incoming Message\""),
             Self::LockError(e) => write!(f, "Error: \"Lock error\". Details: {}", e),
+            Self::UnknownOfferId(id) => write!(f, "Error: \"Unknown offer id\". Details: {}", id),
         }
     }
 }

@@ -4,11 +4,11 @@ use crate::dtls::dtls_socket::DtlsSocket;
 use crate::dtls::key_manager::LocalCert;
 use crate::file::{
     file_metadata::FileMetadata,
-    file_transferer::{FileTransfererError as Error, ftp_message::FTPMessage},
+    file_transferer::{ftp_message::FTPMessage, FileTransfererError as Error},
 };
 use crate::logger::Logger;
-use crate::sctp_transport::SCTPTransport;
 use crate::sctp_transport::data_channel::{DataChannel, DataChannelType};
+use crate::sctp_transport::SCTPTransport;
 use crate::session::sdp::{DtlsSetupRole, Fingerprint};
 use std::collections::HashMap;
 use std::fs::File;
@@ -23,6 +23,16 @@ use std::time::Duration;
 
 const FILE_CHUNK_SIZE: usize = 512;
 
+/// Manages file transfer operations over SCTP Data Channels secured by DTLS.
+///
+/// `FileTransferer` coordinates the file offer/accept/reject handshake,
+/// opens per-transfer Data Channels, and streams file data in fixed-size chunks.
+///
+/// # Threading
+/// This type spawns background threads to:
+/// - listen for incoming Data Channels,
+/// - send outgoing file chunks,
+/// - receive incoming file chunks.
 #[derive(Clone)]
 pub struct FileTransferer {
     transport: SCTPTransport,
@@ -34,6 +44,22 @@ pub struct FileTransferer {
 }
 
 impl FileTransferer {
+    /// Creates a new `FileTransferer` and establishes the SCTP association.
+    ///
+    /// The method binds a dedicated UDP socket for SCTP traffic, negotiates DTLS,
+    /// connects SCTP using the negotiated role, and starts a background listener
+    /// for incoming file offers.
+    ///
+    /// # Parameters
+    /// - `local_addres`: local socket used for SCTP traffic.
+    /// - `peer_address`: remote peer SCTP socket.
+    /// - `local_setup_role`: DTLS role from signaling (`Active`/`Passive`).
+    /// - `expected_fingerprint`: remote DTLS certificate fingerprint to verify.
+    /// - `local_cert`: local certificate used during DTLS handshake.
+    /// - `event_tx`: channel used to notify controller/UI events.
+    /// - `connected`: shared connection flag controlling background loops.
+    /// - `logger`: component logger handle.
+    /// - `config`: runtime configuration.
     pub fn new(
         local_addres: SocketAddr,
         peer_address: SocketAddr,
@@ -82,6 +108,11 @@ impl FileTransferer {
         Ok(instance)
     }
 
+    /// Initiates an outgoing file transfer to the connected peer.
+    ///
+    /// This method opens a reliable Data Channel, sends a `FileOffer` containing
+    /// file metadata, and spawns a worker thread that transmits file chunks when
+    /// the offer is accepted.
     pub fn send_file(&mut self, file_path: &Path) -> Result<(), Error> {
         let mut file = File::open(file_path).map_err(|e| Error::MapError(e.to_string()))?;
         let file_metadata =
@@ -175,6 +206,10 @@ impl FileTransferer {
         Ok(())
     }
 
+    /// Rejects an incoming file offer.
+    ///
+    /// Removes the pending Data Channel associated with `offer_id` and sends a
+    /// `RejectFile` message to the sender.
     pub fn reject_file_offer(&mut self, offer_id: u32) -> Result<(), Error> {
         self.logger
             .warn(&format!("Rejecting file offer {offer_id}"));
@@ -190,6 +225,11 @@ impl FileTransferer {
         })
     }
 
+    /// Accepts an incoming file offer and starts downloading.
+    ///
+    /// Sends `AcceptFile` on the pending offer Data Channel, creates the output
+    /// file at `download_path`, and spawns a receiver thread that persists chunks
+    /// until `EndOfFile` is received.
     pub fn accept_file_offer(&mut self, offer_id: u32, download_path: &Path) -> Result<(), Error> {
         self.logger.info(&format!(
             "Accepting file offer {offer_id}. Download path: {:?}",

@@ -219,16 +219,21 @@ impl OperatingServer {
 
     /// Attempts to establish a call between two users.
     ///
-    /// Steps:
-    /// 1. Retrieves `from_usr` and `to_usr` data.
-    /// 2. Ensures both users are currently `Available`.
-    /// 3. Sends a `CallIncoming` message to `to_usr`.
-    /// 4. Waits for an answer using `get_answer_from_peer`.
-    /// 5. Depending on the received response, either:
-    ///    - accepts the call (`CallAccept`)
-    ///    - rejects the call (`CallReject`)
+    /// # Overview
+    /// This function performs the initial signaling setup:
+    /// 1. Validates that both `from_usr` and `to_usr` exist.
+    /// 2. Ensures both users are currently `UserStatus::Available`.
+    /// 3. Updates both users to `UserStatus::Occupied`, linked to each other.
+    /// 4. Sends a `ServerMessage::CallIncoming` to `to_usr`.
+    /// 5. Returns `ServerResponse::CallRequestOk` to `from_usr` immediately.
     ///
-    /// Errors are reported via `ServerResponse::Error`.
+    /// # Asynchronous flow
+    /// The peer response arrives later as `ClientMessage::CallAccept` or `ClientMessage::CallReject`,
+    /// and is processed by `call_accept` or `call_reject`.
+    ///
+    /// # Errors
+    /// Returns `ServerResponse::Error` or `ServerResponse::CallRequestError`
+    /// when users are not found, are not available, or internal locks fail.
     pub fn call_request(
         &mut self,
         from_usr: String,

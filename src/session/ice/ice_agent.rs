@@ -260,6 +260,9 @@ impl IceAgent {
         false
     }
 
+    /// Returns the first non-loopback local IPv4 address found on the host.
+    ///
+    /// This is the same source used while gathering host ICE candidates.
     pub fn get_local_ip_str(&self) -> Result<String, Error> {
         get_local_ip()
     }
@@ -275,12 +278,18 @@ impl IceAgent {
         &self.local_candidates
     }
 
-    /// Return the selected candidate pair or an error if none was selected.
+    /// Returns the selected candidate pair used for data transmission.
+    ///
+    /// Returns `Error::NoSelectedPair` if connectivity checks have not selected
+    /// a pair yet.
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
     }
 
-    /// Clean remote candidates and candidate pairs.
+    /// Resets remote ICE state.
+    ///
+    /// Clears remote candidates, candidate pairs, and any previously selected
+    /// pair so the agent can be reused for a new negotiation.
     pub fn clean_remote_candidates(&mut self) {
         self.remote_candidates.clear();
         self.candidate_pairs.clear();

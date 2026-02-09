@@ -17,6 +17,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Drives an SCTP association over a DTLS socket and manages Data Channels.
+///
+/// `SCTPTransport` wraps `sctp-proto` endpoint/association state, runs the
+/// protocol event loop, and exposes helpers to open or accept channels.
 #[derive(Clone)]
 pub struct SCTPTransport {
     endpoint: Arc<Mutex<Endpoint>>,
@@ -29,6 +33,10 @@ pub struct SCTPTransport {
 }
 
 impl SCTPTransport {
+    /// Creates a new SCTP transport instance.
+    ///
+    /// This initializes endpoint/association state but does not perform network
+    /// handshake. Call `connect` to establish an association.
     pub fn new(connected: Arc<AtomicBool>, logger: Logger, config: Arc<Config>) -> Self {
         let endpoint = Arc::new(Mutex::new(Endpoint::new(
             Arc::new(EndpointConfig::default()),
@@ -46,6 +54,13 @@ impl SCTPTransport {
         }
     }
 
+    /// Establishes or accepts an SCTP association over the provided DTLS socket.
+    ///
+    /// If `is_client` is `true`, it actively initiates the association.
+    /// Otherwise it waits for the remote side to create it.
+    ///
+    /// This call starts the background event loop and blocks until handshaking
+    /// finishes.
     pub fn connect(
         &mut self,
         peer_address: SocketAddr,
@@ -92,6 +107,13 @@ impl SCTPTransport {
         Ok(())
     }
 
+    /// Opens a new Data Channel on the active SCTP association.
+    ///
+    /// # Parameters
+    /// - `label`: logical channel label.
+    /// - `dc_type`: reliability/ordering mode.
+    /// - `reliability_param`: reliability configuration value used by SCTP.
+    /// - `protocol`: subprotocol label.
     pub fn open_data_channel(
         &mut self,
         label: String,
@@ -125,6 +147,10 @@ impl SCTPTransport {
         Ok(dc)
     }
 
+    /// Waits for and accepts a remotely opened Data Channel.
+    ///
+    /// The method polls for new streams while `connected` remains true and
+    /// returns an error when the transport is no longer connected.
     pub fn accept_data_channel(&self) -> Result<DataChannel, Error> {
         while self.connected.load(Ordering::SeqCst) {
             let stream_id = {

@@ -108,6 +108,10 @@ impl Controller {
     // ---------------------------------------------------------------------------------------------------------------------------
     // FILES
 
+    /// Sends a file offer to the currently connected peer.
+    ///
+    /// Delegates to `FileTransferer::send_file` when a transferer is available.
+    /// If no file transferer is active, this is a no-op and returns `Ok(())`.
     pub fn send_file(&mut self, file_path: &Path) -> Result<(), Error> {
         if let Some(transferer) = self.file_transferer.as_mut() {
             transferer
@@ -117,6 +121,10 @@ impl Controller {
         Ok(())
     }
 
+    /// Accepts a pending remote file offer.
+    ///
+    /// Delegates to `FileTransferer::accept_file_offer` for `id`, saving the file
+    /// to `path`. If no file transferer is active, this is a no-op.
     pub fn accept_file(&mut self, id: u32, path: &Path) -> Result<(), Error> {
         if let Some(transferer) = self.file_transferer.as_mut() {
             transferer
@@ -126,6 +134,10 @@ impl Controller {
         Ok(())
     }
 
+    /// Rejects a pending remote file offer.
+    ///
+    /// Delegates to `FileTransferer::reject_file_offer` for `id`. If no file
+    /// transferer is active, this is a no-op and returns `Ok(())`.
     pub fn reject_file(&mut self, id: u32) -> Result<(), Error> {
         if let Some(transferer) = self.file_transferer.as_mut() {
             transferer

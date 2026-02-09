@@ -15,6 +15,7 @@ pub struct UserHandler {
     op_server: OperatingServer,
     logger: Logger,
 }
+
 /// Handles the lifecycle of a connected client.
 ///
 /// This loop:
@@ -44,6 +45,7 @@ impl UserHandler {
             logger,
         }
     }
+
     /// Handles the lifecycle of a connected client.
     ///
     /// This loop:
@@ -133,6 +135,19 @@ impl UserHandler {
             _ => ServerResponse::BadMessage,
         }
     }
+
+    /// Performs the initial server handshake for a newly connected client.
+    ///
+    /// Flow:
+    /// 1. Reads the first message from the TLS stream.
+    /// 2. Validates it is `ClientMessage::Hello`.
+    /// 3. Compares `users_connected` against configured capacity.
+    /// 4. Sends `ServerResponse::ServerFull` and returns `Error::ServerFull`
+    ///    when the server is at capacity.
+    /// 5. Otherwise sends `ServerResponse::Welcome` and increments
+    ///    `users_connected`.
+    ///
+    /// Returns `Error::ConnectionError` when the message is invalid or I/O fails.
     pub fn client_server_handshake(
         &mut self,
         tls_stream: &mut StreamOwned<ServerConnection, TcpStream>,

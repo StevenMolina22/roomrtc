@@ -24,12 +24,12 @@ pub struct SCTPTransport {
     association_handle: Arc<RwLock<Option<AssociationHandle>>>,
     next_stream_id: StreamId,
     connected: Arc<AtomicBool>,
-    logger: Arc<Logger>,
+    logger: Logger,
     config: Arc<Config>,
 }
 
 impl SCTPTransport {
-    pub fn new(connected: Arc<AtomicBool>, logger: Arc<Logger>, config: Arc<Config>) -> Self {
+    pub fn new(connected: Arc<AtomicBool>, logger: Logger, config: Arc<Config>) -> Self {
         let endpoint = Arc::new(Mutex::new(Endpoint::new(
             Arc::new(EndpointConfig::default()),
             Some(Arc::new(ServerConfig::default())),
@@ -52,6 +52,10 @@ impl SCTPTransport {
         socket: DtlsSocket,
         is_client: bool,
     ) -> Result<(), Error> {
+        let role = if is_client { "Client" } else { "Server" };
+        self.logger
+            .info(&format!("SCTP connecting to {peer_address} as {role}"));
+
         if is_client {
             let (association_handle, association) = self
                 .endpoint
@@ -82,6 +86,9 @@ impl SCTPTransport {
         {
             thread::sleep(Duration::from_millis(0));
         }
+
+        self.logger
+            .info(&format!("SCTP connection established with {peer_address}"));
         Ok(())
     }
 
@@ -92,6 +99,11 @@ impl SCTPTransport {
         reliability_param: u32,
         protocol: String,
     ) -> Result<DataChannel, Error> {
+        self.logger.debug(&format!(
+            "Opening DataChannel. Label: \"{label}\", Stream ID: {}",
+            self.next_stream_id
+        ));
+
         self.association
             .lock()
             .map_err(|e| Error::PoisonedLock(e.to_string()))?
@@ -105,7 +117,7 @@ impl SCTPTransport {
             dc_type,
             reliability_param,
             protocol,
-            Arc::new(self.logger.context("DataChannel")),
+            self.logger.context("DataChannel"),
             self.config.clone(),
         )
         .map_err(|e| Error::OpenDataChannelError(e.to_string()))?;
@@ -124,10 +136,12 @@ impl SCTPTransport {
             };
 
             if let Some(id) = stream_id {
+                self.logger
+                    .debug(&format!("Accepted DataChannel. Stream ID: {id}"));
                 return DataChannel::from_accepted_stream(
                     id,
                     self.association.clone(),
-                    Arc::new(self.logger.context("DataChannel")),
+                    self.logger.context("DataChannel"),
                     self.config.clone(),
                 )
                 .map_err(|e| Error::MapError(e.to_string()));
@@ -154,17 +168,32 @@ impl SCTPTransport {
                     Err(e)
                         if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
                     }
-                    Err(_) => break, //loggear
+                    Err(e) => {
+                        instance
+                            .logger
+                            .error(&format!("SCTP socket recv error: {e}"));
+                        break;
+                    }
                 }
 
                 if match instance.association_handle.read() {
                     Ok(assoc_handle) => assoc_handle.is_some(),
-                    Err(_) => break, //loggear
+                    Err(e) => {
+                        instance
+                            .logger
+                            .error(&format!("Association handle lock poisoned: {e}"));
+                        break;
+                    }
                 } {
                     {
                         let mut assoc = match instance.association.lock() {
                             Ok(assoc) => assoc,
-                            Err(_) => break, //loggear
+                            Err(e) => {
+                                instance
+                                    .logger
+                                    .error(&format!("Association lock poisoned: {e}"));
+                                break;
+                            }
                         };
 
                         if let Some(time) = assoc.poll_timeout()
@@ -176,33 +205,58 @@ impl SCTPTransport {
                         while let Some(endpoint_event) = assoc.poll_endpoint_event() {
                             let assoc_handle = match instance.association_handle.read() {
                                 Ok(assoc_handle) => assoc_handle,
-                                Err(_) => return, //loggear
+                                Err(e) => {
+                                    instance.logger.error(&format!(
+                                        "Association handle lock poisoned during endpoint event: {e}"
+                                    ));
+                                    return;
+                                }
                             };
                             let a = match *assoc_handle {
                                 Some(a) => a,
-                                None => return, //loggear
+                                None => {
+                                    instance
+                                        .logger
+                                        .error("Association handle is None during endpoint event");
+                                    return;
+                                }
                             };
                             match instance.endpoint.lock() {
                                 Ok(mut endpoint) => endpoint.handle_event(a, endpoint_event),
-                                Err(_) => return, //loggear
+                                Err(e) => {
+                                    instance.logger.error(&format!(
+                                        "Endpoint lock poisoned during endpoint event: {e}"
+                                    ));
+                                    return;
+                                }
                             };
                         }
                     }
 
                     if instance.handle_association_events().is_err() {
-                        //loggear
+                        instance
+                            .logger
+                            .error("Failed to handle association events");
                         return;
                     }
 
                     loop {
                         let mut assoc = match instance.association.lock() {
                             Ok(assoc) => assoc,
-                            Err(_) => return, //logger
+                            Err(e) => {
+                                instance.logger.error(&format!(
+                                    "Association lock poisoned during transmit: {e}"
+                                ));
+                                return;
+                            }
                         };
                         match assoc.poll_transmit(Instant::now()) {
                             Some(transmit) => {
-                                if send_transmit(transmit, &socket).is_err() {
-                                    return; //loggear
+                                if let Err(e) = send_transmit(transmit, &socket) {
+                                    instance
+                                        .logger
+                                        .error(&format!("SCTP association transmit failed: {e}"));
+                                    return;
                                 }
                             }
                             None => break,
@@ -212,13 +266,21 @@ impl SCTPTransport {
                     loop {
                         let mut endpoint = match instance.endpoint.lock() {
                             Ok(endpoint) => endpoint,
-                            Err(_) => return, //loggear
+                            Err(e) => {
+                                instance.logger.error(&format!(
+                                    "Endpoint lock poisoned during transmit: {e}"
+                                ));
+                                return;
+                            }
                         };
 
                         match endpoint.poll_transmit() {
                             Some(transmit) => {
-                                if send_transmit(transmit, &socket).is_err() {
-                                    return; //loggear
+                                if let Err(e) = send_transmit(transmit, &socket) {
+                                    instance
+                                        .logger
+                                        .error(&format!("SCTP endpoint transmit failed: {e}"));
+                                    return;
                                 }
                             }
                             None => break,
@@ -298,21 +360,27 @@ impl SCTPTransport {
         }
     }
 
-    //loggear individualmente cada caso
     fn handle_event(&mut self, event: Event) {
         match event {
             Event::Stream(stream_event) => match stream_event {
-                StreamEvent::Opened => {}
-                StreamEvent::BufferedAmountLow { id: _ } => {}
-                StreamEvent::Readable { id: _ } => {}
-                StreamEvent::Finished { id: _ } => {}
-                StreamEvent::Writable { .. } => {}
-                StreamEvent::Stopped { .. } => {}
-                StreamEvent::Available => {}
+                StreamEvent::Opened => self.logger.debug("SCTP Stream Opened"),
+                StreamEvent::Finished { id } => {
+                    self.logger.debug(&format!("SCTP Stream Finished. Stream ID: {id}"))
+                }
+                StreamEvent::Stopped { id, .. } => {
+                    self.logger.warn(&format!("SCTP Stream Stopped. Stream ID: {id}"))
+                }
+                StreamEvent::Available => self.logger.debug("SCTP Stream Available"),
+                StreamEvent::BufferedAmountLow { .. }
+                | StreamEvent::Readable { .. }
+                | StreamEvent::Writable { .. } => {}
             },
-            Event::Connected => {}
-            Event::AssociationLost { reason: _ } => {}
-            Event::DatagramReceived => {}
+            Event::Connected => self.logger.info("SCTP Association Connected"),
+            Event::AssociationLost { reason } => {
+                self.logger
+                    .error(&format!("SCTP Association Lost. Reason: {reason:?}"))
+            }
+            Event::DatagramReceived => self.logger.debug("SCTP Datagram Received"),
         }
     }
 }
@@ -404,7 +472,7 @@ mod tests {
     #[test]
     fn test_new_initializes_fields() {
         let connected = Arc::new(AtomicBool::new(false));
-        let logger = Arc::new(Logger::new("/tmp/test_transport_log").unwrap());
+        let logger = Logger::new("/tmp/test_transport_log").unwrap();
         let config = make_config();
 
         let transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
@@ -417,7 +485,7 @@ mod tests {
     #[test]
     fn test_accept_data_channel_returns_err_when_disconnected() {
         let connected = Arc::new(AtomicBool::new(false));
-        let logger = Arc::new(Logger::new("/tmp/test_transport_log2").unwrap());
+        let logger = Logger::new("/tmp/test_transport_log2").unwrap();
         let config = make_config();
 
         let transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
@@ -429,7 +497,7 @@ mod tests {
     #[test]
     fn test_open_data_channel_fails_without_association() {
         let connected = Arc::new(AtomicBool::new(false));
-        let logger = Arc::new(Logger::new("/tmp/test_transport_log3").unwrap());
+        let logger = Logger::new("/tmp/test_transport_log3").unwrap();
         let config = make_config();
 
         let mut transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());

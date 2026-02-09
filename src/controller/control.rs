@@ -3,10 +3,10 @@ use crate::config::Config;
 use crate::controller::{AppEvent, ControllerError as Error};
 use crate::file::file_transferer::FileTransferer;
 use crate::logger::Logger;
-use crate::media::MediaPipeline;
 use crate::media::frame_handler::Frame;
-use crate::session::CallSession;
+use crate::media::MediaPipeline;
 use crate::session::sdp::{Fingerprint, SessionDescriptionProtocol};
+use crate::session::CallSession;
 use crate::transport::MediaTransport;
 use crate::user::UserStatus;
 use rustls::pki_types::ServerName;
@@ -571,7 +571,7 @@ impl Controller {
                 &self.call_session.local_cert,
                 self.event_tx.clone(),
                 connected,
-                Arc::new(self.logger.clone()),
+                self.logger.clone(),
                 self.config.clone(),
             )
             .map_err(|e| Error::MapError(e.to_string()))?,

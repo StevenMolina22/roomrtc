@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 pub struct DataChannel {
     pub(crate) stream_id: StreamId,
     pub(crate) association: Arc<Mutex<Association>>,
-    logger: Arc<Logger>,
+    logger: Logger,
     config: Arc<Config>,
 }
 
@@ -18,7 +18,7 @@ impl DataChannel {
     pub fn from_accepted_stream(
         stream_id: StreamId,
         association: Arc<Mutex<Association>>,
-        logger: Arc<Logger>,
+        logger: Logger,
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let mut dc = Self {
@@ -43,7 +43,7 @@ impl DataChannel {
         dc_type: DataChannelType,
         reliability_param: u32,
         protocol: String,
-        logger: Arc<Logger>,
+        logger: Logger,
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let mut dc = Self {

@@ -238,10 +238,7 @@ impl RoomRTCApp {
             ui.vertical_centered(|ui| ui.logo(150.0));
             ui.add_space(7.5);
 
-            let username = match self.controller.get_username() {
-                Ok(u) => u,
-                Err(_) => String::new(),
-            };
+            let username = self.controller.get_username().unwrap_or_default();
             ui.user_profile_header(&username, || {
                 if self.controller.log_out().is_ok() {
                     self.view = View::Welcome;
@@ -512,10 +509,7 @@ impl RoomRTCApp {
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
 
-            let error_text = match self.error_msg.as_deref() {
-                Some(s) => s,
-                None => "An unknown error occurred",
-            };
+            let error_text = self.error_msg.as_deref().unwrap_or("An unknown error occurred");
             ui.label(
                 RichText::new(error_text)
                     .color(Color32::RED)

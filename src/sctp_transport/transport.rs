@@ -139,7 +139,6 @@ impl SCTPTransport {
             dc_type,
             reliability_param,
             protocol,
-            self.logger.context("DataChannel"),
             self.config.clone(),
         )
         .map_err(|e| Error::OpenDataChannelError(e.to_string()))?;
@@ -167,7 +166,6 @@ impl SCTPTransport {
                 return DataChannel::from_accepted_stream(
                     id,
                     self.association.clone(),
-                    self.logger.context("DataChannel"),
                     self.config.clone(),
                 )
                 .map_err(|e| Error::MapError(e.to_string()));
@@ -175,7 +173,7 @@ impl SCTPTransport {
 
             thread::sleep(Duration::from_millis(500));
         }
-        Err(Error::ConnectError("".to_string()))
+        Err(Error::ConnectError(String::new()))
     }
 
     fn start_event_loop(&mut self, peer_address: SocketAddr, socket: DtlsSocket) {
@@ -238,14 +236,13 @@ impl SCTPTransport {
                                     return;
                                 }
                             };
-                            let a = match *assoc_handle {
-                                Some(a) => a,
-                                None => {
-                                    instance
-                                        .logger
-                                        .error("Association handle is None during endpoint event");
-                                    return;
-                                }
+                            let a = if let Some(a) = *assoc_handle {
+                                a
+                            } else {
+                                instance
+                                    .logger
+                                    .error("Association handle is None during endpoint event");
+                                return;
                             };
                             match instance.endpoint.lock() {
                                 Ok(mut endpoint) => endpoint.handle_event(a, endpoint_event),
@@ -260,9 +257,7 @@ impl SCTPTransport {
                     }
 
                     if instance.handle_association_events().is_err() {
-                        instance
-                            .logger
-                            .error("Failed to handle association events");
+                        instance.logger.error("Failed to handle association events");
                         return;
                     }
 
@@ -293,9 +288,9 @@ impl SCTPTransport {
                         let mut endpoint = match instance.endpoint.lock() {
                             Ok(endpoint) => endpoint,
                             Err(e) => {
-                                instance.logger.error(&format!(
-                                    "Endpoint lock poisoned during transmit: {e}"
-                                ));
+                                instance
+                                    .logger
+                                    .error(&format!("Endpoint lock poisoned during transmit: {e}"));
                                 return;
                             }
                         };
@@ -390,22 +385,21 @@ impl SCTPTransport {
         match event {
             Event::Stream(stream_event) => match stream_event {
                 StreamEvent::Opened => self.logger.debug("SCTP Stream Opened"),
-                StreamEvent::Finished { id } => {
-                    self.logger.debug(&format!("SCTP Stream Finished. Stream ID: {id}"))
-                }
-                StreamEvent::Stopped { id, .. } => {
-                    self.logger.warn(&format!("SCTP Stream Stopped. Stream ID: {id}"))
-                }
+                StreamEvent::Finished { id } => self
+                    .logger
+                    .debug(&format!("SCTP Stream Finished. Stream ID: {id}")),
+                StreamEvent::Stopped { id, .. } => self
+                    .logger
+                    .warn(&format!("SCTP Stream Stopped. Stream ID: {id}")),
                 StreamEvent::Available => self.logger.debug("SCTP Stream Available"),
                 StreamEvent::BufferedAmountLow { .. }
                 | StreamEvent::Readable { .. }
                 | StreamEvent::Writable { .. } => {}
             },
             Event::Connected => self.logger.info("SCTP Association Connected"),
-            Event::AssociationLost { reason } => {
-                self.logger
-                    .error(&format!("SCTP Association Lost. Reason: {reason:?}"))
-            }
+            Event::AssociationLost { reason } => self
+                .logger
+                .error(&format!("SCTP Association Lost. Reason: {reason:?}")),
             Event::DatagramReceived => self.logger.debug("SCTP Datagram Received"),
         }
     }
@@ -418,7 +412,7 @@ fn send_transmit(transmit: Transmit, socket: &impl Socket) -> Result<(), Error> 
                 .send(&chunk)
                 .map_err(|e| Error::IOError(e.to_string()))?;
         }
-    };
+    }
     Ok(())
 }
 
@@ -480,12 +474,12 @@ mod tests {
                 host_local_preference: 0,
             },
             server: ServerConfig {
-                users_file: "".to_string(),
-                client_server_addr: "".to_string(),
-                server_client_addr: "".to_string(),
-                server_private_key_file: "".to_string(),
-                server_certification_file: "".to_string(),
-                server_name: "".to_string(),
+                users_file: String::new(),
+                client_server_addr: String::new(),
+                server_client_addr: String::new(),
+                server_private_key_file: String::new(),
+                server_certification_file: String::new(),
+                server_name: String::new(),
                 max_amount_of_users_connected: 0,
             },
             dcep: DCEPConfig {
@@ -501,7 +495,7 @@ mod tests {
         let logger = Logger::new("/tmp/test_transport_log").unwrap();
         let config = make_config();
 
-        let transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
+        let transport = SCTPTransport::new(connected, logger, config);
 
         assert_eq!(transport.next_stream_id, 0);
         assert!(transport.association_handle.read().unwrap().is_none());
@@ -514,7 +508,7 @@ mod tests {
         let logger = Logger::new("/tmp/test_transport_log2").unwrap();
         let config = make_config();
 
-        let transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
+        let transport = SCTPTransport::new(connected, logger, config);
 
         let res = transport.accept_data_channel();
         assert!(res.is_err());
@@ -526,14 +520,14 @@ mod tests {
         let logger = Logger::new("/tmp/test_transport_log3").unwrap();
         let config = make_config();
 
-        let mut transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
+        let mut transport = SCTPTransport::new(connected, logger, config);
 
         // There is no real association yet, so opening a data channel should fail
         let res = transport.open_data_channel(
             "label".to_string(),
             DataChannelType::Reliable,
             0,
-            "".to_string(),
+            String::new(),
         );
         assert!(res.is_err());
     }

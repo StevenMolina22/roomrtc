@@ -1,5 +1,4 @@
 use crate::config::Config;
-use crate::logger::Logger;
 use crate::sctp_transport::data_channel::dcep::DCEPMessage;
 use crate::sctp_transport::data_channel::{DataChannelError as Error, DataChannelType};
 use sctp_proto::{Association, Chunks, PayloadProtocolIdentifier, StreamId};
@@ -10,7 +9,6 @@ use std::time::{Duration, Instant};
 pub struct DataChannel {
     pub(crate) stream_id: StreamId,
     pub(crate) association: Arc<Mutex<Association>>,
-    logger: Logger,
     config: Arc<Config>,
 }
 
@@ -18,13 +16,11 @@ impl DataChannel {
     pub fn from_accepted_stream(
         stream_id: StreamId,
         association: Arc<Mutex<Association>>,
-        logger: Logger,
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let mut dc = Self {
             stream_id,
             association,
-            logger,
             config,
         };
 
@@ -43,13 +39,11 @@ impl DataChannel {
         dc_type: DataChannelType,
         reliability_param: u32,
         protocol: String,
-        logger: Logger,
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let mut dc = Self {
             stream_id,
             association,
-            logger,
             config,
         };
         dc.configure_stream(&label, dc_type, reliability_param, &protocol)?;
@@ -166,7 +160,10 @@ impl DataChannel {
                     .read(&mut bytes)
                     .map_err(|e| Error::ReadChunksError(e.to_string()))?;
 
-                if let Some(DCEPMessage::DataChannelAck) = DCEPMessage::from_bytes(&bytes) {
+                if matches!(
+                    DCEPMessage::from_bytes(&bytes),
+                    Some(DCEPMessage::DataChannelAck)
+                ) {
                     return Ok(());
                 }
             }
@@ -213,11 +210,11 @@ impl DataChannel {
 }
 
 fn ack_timed_out(clock: &Instant, wait_timeout_millis: u16) -> bool {
-    clock.elapsed().as_millis() > wait_timeout_millis as u128 && wait_timeout_millis > 0
+    clock.elapsed().as_millis() > u128::from(wait_timeout_millis) && wait_timeout_millis > 0
 }
 
 fn open_timed_out(clock: &Instant, wait_timeout_millis: u16) -> bool {
-    clock.elapsed().as_millis() > wait_timeout_millis as u128 && wait_timeout_millis > 0
+    clock.elapsed().as_millis() > u128::from(wait_timeout_millis) && wait_timeout_millis > 0
 }
 
 #[cfg(test)]
@@ -227,37 +224,49 @@ mod tests {
 
     #[test]
     fn ack_timed_out_returns_false_when_timeout_zero() {
-        let clock = Instant::now() - Duration::from_millis(1000);
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(1000))
+            .unwrap();
         assert!(!ack_timed_out(&clock, 0));
     }
 
     #[test]
     fn ack_timed_out_true_when_elapsed_greater_than_timeout() {
-        let clock = Instant::now() - Duration::from_millis(200);
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(200))
+            .unwrap();
         assert!(ack_timed_out(&clock, 100));
     }
 
     #[test]
     fn ack_timed_out_false_when_elapsed_less_than_timeout() {
-        let clock = Instant::now() - Duration::from_millis(50);
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(50))
+            .unwrap();
         assert!(!ack_timed_out(&clock, 100));
     }
 
     #[test]
     fn open_timed_out_returns_false_when_timeout_zero() {
-        let clock = Instant::now() - Duration::from_millis(1000);
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(1000))
+            .unwrap();
         assert!(!open_timed_out(&clock, 0));
     }
 
     #[test]
     fn open_timed_out_true_when_elapsed_greater_than_timeout() {
-        let clock = Instant::now() - Duration::from_millis(200);
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(200))
+            .unwrap();
         assert!(open_timed_out(&clock, 100));
     }
 
     #[test]
     fn open_timed_out_false_when_elapsed_less_than_timeout() {
-        let clock = Instant::now() - Duration::from_millis(50);
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(50))
+            .unwrap();
         assert!(!open_timed_out(&clock, 100));
     }
 }

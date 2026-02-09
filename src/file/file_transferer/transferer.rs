@@ -43,6 +43,21 @@ pub struct FileTransferer {
     logger: Logger,
 }
 
+pub struct FileTransfererNetParams<'a> {
+    pub local_addres: SocketAddr,
+    pub peer_address: SocketAddr,
+    pub local_setup_role: DtlsSetupRole,
+    pub expected_fingerprint: Fingerprint,
+    pub local_cert: &'a LocalCert,
+}
+
+pub struct FileTransfererRuntime {
+    pub event_tx: Sender<AppEvent>,
+    pub connected: Arc<AtomicBool>,
+    pub logger: Logger,
+    pub config: Arc<Config>,
+}
+
 impl FileTransferer {
     /// Creates a new `FileTransferer` and establishes the SCTP association.
     ///
@@ -51,26 +66,26 @@ impl FileTransferer {
     /// for incoming file offers.
     ///
     /// # Parameters
-    /// - `local_addres`: local socket used for SCTP traffic.
-    /// - `peer_address`: remote peer SCTP socket.
-    /// - `local_setup_role`: DTLS role from signaling (`Active`/`Passive`).
-    /// - `expected_fingerprint`: remote DTLS certificate fingerprint to verify.
-    /// - `local_cert`: local certificate used during DTLS handshake.
-    /// - `event_tx`: channel used to notify controller/UI events.
-    /// - `connected`: shared connection flag controlling background loops.
-    /// - `logger`: component logger handle.
-    /// - `config`: runtime configuration.
+    /// - `net`: network and DTLS setup values required to establish the SCTP path.
+    /// - `runtime`: shared runtime dependencies (events, connection state, logger, config).
     pub fn new(
-        local_addres: SocketAddr,
-        peer_address: SocketAddr,
-        local_setup_role: DtlsSetupRole,
-        expected_fingerprint: Fingerprint,
-        local_cert: &LocalCert,
-        event_tx: Sender<AppEvent>,
-        connected: Arc<AtomicBool>,
-        logger: Logger,
-        config: Arc<Config>,
+        net: FileTransfererNetParams<'_>,
+        runtime: FileTransfererRuntime,
     ) -> Result<Self, Error> {
+        let FileTransfererNetParams {
+            local_addres,
+            peer_address,
+            local_setup_role,
+            expected_fingerprint,
+            local_cert,
+        } = net;
+        let FileTransfererRuntime {
+            event_tx,
+            connected,
+            logger,
+            config,
+        } = runtime;
+
         let is_client = matches!(local_setup_role, DtlsSetupRole::Active);
         let logger = logger.context("FileTransferer");
 
@@ -86,7 +101,7 @@ impl FileTransferer {
         )
         .map_err(|e| Error::MapError(e.to_string()))?;
 
-        let mut transport = SCTPTransport::new(connected.clone(), logger.clone(), config.clone());
+        let mut transport = SCTPTransport::new(connected.clone(), logger.clone(), config);
         transport
             .connect(peer_address, socket, is_client)
             .map_err(|e| Error::MapError(e.to_string()))?;
@@ -129,7 +144,7 @@ impl FileTransferer {
                 file_metadata.name.clone(),
                 DataChannelType::Reliable,
                 0,
-                "".to_string(),
+                String::new(),
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
 
@@ -232,8 +247,7 @@ impl FileTransferer {
     /// until `EndOfFile` is received.
     pub fn accept_file_offer(&mut self, offer_id: u32, download_path: &Path) -> Result<(), Error> {
         self.logger.info(&format!(
-            "Accepting file offer {offer_id}. Download path: {:?}",
-            download_path
+            "Accepting file offer {offer_id}. Download path: {download_path:?}"
         ));
         let mut dc = self
             .pending_data_channels

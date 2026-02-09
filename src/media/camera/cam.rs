@@ -112,15 +112,17 @@ fn setup_camera(config: &Arc<Config>) -> Result<videoio::VideoCapture, Error> {
     let mut cam = videoio::VideoCapture::new(camera_index, videoio::CAP_V4L2)
         .map_err(|e| Error::OpenError(e.to_string()))?;
 
-    if !videoio::VideoCapture::is_opened(&cam).unwrap_or(false) {
-        return Err(Error::OpenError("Camera not opened".to_string()));
+    match videoio::VideoCapture::is_opened(&cam) {
+        Ok(true) => {}
+        Ok(false) => return Err(Error::OpenError("Camera not opened".to_string())),
+        Err(e) => return Err(Error::OpenError(e.to_string())),
     }
 
+    let fourcc_code = VideoWriter::fourcc('M', 'J', 'P', 'G')
+        .map_err(|e| Error::OpenError(e.to_string()))?;
+
     let settings = [
-        (
-            videoio::CAP_PROP_FOURCC,
-            f64::from(VideoWriter::fourcc('M', 'J', 'P', 'G').unwrap()),
-        ),
+        (videoio::CAP_PROP_FOURCC, f64::from(fourcc_code)),
         (videoio::CAP_PROP_FPS, config.media.frame_rate as f64),
         (videoio::CAP_PROP_FRAME_WIDTH, config.media.frame_width),
         (videoio::CAP_PROP_FRAME_HEIGHT, config.media.frame_height),
@@ -145,7 +147,15 @@ fn run_camera_loop(
     let mut rgb = Mat::default();
 
     while running.load(Ordering::SeqCst) {
-        if !cam.read(&mut mat).unwrap_or(false) || mat.empty() {
+        match cam.read(&mut mat) {
+            Ok(true) => {}
+            Ok(false) | Err(_) => {
+                logger.error(&Error::ReadFrameError.to_string());
+                continue;
+            }
+        }
+
+        if mat.empty() {
             logger.error(&Error::ReadFrameError.to_string());
             continue;
         }

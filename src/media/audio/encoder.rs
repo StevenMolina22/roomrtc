@@ -92,6 +92,6 @@ mod tests {
 
         let result = encoder.encode(frame);
 
-        let _ = result; // Ensure encode is exercised; any Ok/Err is acceptable for this constraint test
+        let _ = result;
     }
 }

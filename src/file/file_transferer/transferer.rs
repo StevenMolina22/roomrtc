@@ -97,37 +97,45 @@ impl FileTransferer {
         self.next_offer_id += 1;
 
         thread::spawn(move || {
-            if file_offer_accepted(offer_id, &mut data_channel, file_metadata).unwrap() {
-                let mut message: Vec<u8>;
-                let mut buff = [0u8; FILE_CHUNK_SIZE];
-                while connected.load(Ordering::SeqCst) {
-                    let n = match file
-                        .read(&mut buff)
-                        .map_err(|e| Error::FileReadError(e.to_string()))
-                    {
-                        Ok(n) => n,
-                        Err(e) => {
+            match file_offer_accepted(offer_id, &mut data_channel, file_metadata) {
+                Ok(true) => {
+                    let mut message: Vec<u8>;
+                    let mut buff = [0u8; FILE_CHUNK_SIZE];
+                    while connected.load(Ordering::SeqCst) {
+                        let n = match file
+                            .read(&mut buff)
+                            .map_err(|e| Error::FileReadError(e.to_string()))
+                        {
+                            Ok(n) => n,
+                            Err(e) => {
+                                logger.error(e.to_string().as_str());
+                                break;
+                            }
+                        };
+                        if n == 0 {
+                            break;
+                        }
+
+                        message = FTPMessage::FileChunk {
+                            payload: buff[..n].to_vec(),
+                        }
+                        .to_bytes();
+
+                        if let Err(e) = data_channel.send(&message) {
                             logger.error(e.to_string().as_str());
                             break;
                         }
-                    };
-                    if n == 0 {
-                        break;
+                        thread::sleep(Duration::from_millis(50));
                     }
-
-                    message = FTPMessage::FileChunk {
-                        payload: buff[..n].to_vec(),
-                    }
-                    .to_bytes();
-
+                    message = FTPMessage::EndOfFile.to_bytes();
                     if let Err(e) = data_channel.send(&message) {
                         logger.error(e.to_string().as_str());
-                        break;
                     }
-                    thread::sleep(Duration::from_millis(50));
                 }
-                message = FTPMessage::EndOfFile.to_bytes();
-                if let Err(e) = data_channel.send(&message) {
+                Ok(false) => {
+                    // Offer rejected by remote; nothing to do.
+                }
+                Err(e) => {
                     logger.error(e.to_string().as_str());
                 }
             }
@@ -337,7 +345,10 @@ mod tests {
         }
 
         fn recv(&mut self, buff: &mut [u8]) -> Result<usize, Error> {
-            let mut guard = self.responses.lock().unwrap();
+            let mut guard = match self.responses.lock() {
+                Ok(g) => g,
+                Err(_) => return Err(Error::MapError("mutex poisoned".to_string())),
+            };
             if guard.is_empty() {
                 return Ok(0);
             }

@@ -12,6 +12,12 @@ pub enum DCEPMessage {
 }
 
 impl DCEPMessage {
+    /// Serializes a DCEP message into wire bytes.
+    ///
+    /// Message tags:
+    /// - `0x03`: `DataChannelOpen`
+    /// - `0x02`: `DataChannelAck`
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             Self::DataChannelOpen {
@@ -41,6 +47,10 @@ impl DCEPMessage {
         }
     }
 
+    /// Parses a DCEP message from wire bytes.
+    ///
+    /// Returns `None` if bytes are malformed or incomplete.
+    #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         match bytes.first()? {
             0x03 => {

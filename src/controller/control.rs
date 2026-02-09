@@ -341,7 +341,15 @@ impl Controller {
         Ok(())
     }
 
-    // Helper function to join an active call by setting up media transport and pipeline
+    /// Finalizes transport setup and starts media/file pipelines for an active call.
+    ///
+    /// Resolves peer RTP/RTCP/SCTP addresses from the selected ICE pair, starts
+    /// SRTP transport, initializes file transfer over SCTP, and starts the media
+    /// pipeline.
+    ///
+    /// # Errors
+    /// Returns an error if any transport, media, or file-transfer component
+    /// fails to initialize.
     pub(crate) fn join_call(&mut self) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
         let (remote_rtp_addr, remote_rtcp_addr, remote_sctp_addr) = self
             .get_remote_addresses()
@@ -490,6 +498,13 @@ impl Controller {
         Ok(())
     }
 
+    /// Performs the initial client-server handshake on the signaling channel.
+    ///
+    /// Sends `ClientMessage::Hello` and expects either `ServerResponse::Welcome`
+    /// or `ServerResponse::ServerFull`.
+    ///
+    /// # Errors
+    /// Returns an error if the response is invalid or if event propagation fails.
     pub fn initial_handshake(&mut self) -> Result<(), Error> {
         let msg = ClientMessage::Hello;
         let ans = send_message(msg, &mut self.client_server_stream, &self.event_tx)?;
@@ -531,7 +546,13 @@ impl Controller {
         }
     }
 
-    // Helper function to retrieve the current username
+    /// Returns the current username token used by this client session.
+    ///
+    /// This currently delegates to `get_token` and therefore requires the user
+    /// to be logged in.
+    ///
+    /// # Errors
+    /// Returns `Error::NotLoggedInError` when no session token is available.
     pub(crate) fn get_username(&self) -> Result<String, Error> {
         self.get_token()
     }

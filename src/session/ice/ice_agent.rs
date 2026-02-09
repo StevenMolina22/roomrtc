@@ -274,6 +274,7 @@ impl IceAgent {
     }
 
     #[must_use]
+    /// Returns all gathered local ICE candidates.
     pub fn get_local_candidates(&self) -> &[Candidate] {
         &self.local_candidates
     }

@@ -285,6 +285,9 @@ impl MediaPipeline {
         Ok(())
     }
 
+    /// Toggles microphone mute state in the embedded audio pipeline.
+    ///
+    /// If audio was not initialized for this media pipeline, this method is a no-op.
     pub fn toggle_audio(&self) {
         if let Some(audio) = &self.audio {
             audio.toggle_mute();

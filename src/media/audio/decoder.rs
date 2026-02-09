@@ -1,11 +1,16 @@
 use crate::media::audio::AudioError as Error;
-use audiopus::{Channels, SampleRate, coder::Decoder};
+use audiopus::{coder::Decoder, Channels, SampleRate};
 
 pub struct AudioDecoder {
     decoder: Decoder,
 }
 
 impl AudioDecoder {
+    /// Creates an OPUS decoder configured for 48 kHz mono audio.
+    ///
+    /// # Errors
+    /// Returns `Error::DecoderInitializationError` if the underlying OPUS
+    /// decoder cannot be created.
     pub fn new() -> Result<Self, Error> {
         let decoder = Decoder::new(SampleRate::Hz48000, Channels::Mono)
             .map_err(|_| Error::DecoderInitializationError)?;
@@ -13,6 +18,10 @@ impl AudioDecoder {
         Ok(Self { decoder })
     }
 
+    /// Decodes one OPUS payload into interleaved PCM `f32` samples.
+    ///
+    /// # Errors
+    /// Returns `Error::DecodingError` when decoding fails.
     pub fn decode(&mut self, input_bytes: &[u8]) -> Result<Vec<f32>, Error> {
         let mut buff = vec![0.0f32; 5760];
         let len = self

@@ -18,16 +18,22 @@ impl TryFrom<u8> for DataChannelType {
 }
 
 impl DataChannelType {
+    /// Returns the DCEP wire value for this data channel type.
+    #[must_use]
     pub fn to_u8(&self) -> u8 {
         *self as u8
     }
 
+    /// Returns whether messages are delivered in order for this type.
+    #[must_use]
     pub fn ordered(&self) -> bool {
         match self {
             DataChannelType::Reliable => true,
         }
     }
 
+    /// Returns the SCTP reliability mode associated with this type.
+    #[must_use]
     pub fn reliability_type(&self) -> ReliabilityType {
         match self {
             DataChannelType::Reliable => ReliabilityType::Reliable,

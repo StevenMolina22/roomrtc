@@ -13,6 +13,12 @@ pub struct DataChannel {
 }
 
 impl DataChannel {
+    /// Builds a `DataChannel` from a remotely accepted SCTP stream.
+    ///
+    /// Waits for remote `DataChannelOpen`, then responds with `DataChannelAck`.
+    ///
+    /// # Errors
+    /// Returns an error if handshake messages cannot be read/written.
     pub fn from_accepted_stream(
         stream_id: StreamId,
         association: Arc<Mutex<Association>>,
@@ -32,6 +38,12 @@ impl DataChannel {
         Ok(dc)
     }
 
+    /// Opens a local data channel on an already opened SCTP stream.
+    ///
+    /// Sends `DataChannelOpen` and waits for `DataChannelAck`.
+    ///
+    /// # Errors
+    /// Returns an error if stream configuration or DCEP handshake fails.
     pub fn open(
         label: String,
         stream_id: StreamId,
@@ -60,6 +72,10 @@ impl DataChannel {
         Ok(dc)
     }
 
+    /// Applies stream reliability settings for this data channel.
+    ///
+    /// # Errors
+    /// Returns an error if the SCTP stream cannot be accessed or configured.
     pub fn configure_stream(
         &mut self,
         _label: &String,
@@ -87,6 +103,10 @@ impl DataChannel {
             .map_err(|e| Error::OpenError(e.to_string()))
     }
 
+    /// Sends one application payload over the channel.
+    ///
+    /// # Errors
+    /// Returns an error if stream lock/acquisition or write fails.
     pub fn send(&mut self, message: &[u8]) -> Result<(), Error> {
         let mut association = self
             .association
@@ -102,6 +122,10 @@ impl DataChannel {
         Ok(())
     }
 
+    /// Blocks until channel data is available and reads it into `buff`.
+    ///
+    /// # Errors
+    /// Returns an error if chunk retrieval or read decoding fails.
     pub fn recv(&mut self, buff: &mut [u8]) -> Result<usize, Error> {
         loop {
             if let Some(chunks) = self.read_chunks()? {

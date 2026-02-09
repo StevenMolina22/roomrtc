@@ -4,6 +4,8 @@ pub struct AudioFrame {
 }
 
 impl AudioFrame {
+    /// Creates a new audio frame from PCM samples and capture timestamp.
+    #[must_use]
     pub const fn new(data: Vec<f32>, timestamp: u128) -> Self {
         Self { data, timestamp }
     }

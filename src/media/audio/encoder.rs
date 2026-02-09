@@ -1,12 +1,17 @@
 use crate::media::audio::AudioError as Error;
 use crate::media::audio_handler::AudioFrame;
-use audiopus::{Application, Channels, SampleRate, coder::Encoder};
+use audiopus::{coder::Encoder, Application, Channels, SampleRate};
 
 pub struct AudioEncoder {
     encoder: Encoder,
 }
 
 impl AudioEncoder {
+    /// Creates an OPUS encoder configured for 48 kHz mono VoIP mode.
+    ///
+    /// # Errors
+    /// Returns `Error::EncoderInitializationError` if the encoder cannot be
+    /// created.
     pub fn new() -> Result<Self, Error> {
         let encoder = Encoder::new(SampleRate::Hz48000, Channels::Mono, Application::Voip)
             .map_err(|_| Error::EncoderInitializationError)?;
@@ -14,6 +19,10 @@ impl AudioEncoder {
         Ok(Self { encoder })
     }
 
+    /// Encodes one PCM audio frame into an OPUS payload.
+    ///
+    /// # Errors
+    /// Returns `Error::EncodingError` when OPUS encoding fails.
     pub fn encode(&mut self, audio_frame: AudioFrame) -> Result<Vec<u8>, Error> {
         let input_samples = audio_frame.data;
         let mut buff = vec![0u8; 1500];

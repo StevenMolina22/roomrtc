@@ -14,6 +14,14 @@ pub enum FTPMessage {
 }
 
 impl FTPMessage {
+    /// Serializes an FTP signaling/data message to bytes.
+    ///
+    /// Message tags:
+    /// - `0x01`: `FileOffer`
+    /// - `0x02`: `AcceptFile`
+    /// - `0x03`: `RejectFile`
+    /// - `0x04`: `FileChunk`
+    /// - `0x05`: `EndOfFile`
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
@@ -38,6 +46,9 @@ impl FTPMessage {
         }
     }
 
+    /// Parses an FTP message from raw bytes.
+    ///
+    /// Returns `None` when the payload is malformed or incomplete.
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         match bytes.first()? {

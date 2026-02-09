@@ -45,7 +45,6 @@ impl AudioPipeline {
     /// # Arguments
     ///
     /// * `config` - Application configuration containing audio parameters
-    /// * `ssrc` - Synchronization source identifier for RTP packets
     /// * `logger` - Logger instance for diagnostics
     /// * `clock` - Shared clock for timestamp generation
     ///
@@ -73,7 +72,7 @@ impl AudioPipeline {
     /// * `rtp_tx` - Sender for outgoing RTP packets (to network transport)
     /// * `rtp_rx` - Receiver for incoming RTP packets (from network transport)
     /// * `connected` - Atomic flag to monitor connection state; threads exit when set to false
-    /// * `receiver_metrics` - Reference to receiver statistics for network diagnostics
+    /// * `_receiver_metrics` - Receiver statistics handle reserved for diagnostics.
     ///
     /// # Returns
     ///
@@ -168,9 +167,17 @@ impl AudioPipeline {
         Ok(())
     }
 
+    /// Stops audio capture for this pipeline.
+    ///
+    /// This requests microphone shutdown; sender/receiver worker threads exit
+    /// naturally once connection state changes or channels close.
     pub fn stop(&mut self) {
         let _ = self.microphone.stop();
     }
+
+    /// Toggles local microphone mute state.
+    ///
+    /// Mute affects outgoing captured audio while keeping the pipeline alive.
     pub fn toggle_mute(&self) {
         self.microphone.toggle_mute();
     }

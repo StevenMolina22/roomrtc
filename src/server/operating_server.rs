@@ -20,6 +20,8 @@ pub struct OperatingServer {
 }
 
 impl OperatingServer {
+    /// Creates a new `OperatingServer` with shared user state and logger.
+    #[must_use]
     pub const fn new(
         users: Arc<RwLock<HashMap<String, UserData>>>,
         server_client_socket_address: SocketAddr,
@@ -545,6 +547,14 @@ impl OperatingServer {
         Ok(())
     }
 
+    /// Marks the current authenticated user as offline and broadcasts status.
+    ///
+    /// If no user is currently associated with this handler, this method is a
+    /// no-op and returns `Ok(())`.
+    ///
+    /// # Errors
+    /// Returns an error when shared state cannot be locked or the user record
+    /// cannot be found.
     pub fn make_user_offline(&mut self) -> Result<(), ServerError> {
         let username = match &self.username {
             Some(name) => name,

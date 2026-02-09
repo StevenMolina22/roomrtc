@@ -9,6 +9,11 @@ pub struct FileMetadata {
 }
 
 impl FileMetadata {
+    /// Builds metadata from a file path and opened file handle.
+    ///
+    /// # Errors
+    /// Returns an error if the file name cannot be derived from `file_path`
+    /// or file metadata cannot be read.
     pub fn from(file_path: &Path, file: &File) -> Result<Self, Error> {
         let name = file_path
             .file_name()
@@ -20,6 +25,9 @@ impl FileMetadata {
         Ok(Self { name, size })
     }
 
+    /// Serializes metadata as:
+    /// `[u64 size][u8 name_len][name bytes]`.
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![];
         bytes.extend_from_slice(&self.size.to_be_bytes());
@@ -28,6 +36,10 @@ impl FileMetadata {
         bytes
     }
 
+    /// Parses metadata from bytes produced by `to_bytes`.
+    ///
+    /// Returns `None` when the payload is malformed or UTF-8 conversion fails.
+    #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() >= 9 {
             let file_name_len = bytes[8] as usize;
@@ -49,7 +61,7 @@ impl FileMetadata {
 #[cfg(test)]
 mod tests {
     use super::FileMetadata;
-    use std::fs::{File, remove_file};
+    use std::fs::{remove_file, File};
     use std::io::Write;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};

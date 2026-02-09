@@ -29,6 +29,10 @@ pub struct UserHandler {
 /// - any I/O error occurs,
 /// - the received bytes cannot be parsed into a valid message.
 impl UserHandler {
+    /// Creates a new `UserHandler` bound to shared server state.
+    ///
+    /// Internally initializes an `OperatingServer` scoped to this connection.
+    #[must_use]
     pub fn new(
         users: Arc<RwLock<HashMap<String, UserData>>>,
         config: Arc<Config>,

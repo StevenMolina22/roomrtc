@@ -95,7 +95,7 @@ mod tests {
         assert!(res.is_err(), "decoding invalid data should return an error");
 
         match res {
-            Err(Error::DecodingError(_)) | Err(Error::EmptyFrameError) => {}
+            Err(Error::DecodingError(_) | Error::EmptyFrameError) => {}
             Err(e) => panic!("unexpected error variant: {e:?}"),
             Ok(_) => panic!("expected error decoding invalid data, got Ok"),
         }

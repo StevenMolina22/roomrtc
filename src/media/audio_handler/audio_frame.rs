@@ -4,7 +4,7 @@ pub struct AudioFrame {
 }
 
 impl AudioFrame {
-    pub fn new(data: Vec<f32>, timestamp: u128) -> Self {
+    pub const fn new(data: Vec<f32>, timestamp: u128) -> Self {
         Self { data, timestamp }
     }
 }
@@ -16,7 +16,7 @@ mod tests {
     #[test]
     fn test_audio_frame_creation() {
         let data = vec![0.0, 0.5, -0.5];
-        let timestamp = 123456789;
+        let timestamp = 123_456_789;
         let frame = AudioFrame::new(data.clone(), timestamp);
         assert_eq!(frame.data, data);
         assert_eq!(frame.timestamp, timestamp);

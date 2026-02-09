@@ -14,6 +14,7 @@ pub enum FTPMessage {
 }
 
 impl FTPMessage {
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             Self::FileOffer {
@@ -37,6 +38,7 @@ impl FTPMessage {
         }
     }
 
+    #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         match bytes.first()? {
             0x01 if bytes.len() >= 14 => Some(Self::FileOffer {
@@ -72,7 +74,7 @@ mod tests {
         };
 
         let msg = FTPMessage::FileOffer {
-            offer_id: 0xDEADBEEF_u32,
+            offer_id: 0xDEAD_BEEF_u32,
             file_metadata: meta.clone(),
         };
 
@@ -84,7 +86,7 @@ mod tests {
                 offer_id,
                 file_metadata,
             } => {
-                assert_eq!(offer_id, 0xDEADBEEF_u32);
+                assert_eq!(offer_id, 0xDEAD_BEEF_u32);
                 assert_eq!(file_metadata.size, meta.size);
                 assert_eq!(file_metadata.name, meta.name);
             }
@@ -115,9 +117,7 @@ mod tests {
     #[test]
     fn file_chunk_roundtrip_and_malformed() {
         let payload = vec![1u8, 2, 3, 4, 5];
-        let chunk = FTPMessage::FileChunk {
-            payload: payload.clone(),
-        };
+        let chunk = FTPMessage::FileChunk { payload };
 
         let bytes = chunk.to_bytes();
         let parsed = FTPMessage::from_bytes(&bytes).expect("should parse FileChunk");

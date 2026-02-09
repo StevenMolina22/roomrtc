@@ -175,7 +175,7 @@ impl IceAgent {
                 || pair.remote.candidate_type == CandidateType::ServerReflexive
             {
                 self.logger
-                    .debug(&format!("[ICE] Skipping STUN (srflx) pair: {}", pair));
+                    .debug(&format!("[ICE] Skipping STUN (srflx) pair: {pair}"));
                 continue;
             }
 
@@ -189,13 +189,13 @@ impl IceAgent {
 
             if Self::verify_candidate_pair(socket, &target, &self.logger) {
                 pair.state = ConnectivityState::Succeeded;
-                self.logger.info(&format!("[ICE] Pair VALIDATED: {}", pair));
+                self.logger.info(&format!("[ICE] Pair VALIDATED: {pair}"));
                 selected_index = Some(index);
                 break;
-            } else {
-                pair.state = ConnectivityState::Failed;
-                self.logger.debug(&format!("[ICE] Pair FAILED: {}", pair));
             }
+
+            pair.state = ConnectivityState::Failed;
+            self.logger.debug(&format!("[ICE] Pair FAILED: {pair}"));
         }
 
         let _ = socket.set_read_timeout(None);
@@ -230,7 +230,7 @@ impl IceAgent {
 
         while start.elapsed() < max_duration {
             if let Err(e) = socket.send_to(b"PING", target) {
-                logger.warn(&format!("[ICE] Send error: {}", e));
+                logger.warn(&format!("[ICE] Send error: {e}"));
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -244,7 +244,7 @@ impl IceAgent {
                     let msg = &buf[..amt];
 
                     if msg == b"PONG" {
-                        logger.debug(&format!("[ICE] Received PONG from remote: {}", src));
+                        logger.debug(&format!("[ICE] Received PONG from remote: {src}"));
                         return true;
                     } else if msg == b"PING" {
                         let _ = socket.send_to(b"PONG", target);

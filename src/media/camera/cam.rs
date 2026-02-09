@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::logger::Logger;
 use crate::media::camera::CameraError as Error;
 use crate::media::frame_handler::Frame;
+use opencv::core::AlgorithmHint;
 use opencv::videoio::VideoWriter;
 use opencv::{imgproc, prelude::*, videoio};
 use std::sync::Arc;
@@ -99,7 +100,7 @@ impl FrameSource for Camera {
     }
 
     fn stop(&self) {
-        self.stop_internal()
+        self.stop_internal();
     }
 }
 
@@ -118,12 +119,12 @@ fn setup_camera(config: &Arc<Config>) -> Result<videoio::VideoCapture, Error> {
         Err(e) => return Err(Error::OpenError(e.to_string())),
     }
 
-    let fourcc_code = VideoWriter::fourcc('M', 'J', 'P', 'G')
-        .map_err(|e| Error::OpenError(e.to_string()))?;
+    let fourcc_code =
+        VideoWriter::fourcc('M', 'J', 'P', 'G').map_err(|e| Error::OpenError(e.to_string()))?;
 
     let settings = [
         (videoio::CAP_PROP_FOURCC, f64::from(fourcc_code)),
-        (videoio::CAP_PROP_FPS, config.media.frame_rate as f64),
+        (videoio::CAP_PROP_FPS, f64::from(config.media.frame_rate)),
         (videoio::CAP_PROP_FRAME_WIDTH, config.media.frame_width),
         (videoio::CAP_PROP_FRAME_HEIGHT, config.media.frame_height),
     ];
@@ -147,12 +148,10 @@ fn run_camera_loop(
     let mut rgb = Mat::default();
 
     while running.load(Ordering::SeqCst) {
-        match cam.read(&mut mat) {
-            Ok(true) => {}
-            Ok(false) | Err(_) => {
-                logger.error(&Error::ReadFrameError.to_string());
-                continue;
-            }
+        if matches!(cam.read(&mut mat), Ok(true)) {
+        } else {
+            logger.error(&Error::ReadFrameError.to_string());
+            continue;
         }
 
         if mat.empty() {
@@ -160,7 +159,15 @@ fn run_camera_loop(
             continue;
         }
 
-        if imgproc::cvt_color(&mat, &mut rgb, imgproc::COLOR_BGR2RGB, 0).is_err() {
+        if imgproc::cvt_color(
+            &mat,
+            &mut rgb,
+            imgproc::COLOR_BGR2RGB,
+            0,
+            AlgorithmHint::ALGO_HINT_DEFAULT,
+        )
+        .is_err()
+        {
             continue;
         }
 

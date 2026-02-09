@@ -35,7 +35,7 @@ mod tests {
         let data = vec![pattern; samples];
         AudioFrame {
             data,
-            timestamp: 123456,
+            timestamp: 123_456,
         }
     }
 
@@ -64,7 +64,7 @@ mod tests {
                     "El silencio debería comprimirse a pocos bytes"
                 );
             }
-            Err(e) => panic!("El encode falló con silencio: {}", e),
+            Err(e) => panic!("El encode falló con silencio: {e}"),
         }
     }
 
@@ -81,7 +81,7 @@ mod tests {
                 assert!(!bytes.is_empty());
                 assert!(bytes.len() > 10);
             }
-            Err(e) => panic!("El encode falló: {}", e),
+            Err(e) => panic!("El encode falló: {e}"),
         }
     }
 

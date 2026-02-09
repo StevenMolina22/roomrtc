@@ -4,11 +4,11 @@ use crate::dtls::dtls_socket::DtlsSocket;
 use crate::dtls::key_manager::LocalCert;
 use crate::file::{
     file_metadata::FileMetadata,
-    file_transferer::{ftp_message::FTPMessage, FileTransfererError as Error},
+    file_transferer::{FileTransfererError as Error, ftp_message::FTPMessage},
 };
 use crate::logger::Logger;
-use crate::sctp_transport::data_channel::{DataChannel, DataChannelType};
 use crate::sctp_transport::SCTPTransport;
+use crate::sctp_transport::data_channel::{DataChannel, DataChannelType};
 use crate::session::sdp::{DtlsSetupRole, Fingerprint};
 use std::collections::HashMap;
 use std::fs::File;
@@ -408,7 +408,10 @@ mod tests {
         }
 
         fn recv(&mut self, buff: &mut [u8]) -> Result<usize, Error> {
-            let mut guard = self.responses.lock().unwrap();
+            let mut guard = match self.responses.lock() {
+                Ok(g) => g,
+                Err(_) => return Err(Error::MapError("mutex poisoned".to_string())),
+            };
             if guard.is_empty() {
                 return Ok(0);
             }

@@ -157,10 +157,13 @@ impl Widget for Ui {
                     .color(Color32::WHITE)
                     .size(16.0),
             );
+            let status_string = status.to_string();
+            let status_label_text = match status_string.split(':').next() {
+                Some(s) => s.to_owned(),
+                None => String::new(),
+            };
             ui.label(
-                RichText::new(status.to_string().split(':').next().unwrap_or(""))
-                    .size(11.0)
-                    .color(Color32::GRAY),
+                RichText::new(status_label_text).size(11.0).color(Color32::GRAY),
             );
         });
     }

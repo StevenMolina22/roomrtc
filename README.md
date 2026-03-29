@@ -112,7 +112,7 @@ graph LR
         CTRL --> MP[Media Pipeline<br/>OpenCV / Opus]
     end
     
-    subgraph Network (UDP)
+    subgraph Network["Network (UDP)"]
         MT --> SRTP[SRTP Context]
         MT --> RTP[RTP Sender/Receiver]
         MT --> RTCP[RTCP Report Handler]

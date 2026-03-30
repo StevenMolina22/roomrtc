@@ -2,8 +2,8 @@ use crate::clock::Clock;
 use crate::config::Config;
 use crate::controller::AppEvent;
 use crate::logger::Logger;
-use crate::media::camera::{Camera, FrameSource};
 use crate::media::audio_pipeline::AudioPipeline;
+use crate::media::camera::{Camera, FrameSource};
 use crate::media::error::MediaPipelineError as Error;
 use crate::media::frame_handler::color_space::rgb_to_yuv420;
 use crate::media::frame_handler::{Decoder, EncodedFrame, Encoder, Frame};
@@ -86,7 +86,13 @@ impl MediaPipeline {
 
         // Start audio pipeline if available (use audio_rx)
         if let Some(audio) = &mut self.audio {
-            audio.start(rtp_tx, audio_rx, connected.clone(), receiver_metrics.clone())
+            audio
+                .start(
+                    rtp_tx,
+                    audio_rx,
+                    connected.clone(),
+                    receiver_metrics.clone(),
+                )
                 .map_err(|e| Error::MapError(e.to_string()))?;
         }
 
@@ -117,9 +123,13 @@ impl MediaPipeline {
                     break;
                 }
                 if packet.payload_type == config.media.video_payload_type {
-                    if let Err(_) = video_tx.send(packet) { break }
-                } else if packet.payload_type == config.media.audio_payload_type {
-                    if let Err(_) = audio_tx.send(packet) { break }
+                    if video_tx.send(packet).is_err() {
+                        break;
+                    }
+                } else if packet.payload_type == config.media.audio_payload_type
+                    && audio_tx.send(packet).is_err()
+                {
+                    break;
                 }
             }
             logger.info("Demuxer thread finished");
@@ -139,7 +149,7 @@ impl MediaPipeline {
         let jitter_buffer = JitterBuffer::<JITTER_BUFF_SIZE>::new(
             self.clock.clone(),
             receiver_metrics,
-            self.logger.clone()
+            self.logger.clone(),
         );
 
         let decoder = Decoder::new().map_err(|e| {
@@ -151,7 +161,15 @@ impl MediaPipeline {
         })?;
         thread::spawn({
             move || {
-                run_frame_pipeline_loop(rtp_rx, remote_frame_tx, jitter_buffer, decoder, logger, event_tx, connected);
+                run_frame_pipeline_loop(
+                    rtp_rx,
+                    remote_frame_tx,
+                    jitter_buffer,
+                    decoder,
+                    logger,
+                    event_tx,
+                    connected,
+                );
             }
         });
         Ok(remote_frame_rx)
@@ -168,9 +186,7 @@ impl MediaPipeline {
         let (rgb_tx, rgb_rx) = mpsc::channel();
 
         self.start_frame_sender_thread(rgb_rx, event_tx.clone(), rtp_tx, &connected)?;
-        let camera_frame_rx = self
-            .camera
-            .start();
+        let camera_frame_rx = self.camera.start();
 
         thread::spawn(move || {
             for frame in camera_frame_rx {
@@ -269,6 +285,9 @@ impl MediaPipeline {
         Ok(())
     }
 
+    /// Toggles microphone mute state in the embedded audio pipeline.
+    ///
+    /// If audio was not initialized for this media pipeline, this method is a no-op.
     pub fn toggle_audio(&self) {
         if let Some(audio) = &self.audio {
             audio.toggle_mute();

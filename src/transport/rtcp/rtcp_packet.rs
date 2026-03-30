@@ -112,3 +112,44 @@ impl RtcpPacket {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_deserialize_sender_report() {
+        let stats = SenderStats {
+            packets_sent: 42,
+            bytes_sent: 12345,
+        };
+
+        let pkt = RtcpPacket::SenderReport(stats);
+        let bytes = pkt.to_bytes();
+        let parsed = RtcpPacket::from_bytes(&bytes).expect("should parse sender report");
+
+        assert_eq!(parsed, pkt);
+    }
+
+    #[test]
+    fn serialize_deserialize_receiver_report() {
+        let stats = ReceiverStats {
+            packets_received: 10,
+            packets_lost: 2,
+            jitter: 7,
+        };
+
+        let pkt = RtcpPacket::ReceiverReport(stats);
+        let bytes = pkt.to_bytes();
+        let parsed = RtcpPacket::from_bytes(&bytes).expect("should parse receiver report");
+
+        assert_eq!(parsed, pkt);
+    }
+
+    #[test]
+    fn simple_ascii_packets() {
+        assert_eq!(RtcpPacket::from_bytes(b"BYE"), Some(RtcpPacket::Goodbye));
+        assert_eq!(RtcpPacket::from_bytes(b"HELLO"), Some(RtcpPacket::Hello));
+        assert_eq!(RtcpPacket::from_bytes(b"READY"), Some(RtcpPacket::Ready));
+    }
+}

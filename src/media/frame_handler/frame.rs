@@ -6,7 +6,7 @@ use super::FrameError as Error;
 /// conversions (for example, RGB data produced from YUV input). The
 /// struct carries the pixel bytes, the frame dimensions and the capture
 /// timestamp in milliseconds.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {
     /// Raw pixel bytes.
     pub data: Vec<u8>,
@@ -86,7 +86,7 @@ mod tests {
             data: vec![10, 20, 30, 40, 50, 60],
             width: 2,
             height: 1,
-            frame_time: 123456789,
+            frame_time: 123_456_789,
         };
 
         let bytes = original_frame

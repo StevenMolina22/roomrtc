@@ -5,26 +5,28 @@ use sctp_proto::{Association, Chunks, PayloadProtocolIdentifier, StreamId};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use crate::logger::Logger;
 
 pub struct DataChannel {
     pub(crate) stream_id: StreamId,
     pub(crate) association: Arc<Mutex<Association>>,
-    logger: Arc<Logger>,
     config: Arc<Config>,
 }
 
 impl DataChannel {
+    /// Builds a `DataChannel` from a remotely accepted SCTP stream.
+    ///
+    /// Waits for remote `DataChannelOpen`, then responds with `DataChannelAck`.
+    ///
+    /// # Errors
+    /// Returns an error if handshake messages cannot be read/written.
     pub fn from_accepted_stream(
         stream_id: StreamId,
         association: Arc<Mutex<Association>>,
-        logger: Arc<Logger>,
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let mut dc = Self {
             stream_id,
             association,
-            logger,
             config,
         };
 
@@ -36,6 +38,12 @@ impl DataChannel {
         Ok(dc)
     }
 
+    /// Opens a local data channel on an already opened SCTP stream.
+    ///
+    /// Sends `DataChannelOpen` and waits for `DataChannelAck`.
+    ///
+    /// # Errors
+    /// Returns an error if stream configuration or DCEP handshake fails.
     pub fn open(
         label: String,
         stream_id: StreamId,
@@ -43,13 +51,11 @@ impl DataChannel {
         dc_type: DataChannelType,
         reliability_param: u32,
         protocol: String,
-        logger: Arc<Logger>,
         config: Arc<Config>,
     ) -> Result<Self, Error> {
         let mut dc = Self {
             stream_id,
             association,
-            logger,
             config,
         };
         dc.configure_stream(&label, dc_type, reliability_param, &protocol)?;
@@ -66,12 +72,16 @@ impl DataChannel {
         Ok(dc)
     }
 
+    /// Applies stream reliability settings for this data channel.
+    ///
+    /// # Errors
+    /// Returns an error if the SCTP stream cannot be accessed or configured.
     pub fn configure_stream(
         &mut self,
-        label: &String,
+        _label: &String,
         dc_type: DataChannelType,
         reliability_param: u32,
-        protocol: &String,
+        _protocol: &String,
     ) -> Result<(), Error> {
         let mut assoc = self
             .association
@@ -93,6 +103,10 @@ impl DataChannel {
             .map_err(|e| Error::OpenError(e.to_string()))
     }
 
+    /// Sends one application payload over the channel.
+    ///
+    /// # Errors
+    /// Returns an error if stream lock/acquisition or write fails.
     pub fn send(&mut self, message: &[u8]) -> Result<(), Error> {
         let mut association = self
             .association
@@ -108,6 +122,10 @@ impl DataChannel {
         Ok(())
     }
 
+    /// Blocks until channel data is available and reads it into `buff`.
+    ///
+    /// # Errors
+    /// Returns an error if chunk retrieval or read decoding fails.
     pub fn recv(&mut self, buff: &mut [u8]) -> Result<usize, Error> {
         loop {
             if let Some(chunks) = self.read_chunks()? {
@@ -166,11 +184,11 @@ impl DataChannel {
                     .read(&mut bytes)
                     .map_err(|e| Error::ReadChunksError(e.to_string()))?;
 
-                match DCEPMessage::from_bytes(&bytes) {
-                    Some(DCEPMessage::DataChannelAck) => {
-                        return Ok(())
-                    },
-                    _ => {}
+                if matches!(
+                    DCEPMessage::from_bytes(&bytes),
+                    Some(DCEPMessage::DataChannelAck)
+                ) {
+                    return Ok(());
                 }
             }
         }
@@ -206,9 +224,7 @@ impl DataChannel {
                         )?;
                         return Ok(());
                     }
-                    _ => {
-                        continue
-                    },
+                    _ => continue,
                 }
             }
         }
@@ -218,9 +234,63 @@ impl DataChannel {
 }
 
 fn ack_timed_out(clock: &Instant, wait_timeout_millis: u16) -> bool {
-    clock.elapsed().as_millis() > wait_timeout_millis as u128 && wait_timeout_millis > 0
+    clock.elapsed().as_millis() > u128::from(wait_timeout_millis) && wait_timeout_millis > 0
 }
 
 fn open_timed_out(clock: &Instant, wait_timeout_millis: u16) -> bool {
-    clock.elapsed().as_millis() > wait_timeout_millis as u128 && wait_timeout_millis > 0
+    clock.elapsed().as_millis() > u128::from(wait_timeout_millis) && wait_timeout_millis > 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn ack_timed_out_returns_false_when_timeout_zero() {
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(1000))
+            .unwrap();
+        assert!(!ack_timed_out(&clock, 0));
+    }
+
+    #[test]
+    fn ack_timed_out_true_when_elapsed_greater_than_timeout() {
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(200))
+            .unwrap();
+        assert!(ack_timed_out(&clock, 100));
+    }
+
+    #[test]
+    fn ack_timed_out_false_when_elapsed_less_than_timeout() {
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(50))
+            .unwrap();
+        assert!(!ack_timed_out(&clock, 100));
+    }
+
+    #[test]
+    fn open_timed_out_returns_false_when_timeout_zero() {
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(1000))
+            .unwrap();
+        assert!(!open_timed_out(&clock, 0));
+    }
+
+    #[test]
+    fn open_timed_out_true_when_elapsed_greater_than_timeout() {
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(200))
+            .unwrap();
+        assert!(open_timed_out(&clock, 100));
+    }
+
+    #[test]
+    fn open_timed_out_false_when_elapsed_less_than_timeout() {
+        let clock = Instant::now()
+            .checked_sub(Duration::from_millis(50))
+            .unwrap();
+        assert!(!open_timed_out(&clock, 100));
+    }
 }

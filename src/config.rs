@@ -113,7 +113,6 @@ pub struct MediaConfig {
     pub audio_codec_name: String,
 }
 
-
 #[derive(Debug, Clone)]
 /// Configuration for RTCP-style reporting used by the report handler.
 pub struct RtcpConfig {
@@ -476,36 +475,43 @@ impl Config {
     }
 
     #[must_use]
+    /// Returns a clone of the network configuration section.
     pub fn network_only(&self) -> NetworkConfig {
         self.network.clone()
     }
 
     #[must_use]
+    /// Returns a clone of the media configuration section.
     pub fn media_only(&self) -> MediaConfig {
         self.media.clone()
     }
 
     #[must_use]
+    /// Returns a clone of the RTP configuration section.
     pub fn rtp_only(&self) -> RtpConfig {
         self.rtp.clone()
     }
 
     #[must_use]
+    /// Returns a clone of the RTCP configuration section.
     pub fn rtcp_only(&self) -> RtcpConfig {
         self.rtcp.clone()
     }
 
     #[must_use]
+    /// Returns a clone of the SDP configuration section.
     pub fn sdp_only(&self) -> SdpConfig {
         self.sdp.clone()
     }
 
     #[must_use]
+    /// Returns a clone of the ICE configuration section.
     pub fn ice_only(&self) -> IceConfig {
         self.ice.clone()
     }
 
     #[must_use]
+    /// Returns a clone of the server configuration section.
     pub fn server_only(&self) -> ServerConfig {
         self.server.clone()
     }

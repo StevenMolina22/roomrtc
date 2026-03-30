@@ -134,7 +134,7 @@ fn parse_stun_response(data: &[u8]) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    const MAGIC_COOKIE: u32 = 0x2112A442;
+    const MAGIC_COOKIE: u32 = 0x2112_A442;
 
     struct StunBuilder {
         attributes: Vec<u8>,
@@ -201,7 +201,7 @@ mod tests {
     }
 
     fn build_fake_stun_response(public_ip: &str, public_port: u16) -> Vec<u8> {
-        let magic_cookie: u32 = 0x2112A442;
+        let magic_cookie: u32 = 0x2112_A442;
 
         let mut packet = vec![
             0x01, 0x01, // Type: Binding Success Response (0x0101)

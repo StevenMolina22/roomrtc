@@ -1,11 +1,14 @@
 use crate::client_server_protocol::{ClientMessage, ClientResponse, ServerMessage, ServerResponse};
 use crate::config::Config;
 use crate::controller::{AppEvent, ControllerError as Error};
+use crate::file::file_transferer::{
+    FileTransferer, FileTransfererNetParams, FileTransfererRuntime,
+};
 use crate::logger::Logger;
-use crate::media::MediaPipeline;
 use crate::media::frame_handler::Frame;
-use crate::session::CallSession;
+use crate::media::MediaPipeline;
 use crate::session::sdp::{Fingerprint, SessionDescriptionProtocol};
+use crate::session::CallSession;
 use crate::transport::MediaTransport;
 use crate::user::UserStatus;
 use rustls::pki_types::ServerName;
@@ -19,7 +22,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use crate::file::file_transferer::FileTransferer;
 
 /// Main controller for managing RTC calls and server communication.
 ///
@@ -105,27 +107,44 @@ impl Controller {
         })
     }
 
-
     // ---------------------------------------------------------------------------------------------------------------------------
     // FILES
 
+    /// Sends a file offer to the currently connected peer.
+    ///
+    /// Delegates to `FileTransferer::send_file` when a transferer is available.
+    /// If no file transferer is active, this is a no-op and returns `Ok(())`.
     pub fn send_file(&mut self, file_path: &Path) -> Result<(), Error> {
         if let Some(transferer) = self.file_transferer.as_mut() {
-            transferer.send_file(file_path).map_err(|e| Error::MapError(e.to_string()))?;
+            transferer
+                .send_file(file_path)
+                .map_err(|e| Error::MapError(e.to_string()))?;
         }
         Ok(())
     }
 
+    /// Accepts a pending remote file offer.
+    ///
+    /// Delegates to `FileTransferer::accept_file_offer` for `id`, saving the file
+    /// to `path`. If no file transferer is active, this is a no-op.
     pub fn accept_file(&mut self, id: u32, path: &Path) -> Result<(), Error> {
         if let Some(transferer) = self.file_transferer.as_mut() {
-            transferer.accept_file_offer(id, path).map_err(|e| Error::MapError(e.to_string()))?;
+            transferer
+                .accept_file_offer(id, path)
+                .map_err(|e| Error::MapError(e.to_string()))?;
         }
         Ok(())
     }
 
+    /// Rejects a pending remote file offer.
+    ///
+    /// Delegates to `FileTransferer::reject_file_offer` for `id`. If no file
+    /// transferer is active, this is a no-op and returns `Ok(())`.
     pub fn reject_file(&mut self, id: u32) -> Result<(), Error> {
         if let Some(transferer) = self.file_transferer.as_mut() {
-            transferer.reject_file_offer(id).map_err(|e| Error::MapError(e.to_string()))?;
+            transferer
+                .reject_file_offer(id)
+                .map_err(|e| Error::MapError(e.to_string()))?;
         }
         Ok(())
     }
@@ -149,7 +168,7 @@ impl Controller {
     pub fn call(&mut self, peer_username: &str) -> Result<(), Error> {
         let token = self.get_token()?;
         let msg = ClientMessage::CallRequest {
-            token: token.clone(),
+            token,
             offer_sdp: self.call_session.get_offer(),
             to: peer_username.to_owned(),
         };
@@ -270,9 +289,9 @@ impl Controller {
             .map_err(|e| Error::MapError(e.to_string()))?;
         let token = self.get_token()?;
         let msg = ClientMessage::CallAccept {
-            from_usr: token.clone(),
-            to_usr: to_usr.clone(),
-            sdp_answer: sdp_answer.clone(),
+            from_usr: token,
+            to_usr,
+            sdp_answer,
         };
 
         let response = send_message(msg, &mut self.client_server_stream, &self.event_tx)?;
@@ -322,9 +341,18 @@ impl Controller {
         Ok(())
     }
 
-    // Helper function to join an active call by setting up media transport and pipeline
+    /// Finalizes transport setup and starts media/file pipelines for an active call.
+    ///
+    /// Resolves peer RTP/RTCP/SCTP addresses from the selected ICE pair, starts
+    /// SRTP transport, initializes file transfer over SCTP, and starts the media
+    /// pipeline.
+    ///
+    /// # Errors
+    /// Returns an error if any transport, media, or file-transfer component
+    /// fails to initialize.
     pub(crate) fn join_call(&mut self) -> Result<(Receiver<Frame>, Receiver<Frame>), Error> {
-        let (remote_rtp_addr, remote_rtcp_addr, remote_sctp_addr) = self.get_remote_addresses()
+        let (remote_rtp_addr, remote_rtcp_addr, remote_sctp_addr) = self
+            .get_remote_addresses()
             .map_err(|e| Error::MapError(e.to_string()))?;
         let remote_fingerprint = self
             .call_session
@@ -342,7 +370,11 @@ impl Controller {
                 &self.call_session.local_cert,
             )
             .map_err(|e| Error::MapError(e.to_string()))?;
-        self.setup_file_transferer(remote_sctp_addr.clone(), remote_fingerprint.clone(), handles.is_connected.clone())?;
+        self.setup_file_transferer(
+            remote_sctp_addr,
+            remote_fingerprint,
+            handles.is_connected.clone(),
+        )?;
 
         self.media_pipeline
             .start(
@@ -466,6 +498,13 @@ impl Controller {
         Ok(())
     }
 
+    /// Performs the initial client-server handshake on the signaling channel.
+    ///
+    /// Sends `ClientMessage::Hello` and expects either `ServerResponse::Welcome`
+    /// or `ServerResponse::ServerFull`.
+    ///
+    /// # Errors
+    /// Returns an error if the response is invalid or if event propagation fails.
     pub fn initial_handshake(&mut self) -> Result<(), Error> {
         let msg = ClientMessage::Hello;
         let ans = send_message(msg, &mut self.client_server_stream, &self.event_tx)?;
@@ -475,7 +514,7 @@ impl Controller {
             ServerResponse::ServerFull => {
                 if let Err(e) = self.event_tx.send(AppEvent::FullServerError) {
                     return Err(Error::MapError(e.to_string()));
-                };
+                }
                 Ok(())
             }
             _ => Err(Error::BadResponse),
@@ -507,7 +546,13 @@ impl Controller {
         }
     }
 
-    // Helper function to retrieve the current username
+    /// Returns the current username token used by this client session.
+    ///
+    /// This currently delegates to `get_token` and therefore requires the user
+    /// to be logged in.
+    ///
+    /// # Errors
+    /// Returns `Error::NotLoggedInError` when no session token is available.
     pub(crate) fn get_username(&self) -> Result<String, Error> {
         self.get_token()
     }
@@ -520,9 +565,7 @@ impl Controller {
         self.media_pipeline.toggle_audio();
     }
 
-    fn get_remote_addresses(
-        &mut self
-    ) -> Result<(SocketAddr, SocketAddr, SocketAddr), Error> {
+    fn get_remote_addresses(&mut self) -> Result<(SocketAddr, SocketAddr, SocketAddr), Error> {
         let pair = self
             .call_session
             .get_selected_pair()
@@ -550,18 +593,28 @@ impl Controller {
         remote_fingerprint: Fingerprint,
         connected: Arc<AtomicBool>,
     ) -> Result<(), Error> {
-        let local_sctp_address = SocketAddr::new(self.transport.rtp_address.ip(), self.transport.rtp_address.port() + 2);
-        self.file_transferer = Some(FileTransferer::new(
-            local_sctp_address,
-            remote_sctp_addr,
-            self.call_session.local_setup_role,
-            remote_fingerprint,
-            &self.call_session.local_cert,
-            self.event_tx.clone(),
-            connected,
-            Arc::new(self.logger.clone()),
-            self.config.clone(),
-        ).map_err(|e| Error::MapError(e.to_string()))?);
+        let local_sctp_address = SocketAddr::new(
+            self.transport.rtp_address.ip(),
+            self.transport.rtp_address.port() + 2,
+        );
+        self.file_transferer = Some(
+            FileTransferer::new(
+                FileTransfererNetParams {
+                    local_addres: local_sctp_address,
+                    peer_address: remote_sctp_addr,
+                    local_setup_role: self.call_session.local_setup_role,
+                    expected_fingerprint: remote_fingerprint,
+                    local_cert: &self.call_session.local_cert,
+                },
+                FileTransfererRuntime {
+                    event_tx: self.event_tx.clone(),
+                    connected,
+                    logger: self.logger.clone(),
+                    config: self.config.clone(),
+                },
+            )
+            .map_err(|e| Error::MapError(e.to_string()))?,
+        );
         Ok(())
     }
 }
@@ -581,7 +634,14 @@ fn run_receiver_loop(
         match stream.read(&mut buff) {
             Ok(0) => break,
             Ok(size) => {
-                if let Err(e) = handle_server_bytes(size, &buff, &mut stream, username, event_tx.clone(), user_status.clone()) {
+                if let Err(e) = handle_server_bytes(
+                    size,
+                    &buff,
+                    &mut stream,
+                    username,
+                    event_tx.clone(),
+                    user_status.clone(),
+                ) {
                     send_event_or_log_out(&event_tx, AppEvent::Error(e.to_string()), &logged_in);
                     break;
                 }
@@ -590,7 +650,7 @@ fn run_receiver_loop(
                 send_event_or_log_out(&event_tx, AppEvent::Error(e.to_string()), &logged_in);
                 break;
             }
-            Err(_) => break
+            Err(_) => break,
         }
     }
     Ok(())
@@ -662,18 +722,14 @@ fn get_response_for_server_message(
         } => {
             if let Err(e) = event_tx.send(AppEvent::CallIncoming(from_usr, offer_sdp)) {
                 return Err(Error::MapError(e.to_string()));
-            };
+            }
             Ok(None)
         }
         ServerMessage::CallAccepted {
             from_usr,
             sdp_answer,
         } => {
-            if let Err(e) = event_tx.send(AppEvent::CallAccepted(
-                sdp_answer,
-                username.clone(),
-                from_usr,
-            )) {
+            if let Err(e) = event_tx.send(AppEvent::CallAccepted(sdp_answer, username, from_usr)) {
                 return Err(Error::MapError(e.to_string()));
             }
             Ok(None)
@@ -769,12 +825,10 @@ fn handle_server_bytes(
     let server_msg = ServerMessage::from_bytes(&buff[..size])
         .ok_or_else(|| Error::MapError("Failed to parse message".to_string()))?;
 
-    if let Some(response) = get_response_for_server_message(
-        server_msg,
-        &event_tx,
-        username.to_string(),
-        users_status.clone(),
-    ).map_err(|e| Error::MapError(e.to_string()))? {
+    if let Some(response) =
+        get_response_for_server_message(server_msg, &event_tx, username.to_string(), users_status)
+            .map_err(|e| Error::MapError(e.to_string()))?
+    {
         send_response(response, stream).map_err(|e| Error::MapError(e.to_string()))?;
     }
     Ok(())

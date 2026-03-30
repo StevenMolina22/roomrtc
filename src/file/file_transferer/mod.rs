@@ -4,4 +4,4 @@ mod transferer;
 
 pub use error::FileTransfererError;
 pub use ftp_message::FTPMessage;
-pub use transferer::FileTransferer;
+pub use transferer::{FileTransferer, FileTransfererNetParams, FileTransfererRuntime};

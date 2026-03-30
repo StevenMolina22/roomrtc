@@ -175,7 +175,7 @@ impl IceAgent {
                 || pair.remote.candidate_type == CandidateType::ServerReflexive
             {
                 self.logger
-                    .debug(&format!("[ICE] Skipping STUN (srflx) pair: {}", pair));
+                    .debug(&format!("[ICE] Skipping STUN (srflx) pair: {pair}"));
                 continue;
             }
 
@@ -189,13 +189,13 @@ impl IceAgent {
 
             if Self::verify_candidate_pair(socket, &target, &self.logger) {
                 pair.state = ConnectivityState::Succeeded;
-                self.logger.info(&format!("[ICE] Pair VALIDATED: {}", pair));
+                self.logger.info(&format!("[ICE] Pair VALIDATED: {pair}"));
                 selected_index = Some(index);
                 break;
-            } else {
-                pair.state = ConnectivityState::Failed;
-                self.logger.debug(&format!("[ICE] Pair FAILED: {}", pair));
             }
+
+            pair.state = ConnectivityState::Failed;
+            self.logger.debug(&format!("[ICE] Pair FAILED: {pair}"));
         }
 
         let _ = socket.set_read_timeout(None);
@@ -230,7 +230,7 @@ impl IceAgent {
 
         while start.elapsed() < max_duration {
             if let Err(e) = socket.send_to(b"PING", target) {
-                logger.warn(&format!("[ICE] Send error: {}", e));
+                logger.warn(&format!("[ICE] Send error: {e}"));
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -244,7 +244,7 @@ impl IceAgent {
                     let msg = &buf[..amt];
 
                     if msg == b"PONG" {
-                        logger.debug(&format!("[ICE] Received PONG from remote: {}", src));
+                        logger.debug(&format!("[ICE] Received PONG from remote: {src}"));
                         return true;
                     } else if msg == b"PING" {
                         let _ = socket.send_to(b"PONG", target);
@@ -260,6 +260,9 @@ impl IceAgent {
         false
     }
 
+    /// Returns the first non-loopback local IPv4 address found on the host.
+    ///
+    /// This is the same source used while gathering host ICE candidates.
     pub fn get_local_ip_str(&self) -> Result<String, Error> {
         get_local_ip()
     }
@@ -271,16 +274,23 @@ impl IceAgent {
     }
 
     #[must_use]
+    /// Returns all gathered local ICE candidates.
     pub fn get_local_candidates(&self) -> &[Candidate] {
         &self.local_candidates
     }
 
-    /// Return the selected candidate pair or an error if none was selected.
+    /// Returns the selected candidate pair used for data transmission.
+    ///
+    /// Returns `Error::NoSelectedPair` if connectivity checks have not selected
+    /// a pair yet.
     pub fn get_selected_pair(&self) -> Result<&CandidatePair, Error> {
         self.selected_pair.as_ref().ok_or(Error::NoSelectedPair)
     }
 
-    /// Clean remote candidates and candidate pairs.
+    /// Resets remote ICE state.
+    ///
+    /// Clears remote candidates, candidate pairs, and any previously selected
+    /// pair so the agent can be reused for a new negotiation.
     pub fn clean_remote_candidates(&mut self) {
         self.remote_candidates.clear();
         self.candidate_pairs.clear();

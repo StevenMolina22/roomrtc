@@ -1,0 +1,534 @@
+use crate::config::Config;
+use crate::dtls::DtlsSocket;
+use crate::logger::Logger;
+use crate::sctp_transport::SCTPTransportError as Error;
+use crate::sctp_transport::data_channel::DataChannel;
+use crate::sctp_transport::data_channel::DataChannelType;
+use crate::tools::Socket;
+use bytes::Bytes;
+use sctp_proto::{
+    Association, AssociationHandle, ClientConfig, DatagramEvent, Endpoint, EndpointConfig, Event,
+    Payload, PayloadProtocolIdentifier, ServerConfig, StreamEvent, StreamId, Transmit,
+};
+use std::io::ErrorKind;
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
+use std::thread;
+use std::time::{Duration, Instant};
+
+/// Drives an SCTP association over a DTLS socket and manages Data Channels.
+///
+/// `SCTPTransport` wraps `sctp-proto` endpoint/association state, runs the
+/// protocol event loop, and exposes helpers to open or accept channels.
+#[derive(Clone)]
+pub struct SCTPTransport {
+    endpoint: Arc<Mutex<Endpoint>>,
+    association: Arc<Mutex<Association>>,
+    association_handle: Arc<RwLock<Option<AssociationHandle>>>,
+    next_stream_id: StreamId,
+    connected: Arc<AtomicBool>,
+    logger: Logger,
+    config: Arc<Config>,
+}
+
+impl SCTPTransport {
+    /// Creates a new SCTP transport instance.
+    ///
+    /// This initializes endpoint/association state but does not perform network
+    /// handshake. Call `connect` to establish an association.
+    pub fn new(connected: Arc<AtomicBool>, logger: Logger, config: Arc<Config>) -> Self {
+        let endpoint = Arc::new(Mutex::new(Endpoint::new(
+            Arc::new(EndpointConfig::default()),
+            Some(Arc::new(ServerConfig::default())),
+        )));
+
+        Self {
+            endpoint,
+            association: Arc::new(Mutex::new(Association::default())),
+            association_handle: Arc::new(RwLock::new(None)),
+            next_stream_id: 0,
+            connected,
+            logger,
+            config,
+        }
+    }
+
+    /// Establishes or accepts an SCTP association over the provided DTLS socket.
+    ///
+    /// If `is_client` is `true`, it actively initiates the association.
+    /// Otherwise it waits for the remote side to create it.
+    ///
+    /// This call starts the background event loop and blocks until handshaking
+    /// finishes.
+    pub fn connect(
+        &mut self,
+        peer_address: SocketAddr,
+        socket: DtlsSocket,
+        is_client: bool,
+    ) -> Result<(), Error> {
+        let role = if is_client { "Client" } else { "Server" };
+        self.logger
+            .info(&format!("SCTP connecting to {peer_address} as {role}"));
+
+        if is_client {
+            let (association_handle, association) = self
+                .endpoint
+                .lock()
+                .map_err(|e| Error::PoisonedLock(e.to_string()))?
+                .connect(ClientConfig::default(), peer_address)
+                .map_err(|e| Error::ConnectError(e.to_string()))?;
+
+            self.association_handle
+                .write()
+                .map_err(|e| Error::PoisonedLock(e.to_string()))?
+                .replace(association_handle);
+
+            self.association = Arc::new(Mutex::new(association));
+            self.next_stream_id = 1;
+        }
+
+        socket
+            .set_read_timeout(Some(Duration::from_millis(20)))
+            .map_err(|e| Error::SocketConfigError(e.to_string()))?;
+        self.start_event_loop(peer_address, socket);
+
+        while self
+            .association
+            .lock()
+            .map_err(|e| Error::PoisonedLock(e.to_string()))?
+            .is_handshaking()
+        {
+            thread::sleep(Duration::from_millis(0));
+        }
+
+        self.logger
+            .info(&format!("SCTP connection established with {peer_address}"));
+        Ok(())
+    }
+
+    /// Opens a new Data Channel on the active SCTP association.
+    ///
+    /// # Parameters
+    /// - `label`: logical channel label.
+    /// - `dc_type`: reliability/ordering mode.
+    /// - `reliability_param`: reliability configuration value used by SCTP.
+    /// - `protocol`: subprotocol label.
+    pub fn open_data_channel(
+        &mut self,
+        label: String,
+        dc_type: DataChannelType,
+        reliability_param: u32,
+        protocol: String,
+    ) -> Result<DataChannel, Error> {
+        self.logger.debug(&format!(
+            "Opening DataChannel. Label: \"{label}\", Stream ID: {}",
+            self.next_stream_id
+        ));
+
+        self.association
+            .lock()
+            .map_err(|e| Error::PoisonedLock(e.to_string()))?
+            .open_stream(self.next_stream_id, PayloadProtocolIdentifier::Binary)
+            .map_err(|e| Error::OpenStreamError(e.to_string()))?;
+
+        let dc = DataChannel::open(
+            label,
+            self.next_stream_id,
+            self.association.clone(),
+            dc_type,
+            reliability_param,
+            protocol,
+            self.config.clone(),
+        )
+        .map_err(|e| Error::OpenDataChannelError(e.to_string()))?;
+        self.next_stream_id += 2;
+        Ok(dc)
+    }
+
+    /// Waits for and accepts a remotely opened Data Channel.
+    ///
+    /// The method polls for new streams while `connected` remains true and
+    /// returns an error when the transport is no longer connected.
+    pub fn accept_data_channel(&self) -> Result<DataChannel, Error> {
+        while self.connected.load(Ordering::SeqCst) {
+            let stream_id = {
+                self.association
+                    .lock()
+                    .map_err(|e| Error::PoisonedLock(e.to_string()))?
+                    .accept_stream()
+                    .map(|s| s.stream_identifier())
+            };
+
+            if let Some(id) = stream_id {
+                self.logger
+                    .debug(&format!("Accepted DataChannel. Stream ID: {id}"));
+                return DataChannel::from_accepted_stream(
+                    id,
+                    self.association.clone(),
+                    self.config.clone(),
+                )
+                .map_err(|e| Error::MapError(e.to_string()));
+            }
+
+            thread::sleep(Duration::from_millis(500));
+        }
+        Err(Error::ConnectError(String::new()))
+    }
+
+    fn start_event_loop(&mut self, peer_address: SocketAddr, socket: DtlsSocket) {
+        let mut instance = self.clone();
+
+        thread::spawn(move || {
+            let mut buf = vec![0u8; 1024];
+
+            while instance.connected.load(Ordering::SeqCst) {
+                let now = Instant::now();
+
+                match socket.recv_from(&mut buf) {
+                    Ok((len, _addr)) => {
+                        if instance.handle_incoming(peer_address, &buf, len).is_err() {}
+                    }
+                    Err(e)
+                        if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
+                    }
+                    Err(e) => {
+                        instance
+                            .logger
+                            .error(&format!("SCTP socket recv error: {e}"));
+                        break;
+                    }
+                }
+
+                if match instance.association_handle.read() {
+                    Ok(assoc_handle) => assoc_handle.is_some(),
+                    Err(e) => {
+                        instance
+                            .logger
+                            .error(&format!("Association handle lock poisoned: {e}"));
+                        break;
+                    }
+                } {
+                    {
+                        let mut assoc = match instance.association.lock() {
+                            Ok(assoc) => assoc,
+                            Err(e) => {
+                                instance
+                                    .logger
+                                    .error(&format!("Association lock poisoned: {e}"));
+                                break;
+                            }
+                        };
+
+                        if let Some(time) = assoc.poll_timeout()
+                            && now >= time
+                        {
+                            assoc.handle_timeout(now);
+                        }
+
+                        while let Some(endpoint_event) = assoc.poll_endpoint_event() {
+                            let assoc_handle = match instance.association_handle.read() {
+                                Ok(assoc_handle) => assoc_handle,
+                                Err(e) => {
+                                    instance.logger.error(&format!(
+                                        "Association handle lock poisoned during endpoint event: {e}"
+                                    ));
+                                    return;
+                                }
+                            };
+                            let a = if let Some(a) = *assoc_handle {
+                                a
+                            } else {
+                                instance
+                                    .logger
+                                    .error("Association handle is None during endpoint event");
+                                return;
+                            };
+                            match instance.endpoint.lock() {
+                                Ok(mut endpoint) => endpoint.handle_event(a, endpoint_event),
+                                Err(e) => {
+                                    instance.logger.error(&format!(
+                                        "Endpoint lock poisoned during endpoint event: {e}"
+                                    ));
+                                    return;
+                                }
+                            };
+                        }
+                    }
+
+                    if instance.handle_association_events().is_err() {
+                        instance.logger.error("Failed to handle association events");
+                        return;
+                    }
+
+                    loop {
+                        let mut assoc = match instance.association.lock() {
+                            Ok(assoc) => assoc,
+                            Err(e) => {
+                                instance.logger.error(&format!(
+                                    "Association lock poisoned during transmit: {e}"
+                                ));
+                                return;
+                            }
+                        };
+                        match assoc.poll_transmit(Instant::now()) {
+                            Some(transmit) => {
+                                if let Err(e) = send_transmit(transmit, &socket) {
+                                    instance
+                                        .logger
+                                        .error(&format!("SCTP association transmit failed: {e}"));
+                                    return;
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+
+                    loop {
+                        let mut endpoint = match instance.endpoint.lock() {
+                            Ok(endpoint) => endpoint,
+                            Err(e) => {
+                                instance
+                                    .logger
+                                    .error(&format!("Endpoint lock poisoned during transmit: {e}"));
+                                return;
+                            }
+                        };
+
+                        match endpoint.poll_transmit() {
+                            Some(transmit) => {
+                                if let Err(e) = send_transmit(transmit, &socket) {
+                                    instance
+                                        .logger
+                                        .error(&format!("SCTP endpoint transmit failed: {e}"));
+                                    return;
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(0));
+            }
+        });
+    }
+
+    fn handle_incoming(
+        &mut self,
+        remote: SocketAddr,
+        data: &[u8],
+        len: usize,
+    ) -> Result<(), Error> {
+        if let Some((assoc_handle, datagram_event)) = self
+            .endpoint
+            .lock()
+            .map_err(|e| Error::PoisonedLock(e.to_string()))?
+            .handle(
+                Instant::now(),
+                remote,
+                None,
+                None,
+                Bytes::copy_from_slice(&data[..len]),
+            )
+        {
+            match datagram_event {
+                DatagramEvent::AssociationEvent(e) => self
+                    .association
+                    .lock()
+                    .map_err(|e| Error::PoisonedLock(e.to_string()))?
+                    .handle_event(e),
+                DatagramEvent::NewAssociation(a) => {
+                    if self
+                        .association_handle
+                        .read()
+                        .map_err(|e| Error::PoisonedLock(e.to_string()))?
+                        .is_none()
+                    {
+                        {
+                            let mut shared_association = self
+                                .association
+                                .lock()
+                                .map_err(|e| Error::PoisonedLock(e.to_string()))?;
+                            *shared_association = a;
+                        }
+                        {
+                            let mut shared_association_handle = self
+                                .association_handle
+                                .write()
+                                .map_err(|e| Error::PoisonedLock(e.to_string()))?;
+                            *shared_association_handle = Some(assoc_handle);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_association_events(&mut self) -> Result<(), Error> {
+        loop {
+            let event = match self
+                .association
+                .lock()
+                .map_err(|e| Error::PoisonedLock(e.to_string()))?
+                .poll()
+            {
+                Some(event) => event,
+                None => return Ok(()),
+            };
+
+            self.handle_event(event);
+        }
+    }
+
+    fn handle_event(&mut self, event: Event) {
+        match event {
+            Event::Stream(stream_event) => match stream_event {
+                StreamEvent::Opened => self.logger.debug("SCTP Stream Opened"),
+                StreamEvent::Finished { id } => self
+                    .logger
+                    .debug(&format!("SCTP Stream Finished. Stream ID: {id}")),
+                StreamEvent::Stopped { id, .. } => self
+                    .logger
+                    .warn(&format!("SCTP Stream Stopped. Stream ID: {id}")),
+                StreamEvent::Available => self.logger.debug("SCTP Stream Available"),
+                StreamEvent::BufferedAmountLow { .. }
+                | StreamEvent::Readable { .. }
+                | StreamEvent::Writable { .. } => {}
+            },
+            Event::Connected => self.logger.info("SCTP Association Connected"),
+            Event::AssociationLost { reason } => self
+                .logger
+                .error(&format!("SCTP Association Lost. Reason: {reason:?}")),
+            Event::DatagramReceived => self.logger.debug("SCTP Datagram Received"),
+        }
+    }
+}
+
+fn send_transmit(transmit: Transmit, socket: &impl Socket) -> Result<(), Error> {
+    if let Payload::RawEncode(chunks) = transmit.payload {
+        for chunk in chunks {
+            socket
+                .send(&chunk)
+                .map_err(|e| Error::IOError(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        DCEPConfig, IceConfig, MediaConfig, NetworkConfig, RtcpConfig, RtpConfig, SdpConfig,
+        ServerConfig,
+    };
+    use crate::logger::Logger;
+    use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
+
+    fn make_config() -> Arc<Config> {
+        Arc::new(Config {
+            network: NetworkConfig {
+                bind_address: "0.0.0.0:0".to_string(),
+                max_udp_packet_size: 1200,
+            },
+            media: MediaConfig {
+                camera_index: 0,
+                frame_width: 640.0,
+                frame_height: 480.0,
+                frame_rate: 30.0,
+                h264_idr_interval: 30,
+                rtp_max_chunk_size: 1200,
+                frame_ssrc: 1,
+                audio_ssrc: 2,
+                video_payload_type: 96,
+                video_codec_name: "H264".to_string(),
+                clock_rate: 90000,
+                rtp_version: 2,
+                video_media_type: "video".to_string(),
+                audio_media_type: "audio".to_string(),
+                media_protocol: "RTP/AVP".to_string(),
+                jitter_buffer_size: 5,
+                audio_channels: 2,
+                audio_sample_rate: 48000,
+                audio_frame_size: 960,
+                audio_payload_type: 111,
+                audio_codec_name: "OPUS".to_string(),
+            },
+            rtcp: RtcpConfig {
+                report_period_millis: 1000,
+                receive_limit_millis: 5000,
+                retry_limit: 3,
+            },
+            rtp: RtpConfig {
+                max_packet_size: 1200,
+                read_timeout_millis: 100,
+            },
+            sdp: SdpConfig::default(),
+            ice: IceConfig {
+                foundation: "f".to_string(),
+                transport: "UDP".to_string(),
+                component_id: 1,
+                host_priority_preference: 0,
+                srflx_priority_preference: 0,
+                host_local_preference: 0,
+            },
+            server: ServerConfig {
+                users_file: String::new(),
+                client_server_addr: String::new(),
+                server_client_addr: String::new(),
+                server_private_key_file: String::new(),
+                server_certification_file: String::new(),
+                server_name: String::new(),
+                max_amount_of_users_connected: 0,
+            },
+            dcep: DCEPConfig {
+                ack_wait_timeout_millis: 0,
+                open_wait_timeout_millis: 0,
+            },
+        })
+    }
+
+    #[test]
+    fn test_new_initializes_fields() {
+        let connected = Arc::new(AtomicBool::new(false));
+        let logger = Logger::new("/tmp/test_transport_log").unwrap();
+        let config = make_config();
+
+        let transport = SCTPTransport::new(connected, logger, config);
+
+        assert_eq!(transport.next_stream_id, 0);
+        assert!(transport.association_handle.read().unwrap().is_none());
+        assert!(!transport.connected.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_accept_data_channel_returns_err_when_disconnected() {
+        let connected = Arc::new(AtomicBool::new(false));
+        let logger = Logger::new("/tmp/test_transport_log2").unwrap();
+        let config = make_config();
+
+        let transport = SCTPTransport::new(connected, logger, config);
+
+        let res = transport.accept_data_channel();
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_open_data_channel_fails_without_association() {
+        let connected = Arc::new(AtomicBool::new(false));
+        let logger = Logger::new("/tmp/test_transport_log3").unwrap();
+        let config = make_config();
+
+        let mut transport = SCTPTransport::new(connected, logger, config);
+
+        // There is no real association yet, so opening a data channel should fail
+        let res = transport.open_data_channel(
+            "label".to_string(),
+            DataChannelType::Reliable,
+            0,
+            String::new(),
+        );
+        assert!(res.is_err());
+    }
+}

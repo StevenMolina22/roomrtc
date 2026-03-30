@@ -392,8 +392,12 @@ mod tests {
         let local_md = make_test_media_description()?;
         let local_sdp = SessionDescriptionProtocol::new(vec![local_md], &make_test_sdp_config());
 
-        let mut offer_md =
-            MediaDescription::new("microphone".into(), 6000, "RTP/AVP".into(), HashSet::from([96]));
+        let mut offer_md = MediaDescription::new(
+            "microphone".into(),
+            6000,
+            "RTP/AVP".into(),
+            HashSet::from([96]),
+        );
         offer_md.add_attribute(Attribute::RTPMap(
             96,
             "opus".into(),

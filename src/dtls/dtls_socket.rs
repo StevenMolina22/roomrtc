@@ -1,4 +1,4 @@
-use super::{DtlsError as Error};
+use super::DtlsError as Error;
 use crate::dtls::key_manager::{LocalCert, PKCS12_PASSWORD};
 use crate::session::sdp::{DtlsSetupRole, Fingerprint};
 use crate::tools::Socket;
@@ -186,13 +186,13 @@ fn normalize_role(role: DtlsSetupRole) -> DtlsSetupRole {
     match role {
         DtlsSetupRole::ActPass => DtlsSetupRole::Active,
         DtlsSetupRole::HoldConn => DtlsSetupRole::Passive,
-        _ => role
+        _ => role,
     }
 }
 
 fn establish_active_dtls(
     local_cert: &LocalCert,
-    channel: UdpChannel
+    channel: UdpChannel,
 ) -> Result<DtlsStream<UdpChannel>, Error> {
     let identity = local_cert
         .duplicate_identity()
@@ -210,9 +210,10 @@ fn establish_active_dtls(
         .map_err(|_| Error::InitializationSocketError)
 }
 
+#[allow(deprecated)]
 fn establish_passive_dtls(
     local_cert: &LocalCert,
-    channel: UdpChannel
+    channel: UdpChannel,
 ) -> Result<DtlsStream<UdpChannel>, Error> {
     let pkcs12 = Pkcs12::from_der(&local_cert.pkcs12_der)
         .map_err(|e| Error::MapError(e.to_string()))?

@@ -15,6 +15,7 @@ pub struct UserHandler {
     op_server: OperatingServer,
     logger: Logger,
 }
+
 /// Handles the lifecycle of a connected client.
 ///
 /// This loop:
@@ -28,6 +29,10 @@ pub struct UserHandler {
 /// - any I/O error occurs,
 /// - the received bytes cannot be parsed into a valid message.
 impl UserHandler {
+    /// Creates a new `UserHandler` bound to shared server state.
+    ///
+    /// Internally initializes an `OperatingServer` scoped to this connection.
+    #[must_use]
     pub fn new(
         users: Arc<RwLock<HashMap<String, UserData>>>,
         config: Arc<Config>,
@@ -44,6 +49,7 @@ impl UserHandler {
             logger,
         }
     }
+
     /// Handles the lifecycle of a connected client.
     ///
     /// This loop:
@@ -133,6 +139,19 @@ impl UserHandler {
             _ => ServerResponse::BadMessage,
         }
     }
+
+    /// Performs the initial server handshake for a newly connected client.
+    ///
+    /// Flow:
+    /// 1. Reads the first message from the TLS stream.
+    /// 2. Validates it is `ClientMessage::Hello`.
+    /// 3. Compares `users_connected` against configured capacity.
+    /// 4. Sends `ServerResponse::ServerFull` and returns `Error::ServerFull`
+    ///    when the server is at capacity.
+    /// 5. Otherwise sends `ServerResponse::Welcome` and increments
+    ///    `users_connected`.
+    ///
+    /// Returns `Error::ConnectionError` when the message is invalid or I/O fails.
     pub fn client_server_handshake(
         &mut self,
         tls_stream: &mut StreamOwned<ServerConnection, TcpStream>,
@@ -301,6 +320,6 @@ mod tests {
 
         let response = handler.handle_client_message(msg);
 
-        assert!(matches!(response, ServerResponse::Error(_)));
+        assert!(matches!(response, ServerResponse::CallRequestError(_)));
     }
 }

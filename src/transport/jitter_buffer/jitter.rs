@@ -192,8 +192,18 @@ impl<const N: usize> JitterBuffer<N> {
     fn resync_or_clear(&mut self) {
         self.logger
             .warn("JitterBuffer resync triggered: playout deadline exceeded or buffer overflow.");
-        // NO ESTOY CONSIDERANDO EL CASO DE QUE WRITE ESCRIBA DESPUES DEL READ, CONSIDERAR DESPUES
-        let read_timestamp = self.packets[self.read_idx].as_ref().unwrap().timestamp;
+        let read_timestamp = match self.packets[self.read_idx].as_ref() {
+            Some(pkt) => pkt.timestamp,
+            None => {
+                // No packet at read index: reset buffer state and return
+                self.read_idx = 0;
+                self.write_idx = 0;
+                self.read_seq = None;
+                self.write_seq = None;
+                self.i_frame_needed = true;
+                return;
+            }
+        };
 
         for _ in 0..N {
             if let Some(pkt) = &self.packets[self.read_idx]
@@ -359,7 +369,7 @@ impl<const N: usize> JitterBuffer<N> {
         self.i_frame_needed = false;
     }
 
-    fn prepare_next_frame_ts(&mut self) -> Option<u128>{
+    fn prepare_next_frame_ts(&mut self) -> Option<u128> {
         loop {
             let ts = self.packets[self.read_idx].as_ref()?.timestamp;
 

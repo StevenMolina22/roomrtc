@@ -249,3 +249,118 @@ impl ServerResponse {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::user::UserStatus;
+    use std::collections::HashMap;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn test_welcome_and_simple_variants() {
+        let welcome = ServerResponse::Welcome;
+        let bytes = welcome.to_bytes();
+        assert_eq!(bytes, b"WELCOME\n");
+        assert!(matches!(
+            ServerResponse::from_bytes(&bytes),
+            Some(ServerResponse::Welcome)
+        ));
+
+        let bad_msg = ServerResponse::BadMessage;
+        assert_eq!(bad_msg.to_bytes(), b"BADMSG\n");
+    }
+
+    #[test]
+    fn test_login_ok_serialization() {
+        let mut users = HashMap::new();
+        users.insert("alice".to_string(), UserStatus::Available);
+        users.insert("bob".to_string(), UserStatus::Offline);
+
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let response = ServerResponse::LoginOk("test_token".into(), addr, users);
+
+        let bytes = response.to_bytes();
+        let deserialized = ServerResponse::from_bytes(&bytes).expect("Should deserialize LoginOk");
+
+        if let ServerResponse::LoginOk(token, address, user_map) = deserialized {
+            assert_eq!(token, "test_token");
+            assert_eq!(address, addr);
+            assert_eq!(user_map.get("alice"), Some(&UserStatus::Available));
+            assert_eq!(user_map.get("bob"), Some(&UserStatus::Offline));
+            assert_eq!(user_map.len(), 2);
+        } else {
+            panic!("Expected LoginOk variant");
+        }
+    }
+
+    #[test]
+    fn test_login_ok_empty_users() {
+        let addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+        let response = ServerResponse::LoginOk("token".into(), addr, HashMap::new());
+
+        let bytes = response.to_bytes();
+        let deserialized = ServerResponse::from_bytes(&bytes).unwrap();
+
+        if let ServerResponse::LoginOk(_, _, user_map) = deserialized {
+            assert!(user_map.is_empty());
+        } else {
+            panic!("Expected LoginOk variant");
+        }
+    }
+
+    #[test]
+    fn test_error_variants() {
+        let cases = vec![
+            (
+                ServerResponse::LoginError("invalid pass".into()),
+                "LOGINERROR|invalid pass\n",
+            ),
+            (
+                ServerResponse::SignupError("user exists".into()),
+                "SIGNUPERROR|user exists\n",
+            ),
+            (
+                ServerResponse::Error("fatal crash".into()),
+                "ERROR|fatal crash\n",
+            ),
+        ];
+
+        for (resp, expected_str) in cases {
+            let bytes = resp.to_bytes();
+            assert_eq!(bytes, expected_str.as_bytes());
+
+            let deserialized = ServerResponse::from_bytes(&bytes).unwrap();
+            match (resp, deserialized) {
+                (ServerResponse::Error(a), ServerResponse::Error(b)) => assert_eq!(a, b),
+                (ServerResponse::LoginError(a), ServerResponse::LoginError(b)) => assert_eq!(a, b),
+                (ServerResponse::SignupError(a), ServerResponse::SignupError(b)) => {
+                    assert_eq!(a, b)
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn test_malformed_login_ok() {
+        let bad_addr = b"LOGINOK|token|not_an_ip|user,status\n";
+        assert!(ServerResponse::from_bytes(bad_addr).is_none());
+
+        let missing_fields = b"LOGINOK|token|127.0.0.1:80\n";
+        assert!(ServerResponse::from_bytes(missing_fields).is_none());
+    }
+
+    #[test]
+    fn test_call_responses() {
+        let resp = ServerResponse::CallRequestOk;
+        assert_eq!(resp.to_bytes(), b"CALLREQUESTOK\n");
+        assert!(matches!(
+            ServerResponse::from_bytes(b"CALLREQUESTOK\n"),
+            Some(ServerResponse::CallRequestOk)
+        ));
+
+        let resp_err = ServerResponse::CallAcceptError("timeout".into());
+        assert_eq!(resp_err.to_bytes(), b"CALLACCEPTERROR|timeout\n");
+    }
+}

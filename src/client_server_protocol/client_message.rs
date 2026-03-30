@@ -218,3 +218,84 @@ impl ClientMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_login_serialization() {
+        let msg = ClientMessage::LogIn {
+            username: "alice".into(),
+            password: "password123".into(),
+        };
+        let bytes = msg.to_bytes();
+        assert_eq!(bytes, b"LOGIN|alice|password123\n");
+
+        let deserialized = ClientMessage::from_bytes(&bytes).unwrap();
+        if let ClientMessage::LogIn { username, password } = deserialized {
+            assert_eq!(username, "alice");
+            assert_eq!(password, "password123");
+        } else {
+            panic!("Variant mismatch");
+        }
+    }
+
+    #[test]
+    fn test_hello_variant() {
+        let msg = ClientMessage::Hello;
+        let bytes = msg.to_bytes();
+        assert_eq!(bytes, b"HELLO\n");
+
+        let deserialized = ClientMessage::from_bytes(&bytes).unwrap();
+        assert!(matches!(deserialized, ClientMessage::Hello));
+    }
+
+    #[test]
+    fn test_call_request_serialization() {
+        let sdp_str = "v=0\no=- 12345 67890 IN IP4 127.0.0.1";
+        let msg = ClientMessage::CallRequest {
+            token: "secret_token".into(),
+            offer_sdp: sdp_str.parse().unwrap(),
+            to: "bob".into(),
+        };
+
+        let bytes = msg.to_bytes();
+        let deserialized = ClientMessage::from_bytes(&bytes).expect("Should parse CallRequest");
+
+        if let ClientMessage::CallRequest { token, to, .. } = deserialized {
+            assert_eq!(token, "secret_token");
+            assert_eq!(to, "bob");
+        } else {
+            panic!("Expected CallRequest variant");
+        }
+    }
+
+    #[test]
+    fn test_invalid_messages() {
+        assert!(ClientMessage::from_bytes(b"INVALID|data\n").is_none());
+
+        assert!(ClientMessage::from_bytes(b"LOGIN|only_user\n").is_none());
+
+        let invalid_utf8 = vec![0, 159, 146, 150];
+        assert!(ClientMessage::from_bytes(&invalid_utf8).is_none());
+    }
+
+    #[test]
+    fn test_call_reject() {
+        let msg = ClientMessage::CallReject {
+            from_usr: "alice".into(),
+            to_usr: "bob".into(),
+        };
+        let bytes = msg.to_bytes();
+        assert_eq!(bytes, b"CALLREJECT|alice|bob\n");
+
+        let deserialized = ClientMessage::from_bytes(&bytes).unwrap();
+        if let ClientMessage::CallReject { from_usr, to_usr } = deserialized {
+            assert_eq!(from_usr, "alice");
+            assert_eq!(to_usr, "bob");
+        } else {
+            panic!("Variant mismatch");
+        }
+    }
+}

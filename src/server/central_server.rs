@@ -118,13 +118,15 @@ impl CentralServer {
 
             run_connections_loop(
                 cs_listener,
-                on,
-                tls_config,
-                users_connected,
-                config,
-                users,
-                server_client_socket_addr,
-                logger,
+                ConnectionContext {
+                    on,
+                    tls_config,
+                    users_connected,
+                    config,
+                    users,
+                    server_client_socket_addr,
+                    logger,
+                },
             );
         });
         Ok(())
@@ -178,16 +180,10 @@ impl CentralServer {
 
 fn run_connections_loop(
     cs_listener: TcpListener,
-    on: Arc<AtomicBool>,
-    tls_config: Arc<ServerConfig>,
-    users_connected: Arc<AtomicUsize>,
-    config: Arc<Config>,
-    users: Arc<RwLock<HashMap<String, UserData>>>,
-    server_client_socket_addr: SocketAddr,
-    logger: Logger,
+    context: ConnectionContext,
 ) {
     for stream in cs_listener.incoming() {
-        if !on.load(Ordering::SeqCst) {
+        if !context.on.load(Ordering::SeqCst) {
             break;
         }
         let stream = match stream {
@@ -196,56 +192,38 @@ fn run_connections_loop(
                 continue;
             }
         };
-        let tls_config = tls_config.clone();
-        let users_connected = users_connected.clone();
-        let config = config.clone();
-        let users = users.clone();
-        let on = on.clone();
-        let server_client_socket_addr = server_client_socket_addr;
 
-        handle_client_conn(
-            on.clone(),
-            tls_config.clone(),
-            users_connected.clone(),
-            config.clone(),
-            users.clone(),
-            server_client_socket_addr,
-            logger.context("UserHandler"),
-            stream
-        )
+        let mut user_context = context.clone();
+        user_context.logger = user_context.logger.context("UserHandler");
+        handle_client_conn(user_context, stream);
     }
 }
 
-fn handle_client_conn(
-    on: Arc<AtomicBool>,
-    tls_config: Arc<ServerConfig>,
-    users_connected: Arc<AtomicUsize>,
-    config: Arc<Config>,
-    users: Arc<RwLock<HashMap<String, UserData>>>,
-    server_client_socket_addr: SocketAddr,
-    logger: Logger,
-    stream: TcpStream,
-) {
+fn handle_client_conn(context: ConnectionContext, stream: TcpStream) {
     thread::spawn(move || {
-        let tls_conn = match ServerConnection::new(tls_config) {
+        let tls_conn = match ServerConnection::new(context.tls_config.clone()) {
             Ok(conn) => conn,
             Err(_) => return,
         };
         let mut tls_stream = StreamOwned::new(tls_conn, stream);
 
         let mut user_handler = UserHandler::new(
-            users,
-            config.clone(),
-            server_client_socket_addr,
-            logger,
+            context.users.clone(),
+            context.config.clone(),
+            context.server_client_socket_addr,
+            context.logger,
         );
 
-        if user_handler.client_server_handshake(&mut tls_stream, &users_connected, &config).is_err() {
+        if user_handler
+            .client_server_handshake(&mut tls_stream, &context.users_connected, &context.config)
+            .is_err()
+        {
             return;
         }
 
-        match user_handler.handle_client(&mut tls_stream, on) {
-            Ok(()) | Err(ServerError::ConnectionError) => users_connected
+        match user_handler.handle_client(&mut tls_stream, context.on) {
+            Ok(()) | Err(ServerError::ConnectionError) => context
+                .users_connected
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
                     Some(v.saturating_sub(1))
                 })
@@ -253,6 +231,17 @@ fn handle_client_conn(
             _ => Some(0),
         };
     });
+}
+
+#[derive(Clone)]
+struct ConnectionContext {
+    on: Arc<AtomicBool>,
+    tls_config: Arc<ServerConfig>,
+    users_connected: Arc<AtomicUsize>,
+    config: Arc<Config>,
+    users: Arc<RwLock<HashMap<String, UserData>>>,
+    server_client_socket_addr: SocketAddr,
+    logger: Logger,
 }
 
 // Loads user credentials from disk; creates an empty file if it is missing.
@@ -385,7 +374,7 @@ mod tests {
             Ok(duration) => duration.as_nanos(),
             Err(_) => 0,
         };
-        let filename = format!("test_users_{}.txt", nanos);
+        let filename = format!("test_users_{nanos}.txt");
 
         if let Ok(mut file) = File::create(&filename) {
             let _ = file.write_all(content.as_bytes());

@@ -1,4 +1,6 @@
+use super::Widget;
 use super::views::View;
+use crate::clock::Clock;
 use crate::config::Config;
 use crate::controller::{AppEvent, Controller};
 use crate::file::file_metadata::FileMetadata;
@@ -18,8 +20,6 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, RwLock, mpsc};
 use std::thread;
 use std::time::Instant;
-use crate::clock::Clock;
-use super::Widget;
 
 /// Application state and UI controller for the `RoomRTC` GUI.
 ///
@@ -85,10 +85,11 @@ impl RoomRTCApp {
         let config = Arc::new(config);
         let (event_tx, event_rx) = mpsc::channel();
 
-        let controller = match init_controller(event_tx, config.clone(), server_address, logger.clone()) {
-            Ok(c) => c,
-            Err(_) => std::process::exit(1),
-        };
+        let controller =
+            match init_controller(event_tx, config.clone(), server_address, logger.clone()) {
+                Ok(c) => c,
+                Err(_) => std::process::exit(1),
+            };
 
         Self {
             view: View::default(),
@@ -119,10 +120,10 @@ impl eframe::App for RoomRTCApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(40.0);
 
-            self.run_app_event_loop(&ctx);
+            self.run_app_event_loop(ctx);
             self.manage_files();
             self.show_warning_popup(ctx);
-            self.render_current_view(&ctx, ui);
+            self.render_current_view(ctx, ui);
 
             ctx.request_repaint();
         });
@@ -138,11 +139,17 @@ impl RoomRTCApp {
             ui.add_space(30.0);
 
             ui.centered_and_sized_buttons(120.0, 2, |ui| {
-                if ui.primary_button("Sign Up", egui::vec2(120.0, 40.0)).clicked() {
+                if ui
+                    .primary_button("Sign Up", egui::vec2(120.0, 40.0))
+                    .clicked()
+                {
                     self.view = View::SignUp;
                 }
 
-                if ui.primary_button("Log In", egui::vec2(120.0, 40.0)).clicked() {
+                if ui
+                    .primary_button("Log In", egui::vec2(120.0, 40.0))
+                    .clicked()
+                {
                     self.view = View::LogIn;
                 }
             });
@@ -174,7 +181,10 @@ impl RoomRTCApp {
 
             ui.centered_and_sized_buttons(120.0, 2, |ui| {
                 ui.add_enabled_ui(can_sign_up, |ui| {
-                    if ui.primary_button("Sign Up", egui::vec2(120.0, 40.0)).clicked() {
+                    if ui
+                        .primary_button("Sign Up", egui::vec2(120.0, 40.0))
+                        .clicked()
+                    {
                         self.handle_signup_action();
                     }
                 });
@@ -206,7 +216,10 @@ impl RoomRTCApp {
 
             ui.centered_and_sized_buttons(120.0, 2, |ui| {
                 ui.add_enabled_ui(can_log_in, |ui| {
-                    if ui.primary_button("Log In", egui::vec2(120.0, 40.0)).clicked() {
+                    if ui
+                        .primary_button("Log In", egui::vec2(120.0, 40.0))
+                        .clicked()
+                    {
                         self.handle_login_action();
                     }
                 });
@@ -227,13 +240,20 @@ impl RoomRTCApp {
 
             let username = self.controller.get_username().unwrap_or_default();
             ui.user_profile_header(&username, || {
-                if self.controller.log_out().is_ok() { self.view = View::Welcome; }
+                if self.controller.log_out().is_ok() {
+                    self.view = View::Welcome;
+                }
             });
 
             ui.add_space(10.0);
             ui.separator();
             ui.add_space(10.0);
-            ui.label(RichText::new(" CONTACTS").color(Color32::GRAY).size(13.0).strong());
+            ui.label(
+                RichText::new(" CONTACTS")
+                    .color(Color32::GRAY)
+                    .size(13.0)
+                    .strong(),
+            );
             ui.add_space(15.0);
 
             self.render_contacts_list(ui);
@@ -263,26 +283,43 @@ impl RoomRTCApp {
         });
     }
 
-    fn show_call_incoming(&mut self, peer: String, sdp: SessionDescriptionProtocol, ctx: &Context, ui: &mut Ui) {
+    fn show_call_incoming(
+        &mut self,
+        peer: String,
+        sdp: SessionDescriptionProtocol,
+        ctx: &Context,
+        ui: &mut Ui,
+    ) {
         if self.call_timeout(&peer) {
-            return
+            return;
         }
 
         ui.vertical_centered(|ui| {
             ui.add_space(60.0);
             ui.big_avatar("👤", 150.0);
             ui.add_space(30.0);
-            ui.label(RichText::new(&peer).size(40.0).strong().color(Color32::WHITE));
+            ui.label(
+                RichText::new(&peer)
+                    .size(40.0)
+                    .strong()
+                    .color(Color32::WHITE),
+            );
             ui.status_label("Incoming call...", Color32::from_rgb(0, 122, 255));
             ui.add_space(60.0);
 
             ui.centered_and_sized_buttons(130.0, 2, |ui| {
-                if ui.call_button("Accept", Color32::from_rgb(50, 180, 50)).clicked() {
+                if ui
+                    .call_button("Accept", Color32::from_rgb(50, 180, 50))
+                    .clicked()
+                {
                     self.handle_accept_logic(peer.clone(), sdp, ctx);
                 }
                 ui.add_space(32.0);
 
-                if ui.call_button("Decline", Color32::from_rgb(220, 50, 50)).clicked() {
+                if ui
+                    .call_button("Decline", Color32::from_rgb(220, 50, 50))
+                    .clicked()
+                {
                     self.handle_decline_logic(peer);
                 }
             });
@@ -291,7 +328,9 @@ impl RoomRTCApp {
 
     fn show_call(&mut self, username: String, peer_username: String, ctx: &Context, ui: &mut Ui) {
         self.show_side_panel(ctx);
-        if !self.handle_call_video_update(ctx) { return; }
+        if !self.handle_call_video_update(ctx) {
+            return;
+        }
 
         ui.vertical_centered(|ui| {
             ui.add_space(10.0);
@@ -309,7 +348,11 @@ impl RoomRTCApp {
             } else {
                 ui.add_space(10.0);
                 ui.spinner();
-                ui.label(RichText::new("Waiting for RTCP reports...").italics().color(Color32::GRAY));
+                ui.label(
+                    RichText::new("Waiting for RTCP reports...")
+                        .italics()
+                        .color(Color32::GRAY),
+                );
             }
         });
     }
@@ -334,7 +377,8 @@ impl RoomRTCApp {
             ui.add_space(80.0);
 
             ui.centered_and_sized_buttons(240.0, 1, |ui| {
-                if ui.primary_button("Back to hub", egui::vec2(240.0, 60.0))
+                if ui
+                    .primary_button("Back to hub", egui::vec2(240.0, 60.0))
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
@@ -354,13 +398,19 @@ impl RoomRTCApp {
 
             ui.title("Server Full");
             ui.add_space(10.0);
-            ui.label(RichText::new("Maximum capacity reached.\nPlease try again in a few minutes.")
-                .size(18.0).color(Color32::from_rgb(160, 160, 160)));
+            ui.label(
+                RichText::new("Maximum capacity reached.\nPlease try again in a few minutes.")
+                    .size(18.0)
+                    .color(Color32::from_rgb(160, 160, 160)),
+            );
 
             ui.add_space(80.0);
 
             ui.centered_and_sized_buttons(240.0, 1, |ui| {
-                if ui.neutral_button("Close Application", egui::vec2(240.0, 60.0)).clicked() {
+                if ui
+                    .neutral_button("Close Application", egui::vec2(240.0, 60.0))
+                    .clicked()
+                {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
@@ -375,7 +425,7 @@ impl RoomRTCApp {
                 local_rx,
                 ctx.clone(),
                 self.local_texture.clone(),
-                "local_camera".to_string()
+                "local_camera".to_string(),
             );
         }
 
@@ -384,7 +434,7 @@ impl RoomRTCApp {
                 remote_rx,
                 ctx.clone(),
                 self.remote_texture.clone(),
-                "remote_camera".to_string()
+                "remote_camera".to_string(),
             );
         }
 
@@ -392,7 +442,9 @@ impl RoomRTCApp {
     }
 
     fn show_local_camera(&self, ui: &mut Ui) -> Result<(), Error> {
-        let guard = self.local_texture.lock()
+        let guard = self
+            .local_texture
+            .lock()
             .map_err(|e| Error::MapError(e.to_string()))?;
         if let Some(texture) = guard.as_ref() {
             let size = texture.size_vec2();
@@ -410,7 +462,9 @@ impl RoomRTCApp {
     }
 
     fn show_remote_camera(&self, ui: &mut Ui) -> Result<(), Error> {
-        let guard = self.remote_texture.lock()
+        let guard = self
+            .remote_texture
+            .lock()
             .map_err(|e| Error::MapError(e.to_string()))?;
         if let Some(texture) = guard.as_ref() {
             let size = texture.size_vec2();
@@ -455,10 +509,7 @@ impl RoomRTCApp {
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
 
-            let error_text = self
-                .error_msg
-                .as_deref()
-                .unwrap_or("An unknown error occurred");
+            let error_text = self.error_msg.as_deref().unwrap_or("An unknown error occurred");
             ui.label(
                 RichText::new(error_text)
                     .color(Color32::RED)
@@ -546,13 +597,16 @@ impl RoomRTCApp {
             ui.label(
                 RichText::new("An unexpected error occurred and the\napplication needs to close.")
                     .size(18.0)
-                    .color(Color32::from_rgb(180, 150, 150))
+                    .color(Color32::from_rgb(180, 150, 150)),
             );
 
             ui.add_space(80.0);
 
             ui.centered_and_sized_buttons(240.0, 1, |ui| {
-                if ui.danger_button("Exit Application", egui::vec2(240.0, 60.0)).clicked() {
+                if ui
+                    .danger_button("Exit Application", egui::vec2(240.0, 60.0))
+                    .clicked()
+                {
                     std::process::exit(0);
                 }
             });
@@ -575,11 +629,7 @@ impl RoomRTCApp {
         self.is_muted = false;
     }
 
-    fn handle_event(
-        &mut self,
-        event: AppEvent,
-        ctx: &Context,
-    ) {
+    fn handle_event(&mut self, event: AppEvent, ctx: &Context) {
         match event {
             AppEvent::FullServerError => self.view = View::FullServer,
             AppEvent::CallIncoming(peer, offer_sdp) => {
@@ -620,7 +670,6 @@ impl RoomRTCApp {
                                 self.reset_after_call();
                                 self.view = View::CallHub;
                             }
-                            return;
                         }
                     }
                     Err(e) => {
@@ -648,49 +697,56 @@ impl RoomRTCApp {
                     self.last_stats = Some(new_stats);
                 }
             }
-            AppEvent::RemoteFileOffer(id, metadata) => match self.file_offers.write() {
-                Ok(mut f) => {
+            AppEvent::RemoteFileOffer(id, metadata) => {
+                if let Ok(mut f) = self.file_offers.write() {
                     f.insert(id, metadata);
                 }
-                Err(_) => return,
-            },
+            }
             AppEvent::FileDownloadCompleted(id) => match self.file_downloads.write() {
-                Ok(mut f) => { f.remove(&id); },
+                Ok(mut f) => {
+                    f.remove(&id);
+                }
                 Err(_) => {
                     println!("failed to remove file from downloading");
-                    return
-                },
-            }
+                }
+            },
         }
     }
 
     fn show_side_panel(&mut self, ctx: &Context) {
-        egui::SidePanel::right("files_panel").resizable(true).default_width(200.0).show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(10.0);
-                ui.label(RichText::new("FILES").heading().strong().color(Color32::WHITE));
-                ui.separator();
+        egui::SidePanel::right("files_panel")
+            .resizable(true)
+            .default_width(200.0)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new("FILES")
+                            .heading()
+                            .strong()
+                            .color(Color32::WHITE),
+                    );
+                    ui.separator();
+                });
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.add_space(5.0);
+
+                    self.show_downloading_files(ui);
+                    let id_to_remove = self.show_file_offers(ui);
+
+                    if let Some(id) = id_to_remove
+                        && self.file_save_rx.is_none()
+                    {
+                        self.remove_file_from_offers(id);
+                    }
+                });
             });
-
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.add_space(5.0);
-
-                self.show_downloading_files(ui);
-                let id_to_remove = self.show_file_offers(ui);
-
-                if let Some(id) = id_to_remove && self.file_save_rx.is_none() {
-                    self.remove_file_from_offers(id);
-                }
-            });
-        });
     }
 
     fn remove_file_from_offers(&mut self, id: u32) {
-        match self.file_offers.write() {
-            Ok(mut f) => {
-                f.remove(&id);
-            }
-            Err(_) => return,
+        if let Ok(mut f) = self.file_offers.write() {
+            f.remove(&id);
         }
     }
 
@@ -708,40 +764,34 @@ impl RoomRTCApp {
     }
 
     fn manage_files(&mut self) {
-        if let Some(rx) = &self.file_save_rx {
-            if let Ok((id, metadata, option_path)) = rx.try_recv() {
-                if let Some(path) = option_path {
-                    if let Err(e) = self.controller.accept_file(id, path.as_path()) {
-                        self.warning_msg = Some(format!("Failed to accept file: {e}"));
-                    }
-                    if let Ok(mut downloads) = self.file_downloads.write() {
-                        downloads.insert(id, metadata);
-                    }
-                    if let Ok(mut offers) = self.file_offers.write() {
-                        offers.remove(&id);
-                    }
+        if let Some(rx) = &self.file_save_rx
+            && let Ok((id, metadata, option_path)) = rx.try_recv()
+        {
+            if let Some(path) = option_path {
+                if let Err(e) = self.controller.accept_file(id, path.as_path()) {
+                    self.warning_msg = Some(format!("Failed to accept file: {e}"));
                 }
-                self.file_save_rx = None;
+                if let Ok(mut downloads) = self.file_downloads.write() {
+                    downloads.insert(id, metadata);
+                }
+                if let Ok(mut offers) = self.file_offers.write() {
+                    offers.remove(&id);
+                }
             }
+            self.file_save_rx = None;
         }
 
-        if let Some(rx) = &self.file_send_rx {
-            if let Ok(result) = rx.try_recv() {
-                if let Some(path) = result {
-                    if let Err(e) = self.controller.send_file(path.as_path()) {
-                        self.warning_msg = Some(e.to_string());
-                    }
-                }
-                self.file_send_rx = None;
+        if let Some(rx) = &self.file_send_rx
+            && let Ok(Some(path)) = rx.try_recv()
+        {
+            if let Err(e) = self.controller.send_file(path.as_path()) {
+                self.warning_msg = Some(e.to_string());
             }
+            self.file_send_rx = None;
         }
     }
 
-    fn render_current_view(
-        &mut self,
-        ctx: &Context,
-        ui: &mut Ui
-    ) {
+    fn render_current_view(&mut self, ctx: &Context, ui: &mut Ui) {
         match &self.view {
             View::Welcome => self.show_welcome(ui),
             View::SignUp => self.show_sign_up(ui),
@@ -789,23 +839,32 @@ impl RoomRTCApp {
     }
 
     fn render_contacts_list(&mut self, ui: &mut Ui) {
-        let Ok(users_status) = self.controller.get_users_status() else { return };
+        let Ok(users_status) = self.controller.get_users_status() else {
+            return;
+        };
 
-        egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-            ui.add_space(5.0);
-            for (username, status) in users_status {
-                let u_name = username.clone();
-                ui.contact_card(&username, &status, || {
-                    if self.controller.call(&u_name).is_ok() {
-                        self.view = View::Calling(u_name);
-                    }
-                });
-                ui.add_space(4.0);
-            }
-        });
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.add_space(5.0);
+                for (username, status) in users_status {
+                    let u_name = username.clone();
+                    ui.contact_card(&username, &status, || {
+                        if self.controller.call(&u_name).is_ok() {
+                            self.view = View::Calling(u_name);
+                        }
+                    });
+                    ui.add_space(4.0);
+                }
+            });
     }
 
-    fn handle_accept_logic(&mut self, peer: String, sdp: SessionDescriptionProtocol, ctx: &Context) {
+    fn handle_accept_logic(
+        &mut self,
+        peer: String,
+        sdp: SessionDescriptionProtocol,
+        ctx: &Context,
+    ) {
         match self.controller.accept_call(peer.clone(), &sdp) {
             Ok((local, remote)) => {
                 if let Ok(username) = self.controller.get_username() {
@@ -814,12 +873,19 @@ impl RoomRTCApp {
                     self.view = View::Call(username, peer);
                     if let Err(e) = self.update_video_textures(ctx) {
                         self.warning_msg = Some(e.to_string());
-                        if self.controller.hang_up().is_err() { self.view = View::FatalError; }
-                        else { self.reset_after_call(); self.view = View::CallHub; }
+                        if self.controller.hang_up().is_err() {
+                            self.view = View::FatalError;
+                        } else {
+                            self.reset_after_call();
+                            self.view = View::CallHub;
+                        }
                     }
                 }
             }
-            Err(e) => { self.warning_msg = Some(e.to_string()); self.view = View::CallHub; }
+            Err(e) => {
+                self.warning_msg = Some(e.to_string());
+                self.view = View::CallHub;
+            }
         }
     }
 
@@ -847,8 +913,12 @@ impl RoomRTCApp {
     fn handle_call_video_update(&mut self, ctx: &Context) -> bool {
         if let Err(e) = self.update_video_textures(ctx) {
             self.warning_msg = Some(e.to_string());
-            if self.controller.hang_up().is_err() { self.view = View::FatalError; }
-            else { self.reset_after_call(); self.view = View::CallHub; }
+            if self.controller.hang_up().is_err() {
+                self.view = View::FatalError;
+            } else {
+                self.reset_after_call();
+                self.view = View::CallHub;
+            }
             return false;
         }
         true
@@ -857,33 +927,59 @@ impl RoomRTCApp {
     fn show_video_layout(&mut self, ui: &mut Ui, username: &str, peer: &str) {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new(format!("YOU ({})", username)).size(14.0).color(Color32::GRAY));
+                ui.label(
+                    RichText::new(format!("YOU ({})", username))
+                        .size(14.0)
+                        .color(Color32::GRAY),
+                );
                 ui.add_space(5.0);
-                egui::Frame::canvas(ui.style()).fill(Color32::BLACK).show(ui, |ui| self.show_local_camera(ui));
+                egui::Frame::canvas(ui.style())
+                    .fill(Color32::BLACK)
+                    .show(ui, |ui| self.show_local_camera(ui));
             });
             ui.vertical(|ui| {
-                ui.label(RichText::new(peer).size(14.0).strong().color(Color32::WHITE));
+                ui.label(
+                    RichText::new(peer)
+                        .size(14.0)
+                        .strong()
+                        .color(Color32::WHITE),
+                );
                 ui.add_space(5.0);
-                egui::Frame::canvas(ui.style()).fill(Color32::BLACK).show(ui, |ui| self.show_remote_camera(ui));
+                egui::Frame::canvas(ui.style())
+                    .fill(Color32::BLACK)
+                    .show(ui, |ui| self.show_remote_camera(ui));
             });
         });
     }
 
     fn show_bottom_toolbar(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            let (text, color) = if self.is_muted { ("🔇 Unmute", Color32::from_rgb(200, 100, 0)) }
-            else { ("🎤 Mute", Color32::from_rgb(60, 60, 60)) };
+            let (text, color) = if self.is_muted {
+                ("🔇 Unmute", Color32::from_rgb(200, 100, 0))
+            } else {
+                ("🎤 Mute", Color32::from_rgb(60, 60, 60))
+            };
             if ui.call_action_btn(text, color, 150.0).clicked() {
                 self.controller.toggle_audio();
                 self.is_muted = !self.is_muted;
             }
             ui.add_space(20.0);
-            if ui.call_action_btn("End Call", Color32::from_rgb(200, 40, 40), 180.0).clicked() {
-                if self.controller.hang_up().is_err() { self.view = View::FatalError; }
-                else { self.reset_after_call(); self.view = View::CallHub; }
+            if ui
+                .call_action_btn("End Call", Color32::from_rgb(200, 40, 40), 180.0)
+                .clicked()
+            {
+                if self.controller.hang_up().is_err() {
+                    self.view = View::FatalError;
+                } else {
+                    self.reset_after_call();
+                    self.view = View::CallHub;
+                }
             }
             ui.add_space(20.0);
-            if ui.call_action_btn("Send file", Color32::ORANGE, 180.0).clicked() {
+            if ui
+                .call_action_btn("Send file", Color32::ORANGE, 180.0)
+                .clicked()
+            {
                 self.file_send_rx = Some(pick_file_to_send());
             }
         });
@@ -894,7 +990,11 @@ impl RoomRTCApp {
             let dots = ".".repeat(((self.clock.now() / 1000) % 4) as usize);
             for (_, meta) in downloads.iter() {
                 ui.file_card(&meta.name, meta.size, |ui| {
-                    ui.label(RichText::new(format!("Downloading{dots}")).italics().color(Color32::LIGHT_BLUE));
+                    ui.label(
+                        RichText::new(format!("Downloading{dots}"))
+                            .italics()
+                            .color(Color32::LIGHT_BLUE),
+                    );
                 });
             }
         }
@@ -904,15 +1004,29 @@ impl RoomRTCApp {
         let mut to_remove = None;
         if let Ok(offers) = self.file_offers.read() {
             if offers.is_empty() && self.file_downloads.read().map_or(true, |d| d.is_empty()) {
-                ui.vertical_centered(|ui| ui.label(RichText::new("No pending files").italics().color(Color32::GRAY)));
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new("No pending files")
+                            .italics()
+                            .color(Color32::GRAY),
+                    )
+                });
             }
             for (id, offer) in offers.iter() {
                 ui.file_card(&offer.name, offer.size, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button(RichText::new("✔").color(Color32::GREEN)).on_hover_text("Accept").clicked() {
+                        if ui
+                            .button(RichText::new("✔").color(Color32::GREEN))
+                            .on_hover_text("Accept")
+                            .clicked()
+                        {
                             self.file_save_rx = Some(select_path_to_save_file(*id, offer.clone()));
                         }
-                        if ui.button(RichText::new("✖").color(Color32::RED)).on_hover_text("Reject").clicked() {
+                        if ui
+                            .button(RichText::new("✖").color(Color32::RED))
+                            .on_hover_text("Reject")
+                            .clicked()
+                        {
                             if let Err(e) = self.controller.reject_file(*id) {
                                 self.warning_msg = Some(format!("Failed to reject file: {e}"));
                             }
@@ -926,17 +1040,16 @@ impl RoomRTCApp {
     }
 }
 
-fn select_path_to_save_file(id: u32, metadata: FileMetadata) -> Receiver<(u32, FileMetadata, Option<PathBuf>)> {
+fn select_path_to_save_file(
+    id: u32,
+    metadata: FileMetadata,
+) -> Receiver<(u32, FileMetadata, Option<PathBuf>)> {
     let (tx, rx) = mpsc::channel();
 
     thread::spawn(move || {
-        let path = FileDialog::new()
-            .set_file_name(&metadata.name)
-            .save_file();
+        let path = FileDialog::new().set_file_name(&metadata.name).save_file();
 
-        if let Err(_) = tx.send((id, metadata, path)) {
-            return;
-        }
+        let _ = tx.send((id, metadata, path));
     });
 
     rx
@@ -946,12 +1059,9 @@ fn pick_file_to_send() -> Receiver<Option<PathBuf>> {
     let (tx, rx) = mpsc::channel();
 
     thread::spawn(move || {
-        let path = FileDialog::new()
-            .pick_file();
+        let path = FileDialog::new().pick_file();
 
-        if let Err(_) = tx.send(path) {
-            return;
-        }
+        let _ = tx.send(path);
     });
 
     rx
@@ -969,7 +1079,8 @@ fn spawn_texture_thread(
             while let Ok(more_recent) = rx.try_recv() {
                 last_frame = more_recent;
             }
-            let color_img = ColorImage::from_rgb([last_frame.width, last_frame.height], &last_frame.data);
+            let color_img =
+                ColorImage::from_rgb([last_frame.width, last_frame.height], &last_frame.data);
 
             let mut guard = match texture_arc.lock() {
                 Ok(guard) => guard,
@@ -979,7 +1090,8 @@ fn spawn_texture_thread(
             if let Some(texture) = guard.as_mut() {
                 texture.set(color_img, TextureOptions::default());
             } else {
-                *guard = Some(ctx.load_texture(&texture_name, color_img, TextureOptions::default()));
+                *guard =
+                    Some(ctx.load_texture(&texture_name, color_img, TextureOptions::default()));
             }
 
             ctx.request_repaint();
@@ -1003,6 +1115,8 @@ fn init_controller(
         Err(e) => Err(Error::MapError(e.to_string()))?,
     };
 
-    controller.initial_handshake().map_err(|e| Error::MapError(e.to_string()))?;
+    controller
+        .initial_handshake()
+        .map_err(|e| Error::MapError(e.to_string()))?;
     Ok(controller)
 }

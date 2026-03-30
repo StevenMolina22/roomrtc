@@ -149,7 +149,8 @@ impl MediaTransport {
             local_setup_role,
             expected_fingerprint,
             local_cert,
-        ).map_err(|e| Error::MapError(e.to_string()))?;
+        )
+        .map_err(|e| Error::MapError(e.to_string()))?;
         self.connect_sockets(remote_rtp_address, remote_rtcp_address)?;
         let srtp_ctx = self.generate_srtp_ctx(rtp_dtls)?;
         let local_sender_stats = Arc::new(Mutex::new(SenderStats::default()));
@@ -270,16 +271,16 @@ impl MediaTransport {
 
         thread::spawn(move || {
             for protected_data in protected_rx {
-                if protected_data.is_empty() || !is_rtp_packet(protected_data[0]){
+                if protected_data.is_empty() || !is_rtp_packet(protected_data[0]) {
                     continue;
                 }
 
                 match unprotect_packet(&protected_data, &srtp_ctx, is_client) {
                     Ok(packet) => {
-                        if let Err(_) = send_unprotected_packet(packet, &unprotected_tx, &logger) {
-                            break
+                        if send_unprotected_packet(packet, &unprotected_tx, &logger).is_err() {
+                            break;
                         }
-                    },
+                    }
                     Err(e) => {
                         logger.error(&format!("SRTP unprotect failed: {e}"));
                         break;
@@ -372,7 +373,7 @@ impl MediaTransport {
             sender_metrics,
             self.logger.context("RtpSender"),
         )
-            .map_err(|e| Error::MapError(e.to_string()))?;
+        .map_err(|e| Error::MapError(e.to_string()))?;
 
         srtp_sender
             .start()
@@ -411,7 +412,7 @@ impl MediaTransport {
             &self.connected,
             self.logger.context("RtpReceiver"),
         )
-            .map_err(|e| Error::MapError(e.to_string()))?;
+        .map_err(|e| Error::MapError(e.to_string()))?;
 
         srtp_receiver
             .start(event_tx)
@@ -434,16 +435,13 @@ impl MediaTransport {
         Ok(())
     }
 
-    fn generate_srtp_ctx(
-        &mut self,
-        rtp_dtls: DtlsSocket
-    ) -> Result<SrtpContext, Error> {
+    fn generate_srtp_ctx(&mut self, rtp_dtls: DtlsSocket) -> Result<SrtpContext, Error> {
         let key_material = rtp_dtls
             .export_keying_material("EXTRACTOR-dtls_srtp", 60)
             .map_err(|e| Error::MapError(format!("Key export failed: {e}")))?;
 
-        Ok(SrtpContext::new(&key_material)
-            .map_err(|e| Error::MapError(format!("SRTP context creation failed: {e}")))?)
+        SrtpContext::new(&key_material)
+            .map_err(|e| Error::MapError(format!("SRTP context creation failed: {e}")))
     }
 
     fn initialize_report_handler(
@@ -481,7 +479,9 @@ fn unprotect_packet(
     is_client: bool,
 ) -> Result<RtpPacket, String> {
     let mut srtp_ctx = ctx.lock().map_err(|e| format!("Lock failed: {e}"))?;
-    srtp_ctx.unprotect(data, is_client).map_err(|e| e.to_string())
+    srtp_ctx
+        .unprotect(data, is_client)
+        .map_err(|e| e.to_string())
 }
 
 fn send_unprotected_packet(
@@ -490,7 +490,7 @@ fn send_unprotected_packet(
     logger: &Logger,
 ) -> Result<(), Error> {
     tx.send(packet).map_err({
-        logger.error(&"Failed to send unprotected RTP packet".to_string());
+        logger.error("Failed to send unprotected RTP packet");
         |e| Error::MapError(e.to_string())
     })
 }

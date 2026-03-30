@@ -1,107 +1,158 @@
 # RoomRTC
 
-Proyecto final de Taller de Programacion (FIUBA) desarrollado por el grupo **RoomRTC**.
+Final project for the Programming Workshop (FIUBA) developed by the **RoomRTC** group.
 
-RoomRTC es una aplicacion de videollamadas escrita en Rust. Usa un servidor central para autenticacion y senalizacion, y establece una conexion peer-to-peer entre clientes para transportar audio, video y archivos.
+RoomRTC is a video conferencing application written in Rust. It uses a central server for authentication and signaling, and establishes a peer-to-peer (P2P) connection between clients to transport audio, video, and files.
 
-## Integrantes
+## Quick Start: Build & Run
 
-- Molina Buitrago, Marlon Stiven (112018)
-- Cortez Aguilar, Diego Alejandro (111753)
-- Perez D'Angelo, Tomas (111834)
-- Politti, Ignacio (112034)
-
-## Que hace el proyecto
-
-- registro e inicio de sesion de usuarios
-- listado de usuarios disponibles
-- llamadas entre peers con intercambio de SDP e ICE
-- transporte de audio y video en tiempo real
-- cifrado de la comunicacion con DTLS/SRTP
-- envio de archivos durante la llamada por data channels
-- interfaz grafica de escritorio con `eframe/egui`
-
-## Arquitectura
-
-- **Servidor central:** maneja usuarios, login y senalizacion
-- **Cliente:** interfaz grafica, captura de audio/video y control de la llamada
-- **Conexion P2P:** una vez negociada la llamada, los peers intercambian medios directamente sobre UDP
-
-## Requisitos
-
-- Rust estable
-- OpenCV 4 con headers de desarrollo
-- OpenSSL con headers de desarrollo
-- `clang`, `llvm`, `pkg-config`
-
-En Ubuntu/Debian hay un script base para instalar dependencias del entorno:
-
-```bash
-bash ./scripts/dependencies.sh
-```
-
-Segun tu sistema puede que tambien necesites instalar `libssl-dev`.
-
-## Compilacion
+### Compilation
 
 ```bash
 cargo build
 ```
 
-Para una build optimizada:
-
-```bash
-cargo build --release
-```
-
-## Ejecucion
-
-El proyecto expone dos binarios principales: `server` y `client`.
-
-### 1. Levantar el servidor
+### 1. Running the Server
 
 ```bash
 cargo run --bin server room_rtc.conf
 ```
 
-El servidor usa la configuracion del archivo INI y escribe logs en `room_rtc.server.log`.
+The server uses the configuration from the config file and writes logs to `room_rtc.server.log`.
 
-### 2. Levantar un cliente
+### 2. Running a Client
 
 ```bash
 cargo run --bin client room_rtc.conf 127.0.0.1:8080
 ```
 
-Donde el segundo argumento es la direccion del servidor de senalizacion (`client_server_addr`).
+The second argument is the address of the signaling server (`client_server_addr`). The client writes logs to `room_rtc.log`.
 
-El cliente escribe logs en `room_rtc.log`.
+### Recommended Order
 
-### Orden recomendado
+1. Start the server.
+2. Open one or more clients.
+3. Register or log in.
+4. Select an available user and start the call.
 
-1. Iniciar el servidor.
-2. Abrir uno o mas clientes.
-3. Registrarse o iniciar sesion.
-4. Seleccionar un usuario disponible y comenzar la llamada.
+---
 
-## Configuracion
+## Features
 
-El archivo `room_rtc.conf` incluye las secciones principales del sistema:
+- User registration and login.
+- List of available users.
+- Peer-to-peer calls with SDP and ICE exchange.
+- Real-time audio and video transport.
+- Encrypted communication using DTLS/SRTP.
+- File transfer during calls via Data Channels over SCTP.
+- Desktop graphical interface built with `eframe/egui`.
 
-- `[network]`: sockets y tamano maximo de paquetes UDP
-- `[media]`: camara, video H.264, audio Opus y parametros RTP
-- `[rtcp]` y `[rtp]`: reportes, timeouts y tamanos de paquete
-- `[sdp]` e `[ice]`: negociacion de sesion y candidatos
-- `[server]`: direcciones del servidor, archivos TLS y archivo de usuarios
-- `[dcep]`: timeouts para data channels
+## Architecture (App Flow)
 
-El archivo de ejemplo ya apunta a:
+- **Central Server:** Handles users, login, and signaling over TCP/TLS.
+- **Client:** Handles the GUI, audio/video capture, and call control.
+- **P2P Connection:** Once the call is negotiated, peers exchange media and data directly over UDP.
 
-- servidor de senalizacion en `0.0.0.0:8080`
-- canal servidor-cliente en `0.0.0.0:8081`
-- certificados TLS en `tls_server/`
-- base simple de usuarios en `src/server/data.txt`
+```mermaid
+graph TD
+    subgraph Local Network / Internet
+        S[Central Server<br/>TCP/TLS Signaling]
+        C1[Client 1]
+        C2[Client 2]
+    end
 
-## Testing y calidad
+    C1 <==>|Login / SDP / Signaling| S
+    C2 <==>|Login / SDP / Signaling| S
+    C1 <.->|UDP ICE Checks| C2
+    C1 <==>|P2P Media & Data<br/>DTLS / SRTP / SCTP| C2
+```
+
+## Call Flow
+
+The call establishment flow follows the WebRTC specification adapted to RoomRTC's client-server protocol.
+
+```mermaid
+sequenceDiagram
+    participant C1 as Client 1 (Caller)
+    participant S as Central Server
+    participant C2 as Client 2 (Callee)
+
+    C1->>S: LogIn
+    C2->>S: LogIn
+    
+    Note over C1,C2: Call Initiation
+    C1->>S: CallRequest (SDP Offer)
+    S->>C2: CallIncoming (SDP Offer)
+    
+    C2->>S: CallAccept (SDP Answer)
+    S->>C1: CallAccepted (SDP Answer)
+    
+    Note over C1,C2: Peer-to-Peer Connection
+    C1-->>C2: ICE Connectivity Checks (UDP Ping/Pong)
+    C1-->>C2: DTLS Handshake
+    C1-->>C2: Media Transport (SRTP) / Files (SCTP)
+    
+    Note over C1,C2: End of Call
+    C1->>S: CallHangup
+    S->>C2: UserStatusUpdate (Available)
+```
+
+## Client Internal Components
+
+The application is modularly designed, featuring a central controller that orchestrates the UI, sessions, and network transport, using standard library threads instead of async tools like Tokio.
+
+```mermaid
+graph LR
+    UI[Graphical Interface<br/>egui] --> CTRL[Controller]
+    
+    subgraph Core
+        CTRL --> CS[Call Session<br/>SDP / ICE]
+        CTRL --> MT[Media Transport]
+        CTRL --> FT[File Transferer<br/>SCTP]
+        CTRL --> MP[Media Pipeline<br/>OpenCV / Opus]
+    end
+    
+    subgraph Network["Network (UDP)"]
+        MT --> SRTP[SRTP Context]
+        MT --> RTP[RTP Sender/Receiver]
+        MT --> RTCP[RTCP Report Handler]
+    end
+```
+
+## Requirements
+
+- Stable Rust.
+- OpenCV 4 with development headers.
+- OpenSSL with development headers.
+- `clang`, `llvm`, `pkg-config`.
+
+For Ubuntu/Debian, there is a base script to install environment dependencies:
+
+```bash
+bash ./scripts/dependencies.sh
+```
+
+Depending on your system, you may also need to install `libssl-dev`.
+
+## Configuration
+
+The `room_rtc.conf` file includes the main sections of the system:
+
+- `[network]`: Sockets and maximum UDP packet size.
+- `[media]`: Camera, H.264 video, Opus audio, and RTP parameters.
+- `[rtcp]` & `[rtp]`: Reports, timeouts, and packet sizes.
+- `[sdp]` & `[ice]`: Session negotiation and candidates.
+- `[server]`: Server addresses, TLS files, and users file.
+- `[dcep]`: Timeouts for data channels.
+
+The example configuration file already points to:
+
+- Signaling server at `0.0.0.0:8080`.
+- Server-client channel at `0.0.0.0:8081`.
+- TLS certificates in `tls_server/`.
+- Simple user database in `src/server/data.txt`.
+
+## Testing and Quality
 
 ```bash
 cargo test
@@ -111,15 +162,17 @@ cargo test
 cargo clippy --all-targets --all-features
 ```
 
-## Documentacion
+## Documentation
 
 ```bash
 cargo doc --open
 ```
 
-## Archivos utiles
+## Useful Files
 
-- `room_rtc.conf`: configuracion de ejemplo
-- `src/bin/server/main.rs`: punto de entrada del servidor
-- `src/bin/client/main.rs`: punto de entrada del cliente
-- `docs/Informe.md`: informe tecnico del proyecto
+- `room_rtc.conf`: Example configuration.
+- `src/bin/server/main.rs`: Server entry point.
+- `src/bin/client/main.rs`: Client entry point.
+- `docs/Informe.md`: Technical project report.
+
+*** Let me know if you'd like to tweak any other part of the documentation!

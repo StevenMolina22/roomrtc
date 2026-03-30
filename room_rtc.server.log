@@ -1,0 +1,8 @@
+[2026-03-29 19:51:30] [INFO] [] Central Server starting up...
+[2026-03-29 19:52:13] [DEBUG] [OperatingServer] Broadcasting status update for steven: Offline
+[2026-03-29 19:52:13] [INFO] [OperatingServer] New user signed up: steven
+[2026-03-29 19:52:17] [DEBUG] [OperatingServer] Broadcasting status update for steven: Available
+[2026-03-29 19:52:17] [INFO] [OperatingServer] User steven logged in successfully
+[2026-03-29 19:52:26] [ERROR] [UserHandler] Connection error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+[2026-03-29 19:52:26] [DEBUG] [OperatingServer] Broadcasting status update for steven: Offline
+[2026-03-29 19:52:26] [INFO] [OperatingServer] User steven disconnected

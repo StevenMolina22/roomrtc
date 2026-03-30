@@ -1,4 +1,22 @@
-# RoomRTC
+<div align="center">
+  <picture>
+    <img alt="RoomRTC logo" src="assets/webrtc-transparent.png" height="128">
+  </picture>
+  <h1>RoomRTC</h1>
+
+  <a href="https://www.rust-lang.org/">
+    <img alt="Built with Rust" src="https://img.shields.io/badge/Built%20with-Rust-000000.svg?style=for-the-badge&logo=rust&labelColor=000000">
+  </a>
+  <a href="./Cargo.toml">
+    <img alt="Cargo project" src="https://img.shields.io/badge/Cargo-room--rtc-000000.svg?style=for-the-badge&labelColor=000000">
+  </a>
+  <a href="./LICENSE">
+    <img alt="License" src="https://img.shields.io/badge/License-MIT-000000.svg?style=for-the-badge&labelColor=000000">
+  </a>
+  <a href="./docs/Informe.md">
+    <img alt="Technical report" src="https://img.shields.io/badge/Docs-Informe-000000.svg?style=for-the-badge&labelColor=000000">
+  </a>
+</div>
 
 Final project for the Programming Workshop (FIUBA) developed by the **RoomRTC** group.
 
@@ -174,5 +192,3 @@ cargo doc --open
 - `src/bin/server/main.rs`: Server entry point.
 - `src/bin/client/main.rs`: Client entry point.
 - `docs/Informe.md`: Technical project report.
-
-*** Let me know if you'd like to tweak any other part of the documentation!
